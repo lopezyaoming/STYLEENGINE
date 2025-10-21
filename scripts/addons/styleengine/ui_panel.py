@@ -4,6 +4,7 @@
 
 import bpy
 from . import utils
+from . import workspace_setup
 
 # ----------------------------------------------------------------
 # 1. PROPERTY GROUP
@@ -56,6 +57,44 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         default=75.0,
         min=0.0,
         max=100.0
+    )
+    
+    # Workspace settings
+    def update_refresh_viewport(self, context):
+        """Start or stop the refresh timer based on checkbox state."""
+        if self.refresh_viewport:
+            # Start timer if not already running
+            if not bpy.app.timers.is_registered(workspace_setup.refresh_ai_image):
+                bpy.app.timers.register(workspace_setup.refresh_ai_image, first_interval=1.0, persistent=True)
+                print("[Style Engine] Auto-refresh enabled")
+        else:
+            # Stop timer if running
+            if bpy.app.timers.is_registered(workspace_setup.refresh_ai_image):
+                bpy.app.timers.unregister(workspace_setup.refresh_ai_image)
+                print("[Style Engine] Auto-refresh disabled")
+    
+    refresh_viewport: bpy.props.BoolProperty(
+        name="Refresh Viewport",
+        description="Automatically refresh AI image when it changes",
+        default=True,
+        update=update_refresh_viewport
+    )
+    
+    ai_resolution: bpy.props.EnumProperty(
+        name="AI Resolution",
+        description="Resolution for AI generation",
+        items=[
+            ('640x1536', '640 x 1536', 'Portrait tall'),
+            ('768x1344', '768 x 1344', 'Portrait'),
+            ('832x1216', '832 x 1216', 'Portrait medium'),
+            ('896x1152', '896 x 1152', 'Portrait slight'),
+            ('1024x1024', '1024 x 1024', 'Square'),
+            ('1152x896', '1152 x 896', 'Landscape slight'),
+            ('1216x832', '1216 x 832', 'Landscape medium'),
+            ('1344x768', '1344 x 768', 'Landscape'),
+            ('1536x640', '1536 x 640', 'Landscape wide'),
+        ],
+        default='1024x1024'
     )
 
 
@@ -127,6 +166,21 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
         layout = self.layout
         style_props = context.scene.style_engine_props
 
+        # --- Workspace Setup (TOP) ---
+        setup_box = layout.box()
+        setup_box.label(text="Workspace Setup", icon='WORKSPACE')
+        setup_box.operator("style_engine.setup_workspace", icon='WINDOW')
+        
+        # Auto-refresh checkbox
+        setup_box.prop(style_props, "refresh_viewport", icon='FILE_REFRESH')
+        
+        # Resolution dropdown
+        setup_box.separator()
+        setup_box.label(text="Set Resolution:")
+        setup_box.prop(style_props, "ai_resolution", text="")
+        
+        # --- Scene Settings ---
+        layout.separator()
         main_box = layout.box()
 
         row = main_box.row(align=True)
@@ -166,23 +220,11 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
             row3.label(text="GROUND")
             row3.prop(style_props, "ground_keywords")
         
-        # --- NEW: Sliders Section ---
+        # --- Sliders Section ---
         layout.separator()
-        # Using a box to group the sliders visually
         slider_box = layout.box()
         slider_box.prop(style_props, "depth_influence")
         slider_box.prop(style_props, "silhouette")
-
-        # --- Workspace Setup ---
-        layout.separator()
-        setup_box = layout.box()
-        setup_box.label(text="AI Vision Setup", icon='WORKSPACE')
-        setup_box.operator("style_engine.setup_workspace", icon='WINDOW')
-        
-        # Auto-refresh controls
-        row = setup_box.row(align=True)
-        row.operator("style_engine.start_auto_refresh", text="Start Refresh", icon='PLAY')
-        row.operator("style_engine.stop_auto_refresh", text="Stop Refresh", icon='PAUSE')
         
         # --- Action Buttons ---
         layout.separator()

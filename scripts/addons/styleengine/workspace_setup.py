@@ -28,6 +28,13 @@ def refresh_ai_image():
     global _last_image_mtime
     
     try:
+        # Check if refresh is still enabled
+        props = bpy.context.scene.style_engine_props
+        if not props.refresh_viewport:
+            # Stop the timer if refresh is disabled
+            if bpy.app.timers.is_registered(refresh_ai_image):
+                return None  # Don't repeat
+            
         # Use the addon's installation directory
         img_path = os.path.join(ADDON_ROOT, "data", "temp", "ai_vision", "current_ai.png")
         
@@ -224,26 +231,48 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
             return bpy.data.workspaces["AI"]
         
         # Duplicate the Layout workspace to create AI workspace
-        # We need to use the operator method since workspaces can't be created directly
         layout_workspace = bpy.data.workspaces.get("Layout")
         
         if not layout_workspace:
             # If no Layout workspace, use the current one
             layout_workspace = context.workspace
         
-        # Set the current workspace as the one to duplicate
-        original_workspace = context.workspace
+        # Store the original name
+        original_name = layout_workspace.name
+        
+        # Switch to Layout workspace
         context.window.workspace = layout_workspace
         
         # Duplicate the workspace using operator
         bpy.ops.workspace.duplicate()
         
-        # The duplicated workspace will be the current one now
-        duplicated_workspace = context.workspace
-        duplicated_workspace.name = "AI"
+        # After duplication, the ORIGINAL gets renamed to "Layout.001"
+        # and the CURRENT workspace is still "Layout"
+        # We need to swap their names
         
-        print(f"[Style Engine] Created new AI workspace from {layout_workspace.name}")
-        return duplicated_workspace
+        # Current workspace is the original (now named something like "Layout")
+        current_ws = context.workspace
+        
+        # Find the duplicate (should be named something like "Layout.001")
+        duplicated_ws = None
+        for ws in bpy.data.workspaces:
+            if ws != current_ws and ws.name.startswith(original_name):
+                duplicated_ws = ws
+                break
+        
+        if duplicated_ws:
+            # Rename duplicate to "AI"
+            duplicated_ws.name = "AI"
+            # Restore original name to the original workspace
+            current_ws.name = original_name
+            
+            print(f"[Style Engine] Created new AI workspace from {original_name}")
+            return duplicated_ws
+        else:
+            # Fallback if we couldn't find the duplicate
+            current_ws.name = "AI"
+            print(f"[Style Engine] Created AI workspace")
+            return current_ws
     
     def setup_workspace_layout(self, workspace, camera):
         """Setup the split layout for the AI workspace."""
@@ -282,15 +311,23 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
                         
                         for space in right_area.spaces:
                             if space.type == 'VIEW_3D':
+                                # Switch to camera view (like pressing Numpad 0)
                                 space.region_3d.view_perspective = 'CAMERA'
                                 space.lock_camera = True
                                 
                                 # Show background images in viewport
                                 space.shading.type = 'SOLID'
                                 
+                                # Ensure camera is visible in viewport
+                                space.overlay.show_extras = True
+                                
                                 print("[Style Engine] Right viewport configured as locked camera view")
                         
-                        # Force redraw
+                        # Set the active object to the camera
+                        if camera:
+                            context.view_layer.objects.active = camera
+                        
+                        # Force redraw all areas
                         for area in context.screen.areas:
                             area.tag_redraw()
                     
@@ -304,7 +341,9 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
     
     def start_image_refresh_timer(self):
         """Start a timer to auto-refresh the AI image when it changes."""
-        if not bpy.app.timers.is_registered(refresh_ai_image):
+        # Check if refresh_viewport is enabled
+        props = bpy.context.scene.style_engine_props
+        if props.refresh_viewport and not bpy.app.timers.is_registered(refresh_ai_image):
             bpy.app.timers.register(refresh_ai_image, first_interval=1.0, persistent=True)
             print("[Style Engine] Auto-refresh timer started")
     
@@ -347,10 +386,11 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
         file_output = nodes.new(type='CompositorNodeOutputFile')
         file_output.location = (800, 0)
         
-        # Set base path to passes/ folder (relative to blend file or project root)
+        # Set base path to passes/ folder (absolute path from addon root)
         passes_path = os.path.join(ADDON_ROOT, "data", "temp", "passes")
         os.makedirs(passes_path, exist_ok=True)
-        file_output.base_path = "//..\\data\\temp\\passes\\"
+        # Use absolute path with forward slashes (Blender compatible)
+        file_output.base_path = passes_path.replace("\\", "/") + "/"
         
         # Set format and overwrite settings
         file_output.format.file_format = 'PNG'
