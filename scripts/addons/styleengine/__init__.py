@@ -18,10 +18,12 @@ import bpy
 # Import modules
 from . import ui_panel
 from . import prefs
+from . import workspace_setup
 
 # List of modules to register
 modules = [
     prefs,
+    workspace_setup,
     ui_panel,
 ]
 

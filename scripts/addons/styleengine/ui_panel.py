@@ -173,6 +173,17 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
         slider_box.prop(style_props, "depth_influence")
         slider_box.prop(style_props, "silhouette")
 
+        # --- Workspace Setup ---
+        layout.separator()
+        setup_box = layout.box()
+        setup_box.label(text="AI Vision Setup", icon='WORKSPACE')
+        setup_box.operator("style_engine.setup_workspace", icon='WINDOW')
+        
+        # Auto-refresh controls
+        row = setup_box.row(align=True)
+        row.operator("style_engine.start_auto_refresh", text="Start Refresh", icon='PLAY')
+        row.operator("style_engine.stop_auto_refresh", text="Stop Refresh", icon='PAUSE')
+        
         # --- Action Buttons ---
         layout.separator()
         button_row = layout.row(align=True)
