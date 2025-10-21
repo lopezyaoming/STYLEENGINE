@@ -5,6 +5,8 @@
 
 import bpy
 import os
+import json
+from datetime import datetime
 from pathlib import Path
 
 # Get the project root directory (C:\Coding\STYLEENGINE)
@@ -18,6 +20,83 @@ ADDON_ROOT = os.path.dirname(scripts_dir)  # STYLEENGINE/
 
 # Global variable to track last modification time
 _last_image_mtime = 0
+
+# Global variable for render interval
+RENDER_INTERVAL = 5.0  # seconds
+
+
+def write_session_json(context):
+    """
+    Write session.json with current workspace state.
+    Called whenever UI properties change.
+    """
+    try:
+        props = context.scene.style_engine_props
+        scene = context.scene
+        
+        # Parse resolution
+        res_str = props.ai_resolution  # e.g., "1024x1024"
+        width, height = map(int, res_str.split('x'))
+        
+        # Build session data
+        session_data = {
+            "session_id": props.library_id,
+            "version": "0.1.0",
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "scene_ref": {
+                "blend_path": bpy.data.filepath if bpy.data.filepath else "//",
+                "scene_name": scene.name,
+                "camera_name": "ai_camera"
+            },
+            "agent_id": "agent.comfy.local.v1",  # Placeholder for now
+            "resolution": {
+                "preset": f"native_{width}" if width == height else res_str,
+                "width": width,
+                "height": height
+            },
+            "lookup": props.lookup,
+            "global_prompt": props.global_prompt,
+            "depth_influence": round(props.depth_influence, 3),
+            "silhouette_influence": round(props.silhouette_influence, 3),
+            "objects": [
+                {
+                    "group_id": f"grp-{group.name.lower().replace(' ', '-')}-{str(idx+1).zfill(3)}",
+                    "label": group.name.lower(),
+                    "object_ids": [obj_id.strip() for obj_id in group.object_ids.split(',') if obj_id.strip()],
+                    "pass_index": group.pass_index,
+                    "keywords": [kw.strip() for kw in group.keywords.split(',') if kw.strip()],
+                    "mask": {
+                        "export": True,
+                        "type": "object_index",
+                        "path": f"//temp/ai_vision/passes/id_{group.pass_index}.png"
+                    }
+                }
+                for idx, group in enumerate(props.object_groups)
+            ],
+            "routing": {
+                "temp_dir": "//temp/ai_vision/",
+                "preview_out": "//temp/ai_vision/current_ai.png",
+                "passes_dir": "//temp/ai_vision/passes/",
+                "commits_dir": props.output_path.replace("\\", "/") + "/"
+            },
+            "flags": {
+                "live_preview": props.refresh_viewport,
+                "autosave_every_sec": RENDER_INTERVAL
+            }
+        }
+        
+        # Write to temp file then rename (atomic write)
+        session_path = os.path.join(ADDON_ROOT, "data", "temp", "session.json")
+        session_tmp = session_path + ".tmp"
+        
+        with open(session_tmp, 'w') as f:
+            json.dump(session_data, f, indent=2)
+        
+        # Atomic replace
+        os.replace(session_tmp, session_path)
+        
+    except Exception as e:
+        print(f"[Style Engine] Error writing session.json: {e}")
 
 
 def refresh_ai_image():
@@ -69,6 +148,57 @@ def refresh_ai_image():
     return 1.0
 
 
+def auto_render_passes():
+    """
+    Auto-render timer that renders ai_camera every X seconds with all passes.
+    """
+    try:
+        # Check if refresh is still enabled
+        props = bpy.context.scene.style_engine_props
+        if not props.refresh_viewport:
+            # Stop the timer if refresh is disabled
+            return None
+        
+        # Find the ai_camera
+        if "ai_camera" not in bpy.data.objects:
+            print("[Style Engine] ai_camera not found, skipping render")
+            return RENDER_INTERVAL
+        
+        ai_camera = bpy.data.objects["ai_camera"]
+        scene = bpy.context.scene
+        
+        # Store original settings
+        original_camera = scene.camera
+        original_engine = scene.render.engine
+        original_samples = scene.eevee.taa_render_samples
+        
+        # Configure render settings
+        scene.camera = ai_camera
+        scene.render.engine = 'BLENDER_EEVEE_NEXT'  # Blender 4.2+ uses EEVEE_NEXT
+        scene.eevee.taa_render_samples = 16
+        
+        # Set output path for the main render
+        passes_path = os.path.join(ADDON_ROOT, "data", "temp", "passes")
+        scene.render.filepath = os.path.join(passes_path, "combined")
+        
+        # Render
+        print(f"[Style Engine] Auto-rendering from ai_camera...")
+        bpy.ops.render.render(write_still=True)
+        
+        # Restore original settings
+        scene.camera = original_camera
+        scene.render.engine = original_engine
+        scene.eevee.taa_render_samples = original_samples
+        
+        print(f"[Style Engine] Render complete - saved to: {passes_path}")
+        
+    except Exception as e:
+        print(f"[Style Engine] Error in auto-render: {e}")
+    
+    # Continue running every RENDER_INTERVAL seconds
+    return RENDER_INTERVAL
+
+
 class WM_OT_SetupWorkspace(bpy.types.Operator):
     """Setup the AI Vision workspace with dual 3D views and AI camera."""
     bl_idname = "style_engine.setup_workspace"
@@ -93,6 +223,12 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
         
         # Setup compositor
         self.setup_compositor(context)
+        
+        # Clear groups at session start
+        self.clear_groups(context)
+        
+        # Write initial session.json
+        write_session_json(context)
         
         # Setup the workspace layout
         if workspace:
@@ -339,13 +475,29 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
         # Don't repeat this timer
         return None
     
+    def clear_groups(self, context):
+        """Clear all groups at session start."""
+        props = context.scene.style_engine_props
+        props.object_groups.clear()
+        props.active_group_index = 0
+        props.group_counter = 1
+        print("[Style Engine] Groups cleared for new session")
+    
     def start_image_refresh_timer(self):
-        """Start a timer to auto-refresh the AI image when it changes."""
+        """Start timers for auto-refresh and auto-render."""
         # Check if refresh_viewport is enabled
         props = bpy.context.scene.style_engine_props
-        if props.refresh_viewport and not bpy.app.timers.is_registered(refresh_ai_image):
-            bpy.app.timers.register(refresh_ai_image, first_interval=1.0, persistent=True)
-            print("[Style Engine] Auto-refresh timer started")
+        
+        if props.refresh_viewport:
+            # Start image refresh timer (checks for file changes)
+            if not bpy.app.timers.is_registered(refresh_ai_image):
+                bpy.app.timers.register(refresh_ai_image, first_interval=1.0, persistent=True)
+                print("[Style Engine] Auto-refresh timer started")
+            
+            # Start auto-render timer (renders passes every X seconds)
+            if not bpy.app.timers.is_registered(auto_render_passes):
+                bpy.app.timers.register(auto_render_passes, first_interval=RENDER_INTERVAL, persistent=True)
+                print(f"[Style Engine] Auto-render timer started (every {RENDER_INTERVAL}s)")
     
     def setup_compositor(self, context):
         """Setup the compositor nodes for render passes output."""
@@ -474,9 +626,12 @@ def register():
         bpy.utils.register_class(cls)
 
 def unregister():
-    # Stop the timer if it's running
+    # Stop the timers if they're running
     if bpy.app.timers.is_registered(refresh_ai_image):
         bpy.app.timers.unregister(refresh_ai_image)
+    
+    if bpy.app.timers.is_registered(auto_render_passes):
+        bpy.app.timers.unregister(auto_render_passes)
     
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
