@@ -315,6 +315,27 @@
                 </div>
             </div>
 
+            <!-- Workflow Selector Card -->
+            <div class="card">
+                <h2>⚙️ Workflow Selection</h2>
+                <div id="workflowSelector">
+                    <div class="info-row">
+                        <span class="info-label">Active Workflow:</span>
+                        <span class="info-value" id="activeWorkflow">-</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Available:</span>
+                        <span class="info-value" id="workflowCount">-</span>
+                    </div>
+                </div>
+                <div style="margin-top: 15px;">
+                    <label for="workflowDropdown" style="display: block; margin-bottom: 5px; color: #00d4ff;">Select Workflow:</label>
+                    <select id="workflowDropdown" style="width: 100%; padding: 8px; background: #002a2a; color: white; border: 1px solid #00d4ff; border-radius: 4px;" onchange="changeWorkflow()">
+                        <option value="">Loading...</option>
+                    </select>
+                </div>
+            </div>
+
             <!-- ComfyUI Status Card -->
             <div class="card">
                 <h2>🎨 ComfyUI Status</h2>
@@ -459,7 +480,8 @@
                 loadHealthData(),
                 loadSessionData(),
                 checkComfyStatus(),
-                loadAutoGenStatus()
+                loadAutoGenStatus(),
+                loadWorkflows()
             ]);
             document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
         }
@@ -584,8 +606,13 @@
                 
                 // Auto-generate enabled
                 if (data.auto_generate_enabled) {
-                    document.getElementById('autoGenEnabled').textContent = '✅ Enabled';
-                    document.getElementById('autoGenEnabled').style.color = '#00ff88';
+                    if (data.generation_in_progress) {
+                        document.getElementById('autoGenEnabled').textContent = '🔄 Generating...';
+                        document.getElementById('autoGenEnabled').style.color = '#ffa500';
+                    } else {
+                        document.getElementById('autoGenEnabled').textContent = '✅ Enabled (Ready)';
+                        document.getElementById('autoGenEnabled').style.color = '#00ff88';
+                    }
                 } else {
                     document.getElementById('autoGenEnabled').textContent = '❌ Disabled';
                     document.getElementById('autoGenEnabled').style.color = '#888';
@@ -607,6 +634,61 @@
             }
         }
 
+        // Load available workflows
+        async function loadWorkflows() {
+            try {
+                const response = await fetch('/workflows');
+                const data = await response.json();
+                
+                document.getElementById('activeWorkflow').textContent = data.active || 'None';
+                document.getElementById('workflowCount').textContent = data.count + ' workflows';
+                
+                // Populate dropdown
+                const dropdown = document.getElementById('workflowDropdown');
+                dropdown.innerHTML = '';
+                
+                data.workflows.forEach(workflow => {
+                    const option = document.createElement('option');
+                    option.value = workflow;
+                    option.textContent = workflow;
+                    if (workflow === data.active) {
+                        option.selected = true;
+                    }
+                    dropdown.appendChild(option);
+                });
+                
+            } catch (error) {
+                document.getElementById('activeWorkflow').textContent = 'Error';
+                document.getElementById('workflowCount').textContent = '-';
+            }
+        }
+
+        // Change active workflow
+        async function changeWorkflow() {
+            const dropdown = document.getElementById('workflowDropdown');
+            const selectedWorkflow = dropdown.value;
+            
+            if (!selectedWorkflow) return;
+            
+            try {
+                logActivity('Changing workflow to: ' + selectedWorkflow);
+                
+                const response = await fetch('/workflows/set/' + selectedWorkflow, {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    logActivity('✅ Workflow changed: ' + data.active_workflow);
+                    document.getElementById('activeWorkflow').textContent = data.active_workflow;
+                } else {
+                    logActivity('❌ Failed to change workflow', true);
+                }
+            } catch (error) {
+                logActivity('❌ Error changing workflow: ' + error.message, true);
+            }
+        }
+
         // Send test workflow to ComfyUI
         async function sendTestWorkflow() {
             logActivity('Sending workflow to ComfyUI with dynamic data...');
@@ -622,9 +704,19 @@
                     if (data.status === 'success') {
                         const injected = data.injected_data;
                         logActivity('✅ Workflow sent! Prompt ID: ' + data.prompt_id);
+                        logActivity('   ├─ Workflow: ' + (injected.workflow || 'DepthLCM.json'));
                         logActivity('   ├─ Prompt: "' + (injected.prompt || 'empty') + '"');
                         logActivity('   ├─ Resolution: ' + injected.resolution);
-                        logActivity('   ├─ Depth: ' + injected.depth_image);
+                        logActivity('   ├─ Combined Pass: ' + (injected.combined_pass || injected.depth_image || 'N/A'));
+                        if (injected.depth_influence !== undefined) {
+                            logActivity('   ├─ Depth Influence: ' + injected.depth_influence);
+                        }
+                        if (injected.silhouette_influence !== undefined) {
+                            logActivity('   ├─ Silhouette Influence: ' + injected.silhouette_influence);
+                        }
+                        if (injected.steps !== undefined) {
+                            logActivity('   ├─ Steps: ' + injected.steps);
+                        }
                         logActivity('   ├─ ComfyUI: ' + (injected.comfy_path || 'not set'));
                         logActivity('   └─ Output: ' + injected.output);
                         
@@ -641,9 +733,10 @@
                         let alertMessage = '🎨 Workflow Sent Successfully!\n\n' +
                             'Prompt ID: ' + data.prompt_id + '\n\n' +
                             '✅ Injected Data:\n' +
+                            '  • Workflow: ' + (injected.workflow || 'DepthLCM.json') + '\n' +
                             '  • Prompt: "' + (injected.prompt || 'empty') + '"\n' +
                             '  • Resolution: ' + injected.resolution + '\n' +
-                            '  • Depth: ' + injected.depth_image + '\n' +
+                            '  • Combined Pass: ' + (injected.combined_pass || injected.depth_image || 'N/A') + '\n' +
                             '  • ComfyUI: ' + (injected.comfy_path || 'not set') + '\n\n';
                         
                         if (data.next_steps && data.next_steps.length > 0) {

@@ -8,6 +8,8 @@ import os
 import json
 from datetime import datetime
 from pathlib import Path
+import urllib.request
+import urllib.error
 
 # Get the project root directory (C:\Coding\STYLEENGINE)
 # __file__ = .../scripts/addons/styleengine/workspace_setup.py
@@ -62,6 +64,7 @@ def write_session_json(context):
             "global_prompt": props.global_prompt,
             "depth_influence": round(props.depth_influence, 3),
             "silhouette_influence": round(props.silhouette_influence, 3),
+            "steps": props.steps,
             "objects": [
                 {
                     "group_id": f"grp-{group.name.lower().replace(' ', '-')}-{str(idx+1).zfill(3)}",
@@ -157,6 +160,7 @@ def refresh_ai_image():
 def auto_render_passes():
     """
     Auto-render timer that renders ai_camera every X seconds with all passes.
+    Only renders when previous AI generation is complete (no queue backup).
     """
     try:
         # Check if refresh is still enabled
@@ -164,6 +168,20 @@ def auto_render_passes():
         if not props.refresh_viewport:
             # Stop the timer if refresh is disabled
             return None
+        
+        # Check if auto-generate is enabled
+        if props.auto_generate:
+            # Check if server says it's ready for next render
+            try:
+                req = urllib.request.Request('http://localhost:8000/render/ready', method='GET')
+                with urllib.request.urlopen(req, timeout=1) as response:
+                    data = json.loads(response.read().decode())
+                    if not data.get('ready', True):  # Default True if server not responding
+                        print("[Style Engine] ⏸️ Waiting for AI generation to complete...")
+                        return RENDER_INTERVAL  # Try again later
+            except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError):
+                # Server not responding, continue with render anyway
+                pass
         
         # Find the ai_camera
         if "ai_camera" not in bpy.data.objects:
@@ -353,7 +371,11 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
         
         # Setup background image properties
         bg_img.image = img
-        bg_img.alpha = 1.0  # 100% opacity
+        
+        # Get opacity from properties (default to 1.0)
+        props = bpy.context.scene.style_engine_props
+        bg_img.alpha = props.background_opacity if hasattr(props, 'background_opacity') else 1.0
+        
         bg_img.display_depth = 'FRONT'  # Display in front
         bg_img.frame_method = 'STRETCH'
         

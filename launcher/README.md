@@ -59,7 +59,7 @@ The web dashboard provides a real-time view of:
 ### Debug & Testing
 
 - `GET /debug/paths` - View file paths for troubleshooting
-- `POST /debug/send_workflow` - Send BasicLCM.json workflow to ComfyUI (auto-copies output! ✨)
+- `POST /debug/send_workflow` - Send DepthLCM.json workflow to ComfyUI (auto-copies output! ✨)
 - `GET /debug/comfy_queue` - Check ComfyUI queue status
 - `GET /debug/current_ai_status` - Check current_ai.png modification time and size
 
@@ -100,12 +100,14 @@ The server runs with auto-reload enabled during development. Any changes to `ser
 The server now features **fully automated, cyclical AI generation**!
 
 When enabled in Blender:
-1. Blender renders passes every 5 seconds
-2. Server detects depth pass updates
-3. Auto-triggers ComfyUI workflow
+1. Blender renders passes every 5 seconds (Combined, Depth, AO)
+2. Server detects combined pass updates
+3. Auto-triggers ComfyUI workflow (Default: SDXLworkflow with dual ControlNet)
 4. Auto-copies output to current_ai.png
 5. Blender refreshes viewport
 6. Repeat continuously!
+
+**Default Workflow**: SDXLworkflow.json (high quality with depth + canny ControlNet)
 
 **See**: [`AUTO_GENERATION_GUIDE.md`](AUTO_GENERATION_GUIDE.md) for complete setup and usage instructions.
 

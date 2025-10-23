@@ -21,6 +21,9 @@ import time
 # Global state for auto-generation monitoring
 _auto_gen_task = None
 _last_depth_mtime = 0
+_active_workflow = "SDXLworkflow.json"  # Default workflow
+_generation_in_progress = False
+_last_generation_complete_time = 0
 
 
 # Initialize FastAPI app
@@ -54,42 +57,86 @@ def get_comfy_paths_from_session(session_data: dict) -> tuple:
     return comfy_path, input_dir, output_dir
 
 
+def get_available_workflows(project_root: Path) -> list:
+    """Scan workflows directory and return list of available workflow files."""
+    workflows_dir = project_root / "ComfyUI" / "workflows"
+    
+    if not workflows_dir.exists():
+        return []
+    
+    # Get all .json files in workflows directory
+    workflows = [f.name for f in workflows_dir.glob("*.json")]
+    workflows.sort()  # Sort alphabetically
+    
+    return workflows
+
+
+def inject_workflow_data(workflow: dict, session_data: dict) -> dict:
+    """
+    Inject dynamic data into workflow based on session.json.
+    Handles different workflow structures intelligently.
+    """
+    global_prompt = session_data.get("global_prompt", "")
+    width = session_data.get("resolution", {}).get("width", 1024)
+    height = session_data.get("resolution", {}).get("height", 1024)
+    depth_influence = session_data.get("depth_influence", 1.0)
+    silhouette_influence = session_data.get("silhouette_influence", 1.0)
+    steps = session_data.get("steps", 15)
+    
+    # Node 15: LoadImage - Set combined pass
+    if "15" in workflow and "inputs" in workflow["15"]:
+        workflow["15"]["inputs"]["image"] = "combined0001.png"
+    
+    # Node 25: PrimitiveString - Set prompt
+    if "25" in workflow and "inputs" in workflow["25"]:
+        workflow["25"]["inputs"]["value"] = global_prompt
+    
+    # Node 5: EmptyLatentImage - Set resolution
+    if "5" in workflow and "inputs" in workflow["5"]:
+        workflow["5"]["inputs"]["width"] = width
+        workflow["5"]["inputs"]["height"] = height
+    
+    # Node 9: SaveImage - Set output prefix
+    if "9" in workflow and "inputs" in workflow["9"]:
+        workflow["9"]["inputs"]["filename_prefix"] = "style_engine_output"
+    
+    # Node 40: PrimitiveFloat (cannyStrength) - Set silhouette influence
+    if "40" in workflow and "inputs" in workflow["40"]:
+        workflow["40"]["inputs"]["value"] = silhouette_influence
+    
+    # Node 41: PrimitiveFloat (depthStrength) - Set depth influence
+    if "41" in workflow and "inputs" in workflow["41"]:
+        workflow["41"]["inputs"]["value"] = depth_influence
+    
+    # Node 42: PrimitiveInt (Steps) - Set steps
+    if "42" in workflow and "inputs" in workflow["42"]:
+        workflow["42"]["inputs"]["value"] = steps
+    
+    return workflow
+
+
 async def send_workflow_internal(project_root: Path, depth_image_path: Path, session_data: dict, comfy_root: Path, comfy_input_dir: Path, comfy_output_dir: Path, current_ai_path: Path):
     """
     Internal function to send workflow to ComfyUI (used by both manual and auto-trigger).
     Returns (success: bool, prompt_id: str, message: str)
     """
-    workflow_path = project_root / "ComfyUI" / "workflows" / "BasicLCM.json"
+    global _active_workflow, _generation_in_progress
+    workflow_path = project_root / "ComfyUI" / "workflows" / _active_workflow
     
     try:
-        # Step 1: Copy depth image to ComfyUI input folder
-        comfy_depth_path = comfy_input_dir / "depth0001.png"
-        shutil.copy2(depth_image_path, comfy_depth_path)
+        # Step 1: Copy combined pass to ComfyUI input folder
+        comfy_combined_path = comfy_input_dir / "combined0001.png"
+        shutil.copy2(depth_image_path, comfy_combined_path)
         
         # Step 2: Read the workflow
         with open(workflow_path, 'r') as f:
             workflow = json.load(f)
         
-        # Step 3: Extract data from session
-        global_prompt = session_data.get("global_prompt", "")
-        width = session_data.get("resolution", {}).get("width", 1024)
-        height = session_data.get("resolution", {}).get("height", 1024)
+        # Step 3: Inject dynamic data into workflow
+        workflow = inject_workflow_data(workflow, session_data)
         
-        # Step 4: Modify workflow nodes with dynamic data
-        if "15" in workflow:
-            workflow["15"]["inputs"]["image"] = "depth0001.png"
-        if "25" in workflow:
-            workflow["25"]["inputs"]["value"] = global_prompt
-        if "5" in workflow:
-            workflow["5"]["inputs"]["width"] = width
-            workflow["5"]["inputs"]["height"] = height
-        if "9" in workflow:
-            workflow["9"]["inputs"]["filename_prefix"] = "style_engine_output"
-        
-        # Generate unique client ID
+        # Step 4: Generate unique client ID and prepare payload
         client_id = str(uuid.uuid4())
-        
-        # Prepare payload
         payload = {
             "prompt": workflow,
             "client_id": client_id
@@ -103,10 +150,14 @@ async def send_workflow_internal(project_root: Path, depth_image_path: Path, ses
                 result = response.json()
                 prompt_id = result.get("prompt_id")
                 
+                # Mark generation as in progress
+                _generation_in_progress = True
+                
                 # Start monitoring in background
                 asyncio.create_task(wait_for_comfy_completion(prompt_id, comfy_output_dir, current_ai_path))
                 
                 print(f"[Style Engine] 🎨 Workflow sent to ComfyUI (ID: {prompt_id})")
+                print(f"[Style Engine] 🔒 Generation in progress, blocking new renders...")
                 return True, prompt_id, "Success"
             else:
                 return False, None, f"ComfyUI returned status {response.status_code}"
@@ -119,14 +170,14 @@ async def send_workflow_internal(project_root: Path, depth_image_path: Path, ses
 
 async def monitor_depth_changes():
     """
-    Background task that monitors depth0001.png for changes.
+    Background task that monitors combined0001.png for changes.
     When it changes and auto_generate is enabled, automatically trigger ComfyUI workflow.
     """
     global _last_depth_mtime
     
     project_root = Path(__file__).parent.parent
     session_path = project_root / "data" / "temp" / "session.json"
-    depth_image_path = project_root / "data" / "temp" / "passes" / "depth0001.png"
+    depth_image_path = project_root / "data" / "temp" / "passes" / "combined0001.png"
     current_ai_path = project_root / "data" / "temp" / "ai_vision" / "current_ai.png"
     
     print("[Style Engine] 🔄 Auto-generation monitor started")
@@ -148,6 +199,12 @@ async def monitor_depth_changes():
                 await asyncio.sleep(5)
                 continue
             
+            # Check if generation is already in progress
+            if _generation_in_progress:
+                # Don't send new workflow if previous one is still processing
+                await asyncio.sleep(3)
+                continue
+            
             # Check if depth image exists and has been updated
             if not depth_image_path.exists():
                 await asyncio.sleep(5)
@@ -165,7 +222,7 @@ async def monitor_depth_changes():
                 # Depth pass has been updated!
                 _last_depth_mtime = current_mtime
                 
-                print(f"[Style Engine] 🆕 New render pass detected!")
+                print(f"[Style Engine] 🆕 New combined pass detected!")
                 print(f"[Style Engine] 🚀 Auto-triggering ComfyUI workflow...")
                 
                 # Get ComfyUI paths from session
@@ -201,6 +258,7 @@ async def monitor_depth_changes():
 async def wait_for_comfy_completion(prompt_id: str, comfy_output_dir: Path, current_ai_path: Path, max_wait: int = 120):
     """
     Wait for ComfyUI to complete processing and automatically copy output to current_ai.png.
+    Sets _generation_in_progress flag to coordinate with render timing.
     
     Args:
         prompt_id: The ComfyUI prompt ID to monitor
@@ -208,6 +266,8 @@ async def wait_for_comfy_completion(prompt_id: str, comfy_output_dir: Path, curr
         current_ai_path: Path to current_ai.png destination
         max_wait: Maximum seconds to wait (default 120)
     """
+    global _generation_in_progress, _last_generation_complete_time
+    
     print(f"[Style Engine] Monitoring ComfyUI job: {prompt_id}")
     start_time = time.time()
     check_interval = 2  # Check every 2 seconds
@@ -239,9 +299,15 @@ async def wait_for_comfy_completion(prompt_id: str, comfy_output_dir: Path, curr
                                 print(f"   Source: {newest_file}")
                                 print(f"   Dest: {current_ai_path}")
                                 
+                                # Mark generation as complete
+                                _generation_in_progress = False
+                                _last_generation_complete_time = time.time()
+                                print(f"[Style Engine] ✅ Generation complete, ready for next render")
+                                
                                 return True
                             else:
                                 print(f"[Style Engine] ⚠️ Job complete but no output files found")
+                                _generation_in_progress = False
                                 return False
                     
                 except Exception as e:
@@ -251,10 +317,12 @@ async def wait_for_comfy_completion(prompt_id: str, comfy_output_dir: Path, curr
                 await asyncio.sleep(check_interval)
             
             print(f"[Style Engine] ⏱️ Timeout waiting for ComfyUI (max {max_wait}s)")
+            _generation_in_progress = False
             return False
             
     except Exception as e:
         print(f"[Style Engine] Error in wait_for_comfy_completion: {e}")
+        _generation_in_progress = False
         return False
 
 # Enable CORS for local development
@@ -496,14 +564,16 @@ async def get_auto_generate_status():
     """Get the status of auto-generation feature."""
     project_root = Path(__file__).parent.parent
     session_path = project_root / "data" / "temp" / "session.json"
-    depth_path = project_root / "data" / "temp" / "passes" / "depth0001.png"
+    depth_path = project_root / "data" / "temp" / "passes" / "combined0001.png"
     
     status = {
         "monitor_running": _auto_gen_task is not None and not _auto_gen_task.done(),
         "auto_generate_enabled": False,
         "last_depth_mtime": _last_depth_mtime,
         "depth_exists": depth_path.exists(),
-        "session_exists": session_path.exists()
+        "session_exists": session_path.exists(),
+        "generation_in_progress": _generation_in_progress,
+        "ready_for_render": not _generation_in_progress
     }
     
     if session_path.exists():
@@ -515,6 +585,17 @@ async def get_auto_generate_status():
             pass
     
     return status
+
+
+@app.get("/render/ready")
+async def check_render_ready():
+    """Check if it's safe to render (no generation in progress)."""
+    return {
+        "ready": not _generation_in_progress,
+        "generation_in_progress": _generation_in_progress,
+        "last_complete_time": _last_generation_complete_time,
+        "seconds_since_complete": time.time() - _last_generation_complete_time if _last_generation_complete_time > 0 else None
+    }
 
 
 @app.get("/debug/current_ai_status")
@@ -539,6 +620,51 @@ async def get_current_ai_status():
         }
 
 
+@app.get("/workflows")
+async def get_workflows():
+    """Get list of available workflow files."""
+    project_root = Path(__file__).parent.parent
+    workflows = get_available_workflows(project_root)
+    
+    return {
+        "workflows": workflows,
+        "active": _active_workflow,
+        "count": len(workflows)
+    }
+
+
+@app.get("/workflows/active")
+async def get_active_workflow():
+    """Get the currently active workflow."""
+    return {
+        "active_workflow": _active_workflow
+    }
+
+
+@app.post("/workflows/set/{workflow_name}")
+async def set_active_workflow(workflow_name: str):
+    """Set the active workflow."""
+    global _active_workflow
+    
+    project_root = Path(__file__).parent.parent
+    available_workflows = get_available_workflows(project_root)
+    
+    if workflow_name not in available_workflows:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Workflow '{workflow_name}' not found. Available: {', '.join(available_workflows)}"
+        )
+    
+    _active_workflow = workflow_name
+    print(f"[Style Engine] 🔄 Switched to workflow: {workflow_name}")
+    
+    return {
+        "status": "success",
+        "active_workflow": _active_workflow,
+        "message": f"Switched to {workflow_name}"
+    }
+
+
 @app.post("/debug/send_workflow")
 async def debug_send_workflow(background_tasks: BackgroundTasks):
     """
@@ -547,15 +673,15 @@ async def debug_send_workflow(background_tasks: BackgroundTasks):
     
     Workflow:
     1. Read session.json for prompt, resolution, and ComfyUI path
-    2. Copy depth0001.png to ComfyUI input folder
-    3. Inject dynamic data into workflow
+    2. Copy combined0001.png to ComfyUI input folder
+    3. Inject dynamic data into workflow (DepthLCM with DepthAnything preprocessor)
     4. Send to ComfyUI
     5. Monitor for output and copy to current_ai.png (background task)
     """
     project_root = Path(__file__).parent.parent
-    workflow_path = project_root / "ComfyUI" / "workflows" / "BasicLCM.json"
+    workflow_path = project_root / "ComfyUI" / "workflows" / "DepthLCM.json"
     session_path = project_root / "data" / "temp" / "session.json"
-    depth_image_path = project_root / "data" / "temp" / "passes" / "depth0001.png"
+    depth_image_path = project_root / "data" / "temp" / "passes" / "combined0001.png"
     current_ai_path = project_root / "data" / "temp" / "ai_vision" / "current_ai.png"
     
     # Check if required files exist
@@ -605,7 +731,7 @@ async def debug_send_workflow(background_tasks: BackgroundTasks):
     if not depth_image_path.exists():
         raise HTTPException(
             status_code=404,
-            detail=f"Depth pass not found at {depth_image_path}. Make sure 'Refresh Viewport' is enabled in Blender."
+            detail=f"Combined pass not found at {depth_image_path}. Make sure 'Refresh Viewport' is enabled in Blender."
         )
     
     # Use the internal function to send workflow
@@ -624,6 +750,9 @@ async def debug_send_workflow(background_tasks: BackgroundTasks):
         global_prompt = session_data.get("global_prompt", "")
         width = session_data.get("resolution", {}).get("width", 1024)
         height = session_data.get("resolution", {}).get("height", 1024)
+        depth_influence = session_data.get("depth_influence", 1.0)
+        silhouette_influence = session_data.get("silhouette_influence", 1.0)
+        steps = session_data.get("steps", 15)
         
         return {
             "status": "success",
@@ -631,9 +760,13 @@ async def debug_send_workflow(background_tasks: BackgroundTasks):
             "prompt_id": prompt_id,
             "monitoring": True,
             "injected_data": {
+                "workflow": _active_workflow,
                 "prompt": global_prompt,
                 "resolution": f"{width}x{height}",
-                "depth_image": "depth0001.png (copied to ComfyUI input)",
+                "combined_pass": "combined0001.png (copied to ComfyUI input)",
+                "depth_influence": depth_influence,
+                "silhouette_influence": silhouette_influence,
+                "steps": steps,
                 "comfy_path": str(comfy_root),
                 "output": "Will auto-copy to current_ai.png when ready ✨"
             },

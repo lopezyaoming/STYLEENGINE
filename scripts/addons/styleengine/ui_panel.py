@@ -122,6 +122,15 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         update=update_session_json
     )
     
+    steps: bpy.props.IntProperty(
+        name="Steps",
+        description="Number of sampling steps for AI generation (15-30)",
+        default=15,
+        min=15,
+        max=30,
+        update=update_session_json
+    )
+
     # Workspace settings
     def update_refresh_viewport(self, context):
         """Start or stop the refresh and render timers based on checkbox state."""
@@ -158,6 +167,27 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         description="Automatically send workflow to ComfyUI when render passes update",
         default=False,
         update=update_session_json
+    )
+    
+    def update_background_opacity(self, context):
+        """Update the ai_camera background image opacity."""
+        if "ai_camera" in bpy.data.objects:
+            ai_camera = bpy.data.objects["ai_camera"]
+            cam_data = ai_camera.data
+            
+            # Update background images opacity
+            for bg in cam_data.background_images:
+                bg.alpha = self.background_opacity
+                
+            print(f"[Style Engine] Background opacity set to: {self.background_opacity:.2f}")
+    
+    background_opacity: bpy.props.FloatProperty(
+        name="Background Opacity",
+        description="Transparency of the AI background image (0=invisible, 1=opaque)",
+        default=1.0,
+        min=0.0,
+        max=1.0,
+        update=update_background_opacity
     )
     
     ai_resolution: bpy.props.EnumProperty(
@@ -384,6 +414,11 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
             # Auto-generate AI checkbox
             setup_box.prop(style_props, "auto_generate", icon='PLAY')
             
+            # Background opacity slider
+            setup_box.separator()
+            setup_box.label(text="Background Opacity:")
+            setup_box.prop(style_props, "background_opacity", slider=True, text="")
+            
             # Resolution dropdown
             setup_box.separator()
             setup_box.label(text="Set Resolution:")
@@ -420,6 +455,8 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
             influence_box.label(text="Influence", icon='SHADERFX')
             influence_box.prop(style_props, "depth_influence", slider=True)
             influence_box.prop(style_props, "silhouette_influence", slider=True)
+            influence_box.separator()
+            influence_box.prop(style_props, "steps", slider=True)
             
             # Groups section
             gen_box.separator()
