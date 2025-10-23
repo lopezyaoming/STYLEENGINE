@@ -95,6 +95,22 @@ launcher/
 
 The server runs with auto-reload enabled during development. Any changes to `server.py` will automatically restart the server.
 
+## Cyclical Auto-Generation ✨
+
+The server now features **fully automated, cyclical AI generation**!
+
+When enabled in Blender:
+1. Blender renders passes every 5 seconds
+2. Server detects depth pass updates
+3. Auto-triggers ComfyUI workflow
+4. Auto-copies output to current_ai.png
+5. Blender refreshes viewport
+6. Repeat continuously!
+
+**See**: [`AUTO_GENERATION_GUIDE.md`](AUTO_GENERATION_GUIDE.md) for complete setup and usage instructions.
+
+---
+
 ## Next Steps
 
 Completed:
@@ -102,12 +118,13 @@ Completed:
 - [x] Auto-copy output to current_ai.png
 - [x] Background task monitoring
 - [x] Dynamic data injection from session.json
+- [x] **Cyclical auto-generation** (depth pass monitoring)
+- [x] Auto-trigger workflows on render updates
 
 Future functionality to be added:
-- [ ] File watcher for `session.json` updates (auto-trigger on new passes)
 - [ ] WebSocket support for real-time updates
-- [ ] Automatic workflow triggering when Blender updates passes
 - [ ] Image processing queue for multiple requests
 - [ ] Enhanced error handling and retry logic
 - [ ] Advanced logging system
+- [ ] Adaptive timing based on ComfyUI speed
 

@@ -153,6 +153,13 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         update=update_refresh_viewport
     )
     
+    auto_generate: bpy.props.BoolProperty(
+        name="Auto-Generate AI",
+        description="Automatically send workflow to ComfyUI when render passes update",
+        default=False,
+        update=update_session_json
+    )
+    
     ai_resolution: bpy.props.EnumProperty(
         name="AI Resolution",
         description="Resolution for AI generation",
@@ -373,6 +380,9 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
             
             # Auto-refresh checkbox
             setup_box.prop(style_props, "refresh_viewport", icon='FILE_REFRESH')
+            
+            # Auto-generate AI checkbox
+            setup_box.prop(style_props, "auto_generate", icon='PLAY')
             
             # Resolution dropdown
             setup_box.separator()

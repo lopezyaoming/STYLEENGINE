@@ -86,6 +86,7 @@ def write_session_json(context):
             },
             "flags": {
                 "live_preview": props.refresh_viewport,
+                "auto_generate": props.auto_generate,
                 "autosave_every_sec": RENDER_INTERVAL
             }
         }

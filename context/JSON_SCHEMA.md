@@ -440,6 +440,53 @@ Boolean settings and configuration flags.
 - No automatic rendering
 - Manual updates only
 
+#### `flags.auto_generate`
+- **Type**: Boolean
+- **Purpose**: Enable/disable cyclical auto-generation
+- **Set By**: "Auto-Generate AI" checkbox in UI
+- **Default**: `false`
+- **Use Case**:
+  - Enables fully automated AI vision workflow
+  - Server monitors depth pass for changes
+  - Auto-triggers ComfyUI on each render update
+  - Creates continuous feedback loop
+
+**Effect When `true`**:
+- Server monitors `depth0001.png` every 3 seconds
+- Detects when Blender renders new passes
+- Automatically sends workflow to ComfyUI with:
+  - Latest depth pass
+  - Current `global_prompt`
+  - Session resolution settings
+- Auto-copies ComfyUI output to `current_ai.png`
+- Creates cyclical process: Render → Generate → Display → Repeat
+
+**Effect When `false`**:
+- Monitor continues running but doesn't trigger workflows
+- Manual workflow triggering only (via dashboard or API)
+- Useful for:
+  - Working without constant AI generation
+  - Reducing GPU/ComfyUI load
+  - Manual control over generation timing
+
+**Workflow**:
+```
+1. User checks "Auto-Generate AI" in Blender
+2. Blender renders passes every 5 seconds
+3. Server detects depth pass update
+4. Server auto-sends workflow to ComfyUI
+5. ComfyUI generates image
+6. Server auto-copies to current_ai.png
+7. Blender refreshes viewport (shows new AI image)
+8. Wait 5 seconds → repeat from step 2
+```
+
+**Requirements for auto_generate to work**:
+- `live_preview` must be `true` (to render passes)
+- ComfyUI must be running at http://127.0.0.1:8188
+- `routing.comfy_path` must be set correctly
+- Depth pass must exist in `passes` directory
+
 #### `flags.autosave_every_sec`
 - **Type**: Float (seconds)
 - **Value**: `5.0`

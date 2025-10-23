@@ -342,6 +342,25 @@
                 </div>
             </div>
 
+            <!-- Auto-Generation Status Card -->
+            <div class="card">
+                <h2>🔄 Auto-Generation</h2>
+                <div id="autoGenInfo">
+                    <div class="info-row">
+                        <span class="info-label">Monitor Status:</span>
+                        <span class="info-value" id="monitorStatus">-</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Auto-Generate:</span>
+                        <span class="info-value" id="autoGenEnabled">-</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Depth Pass:</span>
+                        <span class="info-value" id="depthStatus">-</span>
+                    </div>
+                </div>
+            </div>
+
             <!-- Server Health Card -->
             <div class="card">
                 <h2>💚 Server Health</h2>
@@ -439,7 +458,8 @@
             await Promise.all([
                 loadHealthData(),
                 loadSessionData(),
-                checkComfyStatus()
+                checkComfyStatus(),
+                loadAutoGenStatus()
             ]);
             document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
         }
@@ -544,6 +564,46 @@
                 document.getElementById('comfyStatus').textContent = '❌ ERROR';
                 document.getElementById('comfyStatus').style.color = '#ff4444';
                 logActivity('Error checking ComfyUI', true);
+            }
+        }
+
+        // Load auto-generation status
+        async function loadAutoGenStatus() {
+            try {
+                const response = await fetch('/auto_generate/status');
+                const data = await response.json();
+                
+                // Monitor status
+                if (data.monitor_running) {
+                    document.getElementById('monitorStatus').textContent = '✅ Running';
+                    document.getElementById('monitorStatus').style.color = '#00ff88';
+                } else {
+                    document.getElementById('monitorStatus').textContent = '⏸️ Stopped';
+                    document.getElementById('monitorStatus').style.color = '#ff9900';
+                }
+                
+                // Auto-generate enabled
+                if (data.auto_generate_enabled) {
+                    document.getElementById('autoGenEnabled').textContent = '✅ Enabled';
+                    document.getElementById('autoGenEnabled').style.color = '#00ff88';
+                } else {
+                    document.getElementById('autoGenEnabled').textContent = '❌ Disabled';
+                    document.getElementById('autoGenEnabled').style.color = '#888';
+                }
+                
+                // Depth pass status
+                if (data.depth_exists) {
+                    document.getElementById('depthStatus').textContent = '✅ Available';
+                    document.getElementById('depthStatus').style.color = '#00ff88';
+                } else {
+                    document.getElementById('depthStatus').textContent = '❌ Not found';
+                    document.getElementById('depthStatus').style.color = '#888';
+                }
+                
+            } catch (error) {
+                document.getElementById('monitorStatus').textContent = '❌ Error';
+                document.getElementById('autoGenEnabled').textContent = '-';
+                document.getElementById('depthStatus').textContent = '-';
             }
         }
 
