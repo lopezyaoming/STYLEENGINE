@@ -34,6 +34,10 @@ def write_session_json(context):
         props = context.scene.style_engine_props
         scene = context.scene
         
+        # Get ComfyUI path from preferences
+        prefs = context.preferences.addons['styleengine'].preferences
+        comfy_path = prefs.comfy_path if hasattr(prefs, 'comfy_path') else ""
+        
         # Parse resolution
         res_str = props.ai_resolution  # e.g., "1024x1024"
         width, height = map(int, res_str.split('x'))
@@ -77,7 +81,8 @@ def write_session_json(context):
                 "temp_dir": "//temp/ai_vision/",
                 "preview_out": "//temp/ai_vision/current_ai.png",
                 "passes_dir": "//temp/ai_vision/passes/",
-                "commits_dir": props.output_path.replace("\\", "/") + "/"
+                "commits_dir": props.output_path.replace("\\", "/") + "/",
+                "comfy_path": comfy_path.replace("\\", "/") if comfy_path else ""
             },
             "flags": {
                 "live_preview": props.refresh_viewport,

@@ -1,1 +1,2 @@
 minimum viable product. Blender workflow that has a two/screen modality: On the left we have a simple layout window in which the user can model. on the right, we have an "AI vision" camera, with constantly updating AI generated images. the AI vision camera it's constantly (every X seconds) rendering the view, sending it to a quick AI pipeline, and displaying the AI image back as a "Background Image" on front in the camera object, with 100% opacity, making some sort of "AI filter" as the user models.
+

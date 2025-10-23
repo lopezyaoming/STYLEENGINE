@@ -1,0 +1,17 @@
+# Style Engine Launcher - Python Dependencies
+
+# FastAPI framework
+fastapi==0.104.1
+
+# ASGI server for running FastAPI
+uvicorn[standard]==0.24.0
+
+# Data validation
+pydantic==2.5.0
+
+# HTTP client for ComfyUI integration (future use)
+httpx==0.25.1
+
+# File watching for session.json updates (future use)
+watchdog==3.0.0
+

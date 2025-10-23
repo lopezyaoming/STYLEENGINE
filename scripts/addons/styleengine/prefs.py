@@ -40,6 +40,14 @@ class StyleEnginePreferences(AddonPreferences):
         description="Use environment variables if available, otherwise use manually entered values",
         default=True
     )
+    
+    # ComfyUI Installation Path
+    comfy_path: StringProperty(
+        name="ComfyUI Path",
+        description="Path to your ComfyUI installation folder (e.g., C:\\ComfyUI or C:\\ComfyUI_windows_portable\\ComfyUI)",
+        default="",
+        subtype='DIR_PATH'
+    )
 
     def draw(self, context):
         layout = self.layout
@@ -101,6 +109,51 @@ class StyleEnginePreferences(AddonPreferences):
         row = runcomfy_box.row()
         row.operator("style_engine.test_connection", icon='PLUGIN')
         
+        # ComfyUI Path Settings
+        layout.separator()
+        comfy_box = layout.box()
+        comfy_box.label(text="ComfyUI Installation", icon='FILE_FOLDER')
+        
+        # ComfyUI path field
+        col = comfy_box.column(align=True)
+        col.prop(self, "comfy_path", text="ComfyUI Path")
+        
+        # Show status
+        if self.comfy_path:
+            comfy_exists = os.path.exists(self.comfy_path)
+            input_exists = os.path.exists(os.path.join(self.comfy_path, "input"))
+            output_exists = os.path.exists(os.path.join(self.comfy_path, "output"))
+            
+            row = comfy_box.row()
+            if comfy_exists:
+                row.label(text="✓ ComfyUI folder found", icon='CHECKMARK')
+            else:
+                row.label(text="✗ ComfyUI folder not found", icon='ERROR')
+            
+            if input_exists:
+                row = comfy_box.row()
+                row.label(text="✓ Input folder found", icon='CHECKMARK')
+            else:
+                row = comfy_box.row()
+                row.label(text="✗ Input folder not found", icon='ERROR')
+                
+            if output_exists:
+                row = comfy_box.row()
+                row.label(text="✓ Output folder found", icon='CHECKMARK')
+            else:
+                row = comfy_box.row()
+                row.label(text="✗ Output folder not found", icon='ERROR')
+        else:
+            row = comfy_box.row()
+            row.label(text="⚠ ComfyUI path not set", icon='ERROR')
+        
+        comfy_box.separator()
+        col = comfy_box.column(align=True)
+        col.label(text="Example paths:")
+        col.label(text="  • C:\\ComfyUI")
+        col.label(text="  • C:\\ComfyUI_windows_portable\\ComfyUI")
+        col.label(text="  • D:\\AI\\ComfyUI")
+        
         # Instructions
         layout.separator()
         info_box = layout.box()
@@ -109,6 +162,7 @@ class StyleEnginePreferences(AddonPreferences):
         col.label(text="• Set environment variables in your system for automatic detection")
         col.label(text="• Or manually enter credentials above")
         col.label(text="• Environment variables take priority if 'Prefer Environment Variables' is enabled")
+        col.label(text="• Point ComfyUI Path to your ComfyUI installation folder")
 
 
 class WM_OT_TestConnection(bpy.types.Operator):
