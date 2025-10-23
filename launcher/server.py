@@ -17,6 +17,7 @@ import shutil
 import os
 import asyncio
 import time
+from runcomfy_test import get_tester
 
 # Global state for auto-generation monitoring
 _auto_gen_task = None
@@ -372,6 +373,21 @@ async def dashboard():
         return HTMLResponse(content=f.read())
 
 
+@app.get("/runcomfy", response_class=HTMLResponse)
+async def runcomfy_test_ui():
+    """Serve the RunComfy test UI."""
+    html_path = Path(__file__).parent / "templates" / "runcomfy_test.html"
+    
+    if not html_path.exists():
+        return HTMLResponse(
+            content="<h1>RunComfy Test UI not found</h1><p>Please ensure templates/runcomfy_test.html exists.</p>",
+            status_code=404
+        )
+    
+    with open(html_path, 'r', encoding='utf-8') as f:
+        return HTMLResponse(content=f.read())
+
+
 @app.get("/api", response_model=Dict[str, str])
 async def api_info():
     """API information endpoint."""
@@ -664,6 +680,189 @@ async def set_active_workflow(workflow_name: str):
         "message": f"Switched to {workflow_name}"
     }
 
+
+# ============================================
+# RUNCOMFY CLOUD API ENDPOINTS (TEST)
+# ============================================
+
+@app.post("/runcomfy/create_deployment")
+async def runcomfy_create_deployment():
+    """Create a new RunComfy deployment"""
+    # Read credentials from session.json
+    project_root = Path(__file__).parent.parent
+    session_path = project_root / "data" / "temp" / "session.json"
+    
+    if not session_path.exists():
+        raise HTTPException(status_code=404, detail="Session file not found. Please set up workspace in Blender first.")
+    
+    with open(session_path, "r") as f:
+        session_data = json.load(f)
+    
+    # Get API credentials (assuming they're in the session or we need to read from preferences)
+    # For now, we'll expect them to be passed or configured
+    api_token = os.environ.get("RUNCOMFY_API_TOKEN")
+    user_id = os.environ.get("RUNCOMFY_USER_ID")
+    
+    if not api_token or not user_id:
+        raise HTTPException(status_code=401, detail="RunComfy API credentials not found. Please set RUNCOMFY_API_TOKEN and RUNCOMFY_USER_ID environment variables.")
+    
+    tester = get_tester(api_token, user_id)
+    result = await tester.create_deployment(name="StyleEngine_Cloud_Test")
+    
+    if result["success"]:
+        # Send an initial warm-up request
+        deployment_id = result["deployment_id"]
+        print(f"[RunComfy] ✅ Deployment created: {deployment_id}")
+        print(f"[RunComfy] 🔄 Sending warm-up request to load models...")
+        
+        # Send a test workflow to warm up the instance
+        warm_up_result = await tester.send_workflow(
+            deployment_id=deployment_id,
+            prompt="A test image to warm up the deployment",
+            width=1024,
+            height=1024,
+            steps=15
+        )
+        
+        return {
+            "success": True,
+            "deployment": result,
+            "warmup_request": warm_up_result
+        }
+    else:
+        raise HTTPException(status_code=500, detail=result.get("error", "Unknown error"))
+
+
+@app.get("/runcomfy/deployments")
+async def runcomfy_list_deployments():
+    """List all RunComfy deployments"""
+    api_token = os.environ.get("RUNCOMFY_API_TOKEN")
+    user_id = os.environ.get("RUNCOMFY_USER_ID")
+    
+    if not api_token or not user_id:
+        raise HTTPException(status_code=401, detail="RunComfy API credentials not found")
+    
+    tester = get_tester(api_token, user_id)
+    result = await tester.list_deployments()
+    
+    if result["success"]:
+        return result["deployments"]
+    else:
+        raise HTTPException(status_code=500, detail=result.get("error", "Unknown error"))
+
+
+@app.delete("/runcomfy/deployment/{deployment_id}")
+async def runcomfy_delete_deployment(deployment_id: str):
+    """Delete a RunComfy deployment"""
+    api_token = os.environ.get("RUNCOMFY_API_TOKEN")
+    user_id = os.environ.get("RUNCOMFY_USER_ID")
+    
+    if not api_token or not user_id:
+        raise HTTPException(status_code=401, detail="RunComfy API credentials not found")
+    
+    tester = get_tester(api_token, user_id)
+    result = await tester.delete_deployment(deployment_id)
+    
+    if result["success"]:
+        return result
+    else:
+        raise HTTPException(status_code=500, detail=result.get("error", "Unknown error"))
+
+
+@app.post("/runcomfy/send_workflow")
+async def runcomfy_send_workflow(
+    deployment_id: str,
+    prompt: Optional[str] = None,
+    width: Optional[int] = None,
+    height: Optional[int] = None,
+    depth_strength: Optional[float] = None,
+    canny_strength: Optional[float] = None,
+    steps: Optional[int] = None
+):
+    """Send a workflow to RunComfy deployment"""
+    api_token = os.environ.get("RUNCOMFY_API_TOKEN")
+    user_id = os.environ.get("RUNCOMFY_USER_ID")
+    
+    if not api_token or not user_id:
+        raise HTTPException(status_code=401, detail="RunComfy API credentials not found")
+    
+    # Read from session.json if parameters not provided
+    project_root = Path(__file__).parent.parent
+    session_path = project_root / "data" / "temp" / "session.json"
+    
+    if session_path.exists():
+        with open(session_path, "r") as f:
+            session_data = json.load(f)
+        
+        if prompt is None:
+            prompt = session_data.get("global_prompt", "A beautiful landscape")
+        if width is None:
+            width = session_data.get("resolution", {}).get("width", 1024)
+        if height is None:
+            height = session_data.get("resolution", {}).get("height", 1024)
+        if depth_strength is None:
+            depth_strength = session_data.get("depth_influence", 1.0)
+        if canny_strength is None:
+            canny_strength = session_data.get("silhouette_influence", 1.0)
+        if steps is None:
+            steps = session_data.get("steps", 15)
+    
+    tester = get_tester(api_token, user_id)
+    result = await tester.send_workflow(
+        deployment_id=deployment_id,
+        prompt=prompt or "A beautiful landscape",
+        width=width or 1024,
+        height=height or 1024,
+        depth_strength=depth_strength or 1.0,
+        canny_strength=canny_strength or 1.0,
+        steps=steps or 15
+    )
+    
+    if result["success"]:
+        return result
+    else:
+        raise HTTPException(status_code=500, detail=result.get("error", "Unknown error"))
+
+
+@app.get("/runcomfy/status/{deployment_id}/{request_id}")
+async def runcomfy_check_status(deployment_id: str, request_id: str):
+    """Check status of a RunComfy request"""
+    api_token = os.environ.get("RUNCOMFY_API_TOKEN")
+    user_id = os.environ.get("RUNCOMFY_USER_ID")
+    
+    if not api_token or not user_id:
+        raise HTTPException(status_code=401, detail="RunComfy API credentials not found")
+    
+    tester = get_tester(api_token, user_id)
+    result = await tester.check_status(deployment_id, request_id)
+    
+    if result["success"]:
+        return result["data"]
+    else:
+        raise HTTPException(status_code=500, detail=result.get("error", "Unknown error"))
+
+
+@app.get("/runcomfy/result/{deployment_id}/{request_id}")
+async def runcomfy_get_result(deployment_id: str, request_id: str):
+    """Get result of a completed RunComfy request"""
+    api_token = os.environ.get("RUNCOMFY_API_TOKEN")
+    user_id = os.environ.get("RUNCOMFY_USER_ID")
+    
+    if not api_token or not user_id:
+        raise HTTPException(status_code=401, detail="RunComfy API credentials not found")
+    
+    tester = get_tester(api_token, user_id)
+    result = await tester.get_result(deployment_id, request_id)
+    
+    if result["success"]:
+        return result["data"]
+    else:
+        raise HTTPException(status_code=500, detail=result.get("error", "Unknown error"))
+
+
+# ============================================
+# DEBUG ENDPOINTS
+# ============================================
 
 @app.post("/debug/send_workflow")
 async def debug_send_workflow(background_tasks: BackgroundTasks):

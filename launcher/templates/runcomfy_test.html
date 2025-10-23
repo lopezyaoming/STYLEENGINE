@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RunComfy Cloud Test - Style Engine</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: #333;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .header p {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+
+        .card h2 {
+            color: #667eea;
+            margin-bottom: 15px;
+            font-size: 1.5em;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: 600;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .status-box {
+            background: #f8f9fa;
+            border-left: 4px solid #667eea;
+            padding: 15px;
+            margin-top: 15px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .status-box.success {
+            border-left-color: #28a745;
+            background: #d4edda;
+        }
+
+        .status-box.error {
+            border-left-color: #dc3545;
+            background: #f8d7da;
+        }
+
+        .deployment-item {
+            background: #f8f9fa;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 8px;
+            border: 1px solid #dee2e6;
+        }
+
+        .deployment-item h3 {
+            color: #667eea;
+            margin-bottom: 8px;
+        }
+
+        .deployment-item p {
+            margin: 5px 0;
+            font-size: 14px;
+        }
+
+        .deployment-item small {
+            color: #6c757d;
+        }
+
+        .deployment-actions {
+            margin-top: 10px;
+            display: flex;
+            gap: 10px;
+        }
+
+        .deployment-actions button {
+            padding: 8px 16px;
+            font-size: 14px;
+        }
+
+        .input-group {
+            margin: 15px 0;
+        }
+
+        .input-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #495057;
+        }
+
+        .input-group input, .input-group textarea {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #dee2e6;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        .input-group input:focus, .input-group textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .loader {
+            display: none;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .info-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            background: #667eea;
+            color: white;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-left: 10px;
+        }
+
+        .back-link {
+            text-align: center;
+            margin-top: 30px;
+        }
+
+        .back-link a {
+            color: white;
+            text-decoration: none;
+            font-size: 16px;
+            padding: 10px 20px;
+            border: 2px solid white;
+            border-radius: 8px;
+            display: inline-block;
+            transition: all 0.3s;
+        }
+
+        .back-link a:hover {
+            background: white;
+            color: #667eea;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>☁️ RunComfy Cloud Test</h1>
+            <p>Deploy and test Style Engine workflows in the cloud</p>
+        </div>
+
+        <!-- Credentials Check -->
+        <div class="card">
+            <h2>🔑 Credentials Status</h2>
+            <div id="credentialsStatus" class="status-box">
+                Checking credentials...
+            </div>
+        </div>
+
+        <!-- Deployment Management -->
+        <div class="card">
+            <h2>🚀 Deployment Management</h2>
+            <div class="button-group">
+                <button onclick="createDeployment()" id="createBtn">Create New Deployment</button>
+                <button onclick="refreshDeployments()">Refresh Deployments</button>
+            </div>
+            <div class="loader" id="deploymentLoader"></div>
+            <div id="deploymentsList"></div>
+        </div>
+
+        <!-- Workflow Testing -->
+        <div class="card">
+            <h2>🎨 Test Workflow</h2>
+            <div class="input-group">
+                <label>Deployment ID:</label>
+                <input type="text" id="testDeploymentId" placeholder="Enter deployment ID or select from list above">
+            </div>
+            <div class="input-group">
+                <label>Prompt:</label>
+                <textarea id="testPrompt" rows="3" placeholder="Enter your prompt (optional - will use session data if empty)"></textarea>
+            </div>
+            <div class="button-group">
+                <button onclick="sendTestWorkflow()">Send Workflow</button>
+                <button onclick="useSessionData()">Use Session Data</button>
+            </div>
+            <div class="loader" id="workflowLoader"></div>
+            <div id="workflowStatus" class="status-box" style="display:none;"></div>
+        </div>
+
+        <!-- Results -->
+        <div class="card">
+            <h2>📊 Results</h2>
+            <div id="resultsArea" class="status-box">
+                No results yet. Run a workflow to see results here.
+            </div>
+        </div>
+
+        <div class="back-link">
+            <a href="/">← Back to Main Dashboard</a>
+        </div>
+    </div>
+
+    <script>
+        let currentDeployments = [];
+        let currentRequestId = null;
+        let currentDeploymentId = null;
+        let statusCheckInterval = null;
+
+        // Check credentials on load
+        window.onload = async function() {
+            await checkCredentials();
+            await refreshDeployments();
+        };
+
+        async function checkCredentials() {
+            const statusDiv = document.getElementById('credentialsStatus');
+            try {
+                // Try to list deployments to check if credentials work
+                const response = await fetch('/runcomfy/deployments');
+                if (response.ok) {
+                    statusDiv.className = 'status-box success';
+                    statusDiv.textContent = '✅ Credentials valid - Ready to deploy!';
+                } else {
+                    statusDiv.className = 'status-box error';
+                    statusDiv.textContent = '❌ Credentials not found. Please set RUNCOMFY_API_TOKEN and RUNCOMFY_USER_ID environment variables.';
+                }
+            } catch (error) {
+                statusDiv.className = 'status-box error';
+                statusDiv.textContent = `❌ Error checking credentials: ${error.message}`;
+            }
+        }
+
+        async function createDeployment() {
+            const btn = document.getElementById('createBtn');
+            const loader = document.getElementById('deploymentLoader');
+            
+            btn.disabled = true;
+            loader.style.display = 'block';
+
+            try {
+                const response = await fetch('/runcomfy/create_deployment', {
+                    method: 'POST'
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.success) {
+                    alert(`✅ Deployment created!\n\nDeployment ID: ${data.deployment.deployment_id}\n\nA warm-up request has been sent to load models.`);
+                    await refreshDeployments();
+                } else {
+                    alert(`❌ Error: ${data.detail || 'Failed to create deployment'}`);
+                }
+            } catch (error) {
+                alert(`❌ Error: ${error.message}`);
+            } finally {
+                btn.disabled = false;
+                loader.style.display = 'none';
+            }
+        }
+
+        async function refreshDeployments() {
+            const loader = document.getElementById('deploymentLoader');
+            const listDiv = document.getElementById('deploymentsList');
+            
+            loader.style.display = 'block';
+
+            try {
+                const response = await fetch('/runcomfy/deployments');
+                const deployments = await response.json();
+
+                currentDeployments = deployments;
+
+                if (deployments.length === 0) {
+                    listDiv.innerHTML = '<p style="text-align:center; color:#6c757d; padding:20px;">No deployments found. Create one to get started!</p>';
+                } else {
+                    listDiv.innerHTML = deployments.map(dep => `
+                        <div class="deployment-item">
+                            <h3>${dep.name || 'Unnamed'} <span class="info-badge">${dep.status}</span></h3>
+                            <p><strong>ID:</strong> <code>${dep.id}</code></p>
+                            <p><strong>Hardware:</strong> ${dep.hardware.join(', ')}</p>
+                            <p><strong>Instances:</strong> ${dep.min_instances} - ${dep.max_instances}</p>
+                            <p><small>Created: ${new Date(dep.created_at).toLocaleString()}</small></p>
+                            <div class="deployment-actions">
+                                <button onclick="selectDeployment('${dep.id}')">Use This</button>
+                                <button onclick="deleteDeployment('${dep.id}')" style="background:#dc3545;">Delete</button>
+                            </div>
+                        </div>
+                    `).join('');
+                }
+            } catch (error) {
+                listDiv.innerHTML = `<p style="color:#dc3545;">Error loading deployments: ${error.message}</p>`;
+            } finally {
+                loader.style.display = 'none';
+            }
+        }
+
+        function selectDeployment(deploymentId) {
+            document.getElementById('testDeploymentId').value = deploymentId;
+            alert(`✅ Selected deployment: ${deploymentId}`);
+        }
+
+        async function deleteDeployment(deploymentId) {
+            if (!confirm('Are you sure you want to delete this deployment?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/runcomfy/deployment/${deploymentId}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    alert('✅ Deployment deleted successfully!');
+                    await refreshDeployments();
+                } else {
+                    const data = await response.json();
+                    alert(`❌ Error: ${data.detail || 'Failed to delete deployment'}`);
+                }
+            } catch (error) {
+                alert(`❌ Error: ${error.message}`);
+            }
+        }
+
+        async function sendTestWorkflow() {
+            const deploymentId = document.getElementById('testDeploymentId').value.trim();
+            const prompt = document.getElementById('testPrompt').value.trim();
+
+            if (!deploymentId) {
+                alert('Please enter a deployment ID or select one from the list above');
+                return;
+            }
+
+            const loader = document.getElementById('workflowLoader');
+            const statusDiv = document.getElementById('workflowStatus');
+            const resultsDiv = document.getElementById('resultsArea');
+
+            loader.style.display = 'block';
+            statusDiv.style.display = 'block';
+            statusDiv.className = 'status-box';
+            statusDiv.textContent = '⏳ Sending workflow to RunComfy...';
+
+            try {
+                const params = new URLSearchParams({ deployment_id: deploymentId });
+                if (prompt) params.append('prompt', prompt);
+
+                const response = await fetch(`/runcomfy/send_workflow?${params}`, {
+                    method: 'POST'
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.success) {
+                    currentRequestId = data.request_id;
+                    currentDeploymentId = deploymentId;
+
+                    statusDiv.className = 'status-box success';
+                    statusDiv.innerHTML = `
+                        ✅ Workflow submitted!<br>
+                        Request ID: ${data.request_id}<br>
+                        Status: <span id="liveStatus">in_queue</span>
+                    `;
+
+                    resultsDiv.textContent = `Monitoring request ${data.request_id}...\nThis may take several minutes, especially on the first run (cold start).`;
+
+                    // Start polling for status
+                    startStatusPolling(deploymentId, data.request_id);
+                } else {
+                    statusDiv.className = 'status-box error';
+                    statusDiv.textContent = `❌ Error: ${data.detail || data.error || 'Failed to send workflow'}`;
+                }
+            } catch (error) {
+                statusDiv.className = 'status-box error';
+                statusDiv.textContent = `❌ Error: ${error.message}`;
+            } finally {
+                loader.style.display = 'none';
+            }
+        }
+
+        function startStatusPolling(deploymentId, requestId) {
+            if (statusCheckInterval) {
+                clearInterval(statusCheckInterval);
+            }
+
+            statusCheckInterval = setInterval(async () => {
+                try {
+                    const response = await fetch(`/runcomfy/status/${deploymentId}/${requestId}`);
+                    const data = await response.json();
+
+                    const liveStatusSpan = document.getElementById('liveStatus');
+                    if (liveStatusSpan) {
+                        liveStatusSpan.textContent = data.status;
+                    }
+
+                    if (data.status === 'completed') {
+                        clearInterval(statusCheckInterval);
+                        await fetchResults(deploymentId, requestId);
+                    } else if (data.status === 'failed' || data.status === 'canceled') {
+                        clearInterval(statusCheckInterval);
+                        document.getElementById('resultsArea').textContent = `❌ Request ${data.status}: ${JSON.stringify(data, null, 2)}`;
+                    }
+                } catch (error) {
+                    console.error('Status check error:', error);
+                }
+            }, 5000); // Check every 5 seconds
+        }
+
+        async function fetchResults(deploymentId, requestId) {
+            const resultsDiv = document.getElementById('resultsArea');
+            resultsDiv.textContent = '⏳ Fetching results...';
+
+            try {
+                const response = await fetch(`/runcomfy/result/${deploymentId}/${requestId}`);
+                const data = await response.json();
+
+                if (data.status === 'succeeded') {
+                    let html = '✅ Generation completed!\n\n';
+                    html += `Outputs:\n`;
+                    
+                    for (const [nodeId, output] of Object.entries(data.outputs || {})) {
+                        if (output.images) {
+                            for (const img of output.images) {
+                                html += `\n📷 ${img.filename}\n`;
+                                html += `URL: ${img.url}\n`;
+                            }
+                        }
+                    }
+
+                    html += `\n\nCreated: ${new Date(data.created_at).toLocaleString()}`;
+                    html += `\nFinished: ${new Date(data.finished_at).toLocaleString()}`;
+                    
+                    resultsDiv.textContent = html;
+                } else {
+                    resultsDiv.textContent = `Result status: ${data.status}\n\n${JSON.stringify(data, null, 2)}`;
+                }
+            } catch (error) {
+                resultsDiv.textContent = `❌ Error fetching results: ${error.message}`;
+            }
+        }
+
+        function useSessionData() {
+            document.getElementById('testPrompt').value = '';
+            alert('✅ Prompt cleared. The workflow will use data from session.json (Blender settings).');
+        }
+
+        // Clean up on page unload
+        window.onbeforeunload = function() {
+            if (statusCheckInterval) {
+                clearInterval(statusCheckInterval);
+            }
+        };
+    </script>
+</body>
+</html>
+

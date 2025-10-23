@@ -1,0 +1,323 @@
+{
+  "3": {
+    "_meta": {
+      "title": "KSampler"
+    },
+    "inputs": {
+      "cfg": 8,
+      "seed": 1092573567718621,
+      "model": [
+        "34",
+        0
+      ],
+      "steps": [
+        "40",
+        0
+      ],
+      "denoise": 0.9500000000000002,
+      "negative": [
+        "14",
+        1
+      ],
+      "positive": [
+        "14",
+        0
+      ],
+      "scheduler": "karras",
+      "latent_image": [
+        "5",
+        0
+      ],
+      "sampler_name": "dpmpp_2m"
+    },
+    "class_type": "KSampler"
+  },
+  "4": {
+    "_meta": {
+      "title": "Load Checkpoint"
+    },
+    "inputs": {
+      "ckpt_name": "sdxl/juggernautXL_version6Rundiffusion.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple"
+  },
+  "5": {
+    "_meta": {
+      "title": "Empty Latent Image"
+    },
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage"
+  },
+  "6": {
+    "_meta": {
+      "title": "CLIP Text Encode (Prompt)"
+    },
+    "inputs": {
+      "clip": [
+        "34",
+        1
+      ],
+      "text": [
+        "39",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode"
+  },
+  "7": {
+    "_meta": {
+      "title": "CLIP Text Encode (Prompt)"
+    },
+    "inputs": {
+      "clip": [
+        "34",
+        1
+      ],
+      "text": "text, watermark, blurry, deformed"
+    },
+    "class_type": "CLIPTextEncode"
+  },
+  "8": {
+    "_meta": {
+      "title": "VAE Decode"
+    },
+    "inputs": {
+      "vae": [
+        "4",
+        2
+      ],
+      "samples": [
+        "3",
+        0
+      ]
+    },
+    "class_type": "VAEDecode"
+  },
+  "9": {
+    "_meta": {
+      "title": "Output"
+    },
+    "inputs": {
+      "images": [
+        "8",
+        0
+      ],
+      "filename_prefix": "ComfyUI"
+    },
+    "class_type": "SaveImage"
+  },
+  "13": {
+    "_meta": {
+      "title": "Load ControlNet Model"
+    },
+    "inputs": {
+      "control_net_name": "sdxl/diffusers_xl_depth_mid.safetensors"
+    },
+    "class_type": "ControlNetLoader"
+  },
+  "14": {
+    "_meta": {
+      "title": "Apply ControlNet"
+    },
+    "inputs": {
+      "vae": [
+        "4",
+        2
+      ],
+      "image": [
+        "31",
+        0
+      ],
+      "negative": [
+        "37",
+        1
+      ],
+      "positive": [
+        "37",
+        0
+      ],
+      "strength": [
+        "41",
+        0
+      ],
+      "control_net": [
+        "13",
+        0
+      ],
+      "end_percent": 1,
+      "start_percent": 0
+    },
+    "class_type": "ControlNetApplyAdvanced"
+  },
+  "15": {
+    "_meta": {
+      "title": "AO"
+    },
+    "inputs": {
+      "image": "Untitled (1).png"
+    },
+    "class_type": "LoadImage"
+  },
+  "25": {
+    "_meta": {
+      "title": "Prompt"
+    },
+    "inputs": {
+      "value": "A dense, dystopian bio-industrial cityscape rises from toxic fog. The architecture fuses retro-futurist machinery and organic decay — stacked cylindrical towers wrapped in corroded pipes, cables, and rusted ducts glowing with neon signage in alien glyphs. The air is thick with vapor and faint smoke, lit by radioactive hues of magenta, cyan, and amber. Graffiti and mismatched signage suggest a hybrid of cyberpunk and junkyard urbanism — scavenged technology repurposed into fragile, pulsating life-support systems."
+    },
+    "class_type": "PrimitiveString"
+  },
+  "31": {
+    "_meta": {
+      "title": "Depth Anything V2"
+    },
+    "inputs": {
+      "images": [
+        "15",
+        0
+      ],
+      "da_model": [
+        "32",
+        0
+      ]
+    },
+    "class_type": "DepthAnything_V2"
+  },
+  "32": {
+    "_meta": {
+      "title": "DownloadAndLoadDepthAnythingV2Model"
+    },
+    "inputs": {
+      "model": "depth_anything_v2_vitl_fp32.safetensors"
+    },
+    "class_type": "DownloadAndLoadDepthAnythingV2Model"
+  },
+  "33": {
+    "_meta": {
+      "title": "Preview Image"
+    },
+    "inputs": {
+      "images": [
+        "31",
+        0
+      ]
+    },
+    "class_type": "PreviewImage"
+  },
+  "34": {
+    "_meta": {
+      "title": "Load LoRA"
+    },
+    "inputs": {
+      "clip": [
+        "4",
+        1
+      ],
+      "model": [
+        "4",
+        0
+      ],
+      "lora_name": "sdxl/xl_more_art-full_v1.safetensors",
+      "strength_clip": 1,
+      "strength_model": 1
+    },
+    "class_type": "LoraLoader"
+  },
+  "36": {
+    "_meta": {
+      "title": "Canny"
+    },
+    "inputs": {
+      "image": [
+        "15",
+        0
+      ],
+      "low_threshold": 0.4,
+      "high_threshold": 0.8
+    },
+    "class_type": "Canny"
+  },
+  "37": {
+    "_meta": {
+      "title": "Apply ControlNet"
+    },
+    "inputs": {
+      "vae": [
+        "4",
+        2
+      ],
+      "image": [
+        "36",
+        0
+      ],
+      "negative": [
+        "7",
+        0
+      ],
+      "positive": [
+        "6",
+        0
+      ],
+      "strength": [
+        "42",
+        0
+      ],
+      "control_net": [
+        "38",
+        0
+      ],
+      "end_percent": 1,
+      "start_percent": 0
+    },
+    "class_type": "ControlNetApplyAdvanced"
+  },
+  "38": {
+    "_meta": {
+      "title": "Load ControlNet Model"
+    },
+    "inputs": {
+      "control_net_name": "sdxl/diffusers_xl_canny_full.safetensors"
+    },
+    "class_type": "ControlNetLoader"
+  },
+  "39": {
+    "_meta": {
+      "title": "Prompt"
+    },
+    "inputs": {
+      "value": "Nighttime view of a dense dystopian gotham city, dramatic lighting, dark hues and sketchy corridors, noir, damp after heavy rain, photorrealistic"
+    },
+    "class_type": "PrimitiveString"
+  },
+  "40": {
+    "_meta": {
+      "title": "Steps"
+    },
+    "inputs": {
+      "value": 15
+    },
+    "class_type": "PrimitiveInt"
+  },
+  "41": {
+    "_meta": {
+      "title": "depthStrength"
+    },
+    "inputs": {
+      "value": 1
+    },
+    "class_type": "PrimitiveFloat"
+  },
+  "42": {
+    "_meta": {
+      "title": "cannyStrength"
+    },
+    "inputs": {
+      "value": 1
+    },
+    "class_type": "PrimitiveFloat"
+  }
+}

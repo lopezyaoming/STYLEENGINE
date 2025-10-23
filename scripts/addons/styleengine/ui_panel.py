@@ -378,6 +378,172 @@ class WM_OT_DeleteGroup(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class WM_OT_ProjectTexture(bpy.types.Operator):
+    """Project AI texture onto all objects from camera view."""
+    bl_idname = "style_engine.project_texture"
+    bl_label = "Project Texture"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    def execute(self, context):
+        # Check if ai_camera exists
+        if "ai_camera" not in bpy.data.objects:
+            self.report({'ERROR'}, "AI Camera not found. Please setup workspace first.")
+            return {'CANCELLED'}
+        
+        ai_camera = bpy.data.objects["ai_camera"]
+        
+        # Get path to current_ai.png
+        import os
+        from pathlib import Path
+        # Go up from: scripts/addons/styleengine/ui_panel.py -> root
+        addon_root = Path(__file__).parent.parent.parent.parent
+        img_path = addon_root / "data" / "temp" / "ai_vision" / "current_ai.png"
+        
+        print(f"[Style Engine] Looking for image at: {img_path}")
+        
+        if not img_path.exists():
+            self.report({'ERROR'}, f"AI image not found at {img_path}")
+            return {'CANCELLED'}
+        
+        print(f"[Style Engine] Found image, loading for projection...")
+        
+        # Load or reload the image
+        img_name = "current_ai.png"
+        if img_name in bpy.data.images:
+            img = bpy.data.images[img_name]
+            img.filepath = str(img_path)
+            img.reload()
+        else:
+            img = bpy.data.images.load(str(img_path))
+            img.name = img_name
+        
+        # Store original state
+        original_active = context.view_layer.objects.active
+        original_selected = list(context.selected_objects)
+        original_mode = context.object.mode if context.object else 'OBJECT'
+        original_camera = context.scene.camera
+        
+        # Make sure we're in object mode
+        if context.object and context.object.mode != 'OBJECT':
+            bpy.ops.object.mode_set(mode='OBJECT')
+        
+        # Get all mesh objects
+        mesh_objects = [obj for obj in context.scene.objects if obj.type == 'MESH']
+        
+        if not mesh_objects:
+            self.report({'WARNING'}, "No mesh objects found in scene")
+            return {'CANCELLED'}
+        
+        # Create or get the shared material
+        mat_name = "projected_material"
+        if mat_name in bpy.data.materials:
+            mat = bpy.data.materials[mat_name]
+            # Update the image in existing material
+            for node in mat.node_tree.nodes:
+                if node.type == 'TEX_IMAGE':
+                    node.image = img
+        else:
+            mat = bpy.data.materials.new(name=mat_name)
+            mat.use_nodes = True
+            nodes = mat.node_tree.nodes
+            links = mat.node_tree.links
+            
+            # Clear default nodes
+            nodes.clear()
+            
+            # Create Principled BSDF
+            bsdf = nodes.new(type='ShaderNodeBsdfPrincipled')
+            bsdf.location = (0, 0)
+            
+            # Create Image Texture node
+            tex_node = nodes.new(type='ShaderNodeTexImage')
+            tex_node.location = (-300, 0)
+            tex_node.image = img
+            
+            # Create Material Output
+            output = nodes.new(type='ShaderNodeOutputMaterial')
+            output.location = (300, 0)
+            
+            # Connect nodes
+            links.new(tex_node.outputs['Color'], bsdf.inputs['Base Color'])
+            links.new(bsdf.outputs['BSDF'], output.inputs['Surface'])
+        
+        # Set ai_camera as the scene camera temporarily
+        context.scene.camera = ai_camera
+        
+        projected_count = 0
+        
+        for obj in mesh_objects:
+            try:
+                # Assign material to object
+                if len(obj.data.materials) == 0:
+                    obj.data.materials.append(mat)
+                else:
+                    obj.data.materials[0] = mat
+                
+                # Deselect all
+                for o in context.selected_objects:
+                    o.select_set(False)
+                
+                # Select and activate this object
+                obj.select_set(True)
+                context.view_layer.objects.active = obj
+                
+                # Enter edit mode for this specific object
+                bpy.ops.object.mode_set(mode='EDIT')
+                
+                # Select all faces
+                bpy.ops.mesh.select_all(action='SELECT')
+                
+                # Project from camera view
+                bpy.ops.uv.project_from_view(
+                    camera_bounds=True,
+                    correct_aspect=True,
+                    scale_to_bounds=False
+                )
+                
+                # Return to object mode
+                bpy.ops.object.mode_set(mode='OBJECT')
+                
+                projected_count += 1
+                print(f"[Style Engine] ✓ Projected texture on {obj.name}")
+                
+            except Exception as e:
+                print(f"[Style Engine] ✗ Error projecting texture on {obj.name}: {e}")
+                # Make sure we're back in object mode
+                if context.object and context.object.mode != 'OBJECT':
+                    try:
+                        bpy.ops.object.mode_set(mode='OBJECT')
+                    except:
+                        pass
+                continue
+        
+        # Restore original camera
+        context.scene.camera = original_camera
+        
+        # Restore original selection
+        for o in context.selected_objects:
+            o.select_set(False)
+        for obj in original_selected:
+            if obj.name in context.scene.objects:
+                obj.select_set(True)
+        
+        if original_active and original_active.name in context.scene.objects:
+            context.view_layer.objects.active = original_active
+        
+        # Restore original mode
+        if original_mode == 'EDIT':
+            try:
+                bpy.ops.object.mode_set(mode='EDIT')
+            except:
+                pass
+        
+        self.report({'INFO'}, f"Projected texture onto {projected_count} objects from AI camera")
+        print(f"[Style Engine] 🎨 Projected texture onto {projected_count} objects")
+        
+        return {'FINISHED'}
+
+
 # ----------------------------------------------------------------
 # 3. UI PANEL
 # ----------------------------------------------------------------
@@ -448,6 +614,10 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
             col = gen_box.column(align=True)
             col.label(text="Global Prompt:")
             col.prop(style_props, "global_prompt", text="")
+            
+            # Project Texture button
+            gen_box.separator()
+            gen_box.operator("style_engine.project_texture", icon='UV')
             
             # Influence section
             gen_box.separator()
@@ -522,6 +692,7 @@ classes = (
     WM_OT_RenameGroup,
     WM_OT_SelectGroup,
     WM_OT_DeleteGroup,
+    WM_OT_ProjectTexture,
     VIEW3D_PT_StyleEngine,
 )
 
