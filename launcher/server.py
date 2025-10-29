@@ -113,6 +113,29 @@ def inject_workflow_data(workflow: dict, session_data: dict) -> dict:
     if "42" in workflow and "inputs" in workflow["42"]:
         workflow["42"]["inputs"]["value"] = steps
     
+    # IPAdapter nodes (if present in workflow)
+    ipadapter = session_data.get("ipadapter", {})
+    if ipadapter.get("enabled", False):
+        # Node 43: LoadImage - Reference image
+        if "43" in workflow and "inputs" in workflow["43"]:
+            ref_image = ipadapter.get("reference_image", "")
+            if ref_image:
+                # Use just the filename (already copied to input folder)
+                workflow["43"]["inputs"]["image"] = Path(ref_image).name
+                print(f"[Style Engine] IPAdapter - Reference image: {Path(ref_image).name}")
+        
+        # Node 49: IPAdapterEmbeds - Weight type
+        if "49" in workflow and "inputs" in workflow["49"]:
+            weight_type = ipadapter.get("weight_type", "style transfer")
+            workflow["49"]["inputs"]["weight_type"] = weight_type
+            print(f"[Style Engine] IPAdapter - Mode: {weight_type}")
+        
+        # Node 52: PrimitiveFloat - IPAdapter strength
+        if "52" in workflow and "inputs" in workflow["52"]:
+            strength = ipadapter.get("strength", 0.75)
+            workflow["52"]["inputs"]["value"] = strength
+            print(f"[Style Engine] IPAdapter - Strength: {strength}")
+    
     return workflow
 
 
@@ -122,12 +145,31 @@ async def send_workflow_internal(project_root: Path, depth_image_path: Path, ses
     Returns (success: bool, prompt_id: str, message: str)
     """
     global _active_workflow, _generation_in_progress
-    workflow_path = project_root / "ComfyUI" / "workflows" / _active_workflow
+    
+    # Select workflow based on IPAdapter settings
+    ipadapter = session_data.get("ipadapter", {})
+    if ipadapter.get("enabled", False) and ipadapter.get("reference_image", ""):
+        selected_workflow = "IPAdapterworkflow.json"
+        print(f"[Style Engine] Using IPAdapter workflow (reference: {Path(ipadapter['reference_image']).name})")
+    else:
+        selected_workflow = _active_workflow
+        print(f"[Style Engine] Using base workflow: {selected_workflow}")
+    
+    workflow_path = project_root / "ComfyUI" / "workflows" / selected_workflow
     
     try:
         # Step 1: Copy combined pass to ComfyUI input folder
         comfy_combined_path = comfy_input_dir / "combined0001.png"
         shutil.copy2(depth_image_path, comfy_combined_path)
+        
+        # Step 1b: Copy reference image if IPAdapter is enabled
+        if ipadapter.get("enabled", False):
+            ref_image_path = ipadapter.get("reference_image", "")
+            if ref_image_path and Path(ref_image_path).exists():
+                ref_filename = Path(ref_image_path).name
+                comfy_ref_path = comfy_input_dir / ref_filename
+                shutil.copy2(ref_image_path, comfy_ref_path)
+                print(f"[Style Engine] Copied reference image: {ref_filename}")
         
         # Step 2: Read the workflow
         with open(workflow_path, 'r') as f:

@@ -65,6 +65,12 @@ def write_session_json(context):
             "depth_influence": round(props.depth_influence, 3),
             "silhouette_influence": round(props.silhouette_influence, 3),
             "steps": props.steps,
+            "ipadapter": {
+                "enabled": props.use_ipadapter if hasattr(props, 'use_ipadapter') else False,
+                "reference_image": props.ipadapter_reference_image if hasattr(props, 'ipadapter_reference_image') else "",
+                "weight_type": props.ipadapter_weight_type if hasattr(props, 'ipadapter_weight_type') else "style transfer",
+                "strength": round(props.ipadapter_strength, 2) if hasattr(props, 'ipadapter_strength') else 0.75
+            },
             "objects": [
                 {
                     "group_id": f"grp-{group.name.lower().replace(' ', '-')}-{str(idx+1).zfill(3)}",
@@ -533,8 +539,13 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
         
         # Enable required render passes FIRST
         view_layer = context.view_layer
-        view_layer.use_pass_z = True  # Depth (Z)
+        view_layer.use_pass_mist = True  # Mist pass (instead of Z)
         view_layer.use_pass_ambient_occlusion = True  # AO
+        
+        # Configure Mist settings for better control
+        scene.world.mist_settings.start = 0.0
+        scene.world.mist_settings.depth = 100.0  # Adjust based on scene scale
+        scene.world.mist_settings.falloff = 'LINEAR'
         
         # Enable compositor
         scene.use_nodes = True
@@ -548,19 +559,18 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
         render_layers = nodes.new(type='CompositorNodeRLayers')
         render_layers.location = (0, 0)
         
-        # Create Normalize node for depth
-        normalize = nodes.new(type='CompositorNodeNormalize')
-        normalize.location = (300, -200)
-        
-        # Create Color Ramp node (flips the depth mapping)
+        # Create Color Ramp node (inverts mist with tight range)
         color_ramp = nodes.new(type='CompositorNodeValToRGB')
-        color_ramp.location = (500, -200)
+        color_ramp.location = (400, -200)
         
-        # Configure color ramp to flip depth (white to black)
-        color_ramp.color_ramp.elements[0].position = 0.0
-        color_ramp.color_ramp.elements[0].color = (1, 1, 1, 1)  # White at start
-        color_ramp.color_ramp.elements[1].position = 1.0
-        color_ramp.color_ramp.elements[1].color = (0, 0, 0, 1)  # Black at end
+        # Configure color ramp with inverted colors and tight range
+        # Color stop 0: position 0.000, white (near)
+        color_ramp.color_ramp.elements[0].position = 0.000
+        color_ramp.color_ramp.elements[0].color = (1, 1, 1, 1)  # White
+        
+        # Color stop 1: position 0.010, black (far)
+        color_ramp.color_ramp.elements[1].position = 0.010
+        color_ramp.color_ramp.elements[1].color = (0, 0, 0, 1)  # Black
         
         # Create File Output node
         file_output = nodes.new(type='CompositorNodeOutputFile')
@@ -594,9 +604,8 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
         # Create links
         links = scene.node_tree.links
         
-        # Connect Render Layers -> Normalize -> Color Ramp -> File Output (depth)
-        links.new(render_layers.outputs['Depth'], normalize.inputs['Value'])
-        links.new(normalize.outputs['Value'], color_ramp.inputs['Fac'])
+        # Connect Render Layers Mist -> Color Ramp -> File Output (depth)
+        links.new(render_layers.outputs['Mist'], color_ramp.inputs['Fac'])
         links.new(color_ramp.outputs['Image'], file_output.inputs['depth'])
         
         # Connect other passes
@@ -605,7 +614,8 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
         
         print(f"[Style Engine] Compositor setup complete")
         print(f"[Style Engine] Render passes output to: {passes_path}")
-        print(f"[Style Engine] Enabled passes: Combined, Depth (Z), AO")
+        print(f"[Style Engine] Enabled passes: Combined, Mist (depth), AO")
+        print(f"[Style Engine] Mist range: 0.0 - 100.0, Color ramp: 0.000 (white) to 0.010 (black)")
 
 
 class WM_OT_StopAutoRefresh(bpy.types.Operator):

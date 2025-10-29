@@ -36,6 +36,13 @@ The `session.json` file is the central communication hub between Style Engine (B
   "global_prompt": "string",
   "depth_influence": float (0.0 - 1.0),
   "silhouette_influence": float (0.0 - 1.0),
+  "steps": integer (15 - 30),
+  "ipadapter": {
+    "enabled": boolean,
+    "reference_image": "string",
+    "weight_type": "string (enum)",
+    "strength": float (0.0 - 1.5)
+  },
   "objects": [
     {
       "group_id": "string",
@@ -259,6 +266,109 @@ Defines the output resolution for AI-generated images.
   - Preventing "melting" effects in abstract styles
   - Architectural projects typically use higher values
 - **Technical**: Affects ambient occlusion pass weight in AI pipeline
+
+---
+
+### `steps`
+- **Type**: Integer (15 to 30)
+- **Purpose**: Number of AI generation steps/iterations
+- **Set By**: User in "Influence" section
+- **Default**: `15`
+- **Range**: `15` (fast, lower quality) to `30` (slow, higher quality)
+- **Use Case**:
+  - Controls generation quality vs. speed trade-off
+  - Higher steps = more refined details, longer generation time
+  - Lower steps = faster iteration, good for previews
+  - Typical settings: 15 for previews, 20-25 for production
+- **Technical**: Passed directly to ComfyUI sampler node
+
+---
+
+### `ipadapter` Object
+
+Advanced feature for reference image-based generation. Allows AI to use a reference image for style transfer, composition guidance, or identity preservation.
+
+#### `ipadapter.enabled`
+- **Type**: Boolean
+- **Purpose**: Enable/disable IPAdapter workflow
+- **Set By**: "Use image reference" checkbox in UI
+- **Default**: `false`
+- **Use Case**:
+  - Switch between base workflow (SDXLworkflow.json) and IPAdapter workflow (IPAdapterworkflow.json)
+  - When `true`, reference image influences generation
+  - When `false`, standard workflow is used
+- **Workflow Logic**: 
+  ```python
+  if ipadapter.enabled and ipadapter.reference_image:
+      use_workflow("IPAdapterworkflow.json")
+  else:
+      use_workflow("SDXLworkflow.json")
+  ```
+
+#### `ipadapter.reference_image`
+- **Type**: String (file path)
+- **Purpose**: Path to reference image file
+- **Set By**: File picker in IPAdapter section
+- **Default**: `""` (empty)
+- **Example**: `"C:/projects/references/gothic_style.jpg"`
+- **Supported Formats**: PNG, JPG, JPEG
+- **Use Case**:
+  - Apply artistic style from reference photo
+  - Match material appearance from real-world samples
+  - Maintain character/object consistency across generations
+  - Transfer lighting mood from reference
+- **Technical**: 
+  - Local ComfyUI: File is copied to `ComfyUI/input/` folder
+  - Cloud (RunComfy): File is Base64 encoded and sent in API request
+  - Recommended size: <10MB, ideally 1024x1024 to 2048x2048
+
+#### `ipadapter.weight_type`
+- **Type**: String (enum)
+- **Purpose**: Defines how reference image influences generation
+- **Set By**: "Mode" dropdown in IPAdapter section
+- **Default**: `"style transfer"`
+- **Options**:
+  - `"style transfer"` - Apply artistic style (colors, textures, mood)
+  - `"composition"` - Use reference for layout and structure
+  - `"strong style transfer"` - Aggressive style application (maximum influence)
+- **Use Case Examples**:
+  - **Style Transfer**: Apply painting style to 3D render
+  - **Composition**: Match camera angle and object placement
+  - **Strong Style Transfer**: Heavily stylize output to match reference
+- **Technical**: Passed to `IPAdapterEmbeds` node (Node 49) `weight_type` input
+
+#### `ipadapter.strength`
+- **Type**: Float (0.0 to 1.5)
+- **Purpose**: Controls influence intensity of reference image
+- **Set By**: "Strength" slider in IPAdapter section
+- **Default**: `0.75`
+- **Range**:
+  - `0.0` = No IPAdapter influence (effectively disabled)
+  - `0.5` = Subtle influence
+  - `1.0` = Strong influence (recommended max for most cases)
+  - `1.5` = Maximum influence (may overpower other controls)
+- **Use Case**:
+  - Fine-tune balance between reference and prompt
+  - Lower values for subtle style hints
+  - Higher values for dramatic transformations
+- **Technical**: Passed to `PrimitiveFloat` node (Node 52) → `IPAdapterEmbeds` weight
+
+**IPAdapter Requirements**:
+- Models needed (for local ComfyUI):
+  - `ip-adapter-plus_sdxl_vit-h.bin` (~3.7GB)
+  - `CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors` (~1.7GB)
+- Additional VRAM: ~2GB
+- Generation time increase: +5-10 seconds
+
+**IPAdapter Workflow Nodes** (IPAdapterworkflow.json):
+- Node 43: LoadImage (reference image)
+- Node 44: ImageResizeKJv2 (resize to 1024x1024)
+- Node 45: IPAdapterModelLoader
+- Node 46: CLIPVisionLoader
+- Node 47: PrepImageForClipVision
+- Node 48: IPAdapterEncoder
+- Node 49: IPAdapterEmbeds (applies to model)
+- Node 52: PrimitiveFloat (strength control)
 
 ---
 

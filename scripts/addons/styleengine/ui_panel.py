@@ -3,6 +3,8 @@
 # ================================================================
 
 import bpy
+import shutil
+from pathlib import Path
 from . import utils
 from . import workspace_setup
 
@@ -90,7 +92,7 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         description="Expand or collapse the groups section",
         default=True
     )
-    
+
     active_group_index: bpy.props.IntProperty(
         name="Active Group Index",
         description="Currently selected group",
@@ -162,11 +164,18 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         update=update_refresh_viewport
     )
     
+    def update_auto_generate(self, context):
+        """Update auto-generate and sync refresh_viewport."""
+        # Sync refresh_viewport with auto_generate
+        self.refresh_viewport = self.auto_generate
+        # Update session JSON
+        self.update_session_json(context)
+    
     auto_generate: bpy.props.BoolProperty(
         name="Auto-Generate AI",
-        description="Automatically send workflow to ComfyUI when render passes update",
+        description="Automatically send workflow to ComfyUI when render passes update (also enables viewport refresh)",
         default=False,
-        update=update_session_json
+        update=update_auto_generate
     )
     
     def update_background_opacity(self, context):
@@ -205,6 +214,60 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
             ('1536x640', '1536 x 640', 'Landscape wide'),
         ],
         default='1024x1024',
+        update=update_session_json
+    )
+    
+    save_iterations: bpy.props.BoolProperty(
+        name="Save Iterations",
+        description="Automatically save iteration snapshots with their corresponding AI images",
+        default=True
+    )
+    
+    # IPAdapter properties
+    show_ipadapter: bpy.props.BoolProperty(
+        name="Show IPAdapter",
+        description="Expand or collapse the IPAdapter section",
+        default=False
+    )
+    
+    use_ipadapter: bpy.props.BoolProperty(
+        name="Use image reference",
+        description="Enable IPAdapter workflow with reference image guidance",
+        default=False,
+        update=update_session_json
+    )
+    
+    ipadapter_reference_image: bpy.props.StringProperty(
+        name="Reference Image",
+        description="Path to reference image for style/composition guidance",
+        default="",
+        subtype='FILE_PATH',
+        update=update_session_json
+    )
+    
+    ipadapter_weight_type: bpy.props.EnumProperty(
+        name="Mode",
+        description="IPAdapter application mode",
+        items=[
+            ('style transfer', "Style Transfer", 
+             "Apply artistic style from reference image"),
+            ('composition', "Composition", 
+             "Use reference for layout and structure"),
+            ('strong style transfer', "Strong Style Transfer", 
+             "Aggressive style application")
+        ],
+        default='style transfer',
+        update=update_session_json
+    )
+    
+    ipadapter_strength: bpy.props.FloatProperty(
+        name="Strength",
+        description="IPAdapter influence (0.0=off, 1.5=maximum)",
+        default=0.75,
+        min=0.0,
+        max=1.5,
+        step=5,
+        precision=2,
         update=update_session_json
     )
 
@@ -541,7 +604,174 @@ class WM_OT_ProjectTexture(bpy.types.Operator):
         self.report({'INFO'}, f"Projected texture onto {projected_count} objects from AI camera")
         print(f"[Style Engine] 🎨 Projected texture onto {projected_count} objects")
         
+        # Create iteration snapshot
+        self.create_iteration_snapshot(context, mesh_objects)
+        
         return {'FINISHED'}
+    
+    def create_iteration_snapshot(self, context, mesh_objects):
+        """Create a snapshot of all meshes joined into a single iteration object."""
+        if not mesh_objects:
+            return
+        
+        props = context.scene.style_engine_props
+        
+        # Check if save iterations is enabled
+        if not props.save_iterations:
+            print("[Style Engine] ⏭️ Save Iterations disabled, skipping snapshot")
+            return
+        
+        # Ensure we're in object mode
+        if context.object and context.object.mode != 'OBJECT':
+            bpy.ops.object.mode_set(mode='OBJECT')
+        
+        # Get or create "Iterations" collection
+        if "Iterations" not in bpy.data.collections:
+            iterations_collection = bpy.data.collections.new("Iterations")
+            context.scene.collection.children.link(iterations_collection)
+            print("[Style Engine] Created 'Iterations' collection")
+        else:
+            iterations_collection = bpy.data.collections["Iterations"]
+        
+        # Find next iteration number
+        iteration_num = 0
+        while f"Iteration_{iteration_num:03d}" in bpy.data.objects:
+            iteration_num += 1
+        
+        iteration_name = f"Iteration_{iteration_num:03d}"
+        
+        # Deselect all
+        for obj in context.selected_objects:
+            obj.select_set(False)
+        
+        # Select all mesh objects
+        for obj in mesh_objects:
+            obj.select_set(True)
+        
+        # Set one as active for duplication
+        if mesh_objects:
+            context.view_layer.objects.active = mesh_objects[0]
+        
+        # Get current objects before duplication
+        objects_before = set(bpy.data.objects)
+        
+        # Duplicate all selected objects at once
+        bpy.ops.object.duplicate(linked=False)
+        
+        # Find the new duplicated objects
+        objects_after = set(bpy.data.objects)
+        duplicates = list(objects_after - objects_before)
+        
+        print(f"[Style Engine] 📦 Duplicated {len(duplicates)} objects")
+        
+        # Deselect originals, keep duplicates selected
+        for obj in mesh_objects:
+            obj.select_set(False)
+        
+        # Set one as active
+        if duplicates:
+            context.view_layer.objects.active = duplicates[0]
+            
+            # Join all duplicates into one mesh (Ctrl+J equivalent)
+            if len(duplicates) > 1:
+                bpy.ops.object.join()
+            
+            # Get the joined object (active object after join)
+            joined_obj = context.active_object
+            
+            # Rename it
+            joined_obj.name = iteration_name
+            
+            # Unlink from current collection and link to Iterations collection
+            for coll in joined_obj.users_collection:
+                coll.objects.unlink(joined_obj)
+            iterations_collection.objects.link(joined_obj)
+            
+            # Hide from viewport (eye icon in outliner)
+            joined_obj.hide_viewport = True
+            
+            # Disable in renders (camera icon)
+            joined_obj.hide_render = True
+            
+            # Ensure object is not "disabled" (gray font) - keep it selectable
+            joined_obj.hide_select = False
+            
+            # Deselect
+            joined_obj.select_set(False)
+            
+            print(f"[Style Engine] 💾 Created {iteration_name} in Iterations collection")
+            print(f"[Style Engine]    └─ Hidden from viewport (eye icon) and disabled in renders")
+            
+            # Copy AI image to generated folder and assign material
+            self.save_iteration_image_and_material(iteration_name, joined_obj)
+    
+    def save_iteration_image_and_material(self, iteration_name, obj):
+        """Copy the AI image and assign it as the base color material."""
+        try:
+            # Get project root (go up from addon root)
+            addon_root = Path(__file__).parent.parent.parent.parent
+            
+            # Path to current AI image
+            ai_image_path = addon_root / "data" / "temp" / "ai_vision" / "current_ai.png"
+            
+            if not ai_image_path.exists():
+                print(f"[Style Engine] ⚠️ AI image not found at {ai_image_path}")
+                return
+            
+            # Create generated folder if it doesn't exist
+            generated_folder = addon_root / "generated"
+            generated_folder.mkdir(exist_ok=True)
+            
+            # Copy image to generated folder with iteration name
+            dest_image_path = generated_folder / f"{iteration_name}.png"
+            shutil.copy2(ai_image_path, dest_image_path)
+            print(f"[Style Engine] 📸 Saved image: {dest_image_path.name}")
+            
+            # Load the image into Blender
+            if iteration_name in bpy.data.images:
+                bpy.data.images.remove(bpy.data.images[iteration_name])
+            
+            img = bpy.data.images.load(str(dest_image_path))
+            img.name = iteration_name
+            
+            # Create or get material
+            mat_name = f"{iteration_name}_Material"
+            if mat_name in bpy.data.materials:
+                mat = bpy.data.materials[mat_name]
+            else:
+                mat = bpy.data.materials.new(name=mat_name)
+                mat.use_nodes = True
+            
+            # Clear existing nodes and create new setup
+            nodes = mat.node_tree.nodes
+            nodes.clear()
+            
+            # Create nodes
+            output_node = nodes.new(type='ShaderNodeOutputMaterial')
+            output_node.location = (300, 0)
+            
+            bsdf_node = nodes.new(type='ShaderNodeBsdfPrincipled')
+            bsdf_node.location = (0, 0)
+            
+            tex_node = nodes.new(type='ShaderNodeTexImage')
+            tex_node.location = (-300, 0)
+            tex_node.image = img
+            
+            # Connect nodes
+            links = mat.node_tree.links
+            links.new(tex_node.outputs['Color'], bsdf_node.inputs['Base Color'])
+            links.new(bsdf_node.outputs['BSDF'], output_node.inputs['Surface'])
+            
+            # Assign material to object
+            if obj.data.materials:
+                obj.data.materials[0] = mat
+            else:
+                obj.data.materials.append(mat)
+            
+            print(f"[Style Engine] 🎨 Material '{mat_name}' assigned with texture")
+            
+        except Exception as e:
+            print(f"[Style Engine] ❌ Error saving iteration image/material: {e}")
 
 
 # ----------------------------------------------------------------
@@ -561,23 +791,26 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
 
         # --- Workspace Setup (TOP) - COLLAPSIBLE ---
         setup_box = layout.box()
-        row = setup_box.row(align=True)
+        header_row = setup_box.row(align=True)
         icon = 'TRIA_DOWN' if style_props.show_workspace_setup else 'TRIA_RIGHT'
-        row.prop(style_props, "show_workspace_setup", text="Workspace Setup", icon=icon, emboss=False)
+        header_row.prop(style_props, "show_workspace_setup", text="Workspace Setup", icon=icon, emboss=False, toggle=True)
         
         if style_props.show_workspace_setup:
-            # Session ID
-            row = setup_box.row(align=True)
-            row.label(text="Session ID:")
-            row.prop(style_props, "library_id", text="")
+            # # Session ID - COMMENTED OUT
+            # row = setup_box.row(align=True)
+            # row.label(text="Session ID:")
+            # row.prop(style_props, "library_id", text="")
+            # 
+            # setup_box.separator()
             
-            setup_box.separator()
             setup_box.operator("style_engine.setup_workspace", icon='WINDOW')
             
-            # Auto-refresh checkbox
-            setup_box.prop(style_props, "refresh_viewport", icon='FILE_REFRESH')
+            # # Auto-refresh checkbox - COMMENTED OUT (now automatic with Auto-Generate)
+            # setup_box.prop(style_props, "refresh_viewport", icon='FILE_REFRESH')
+            # 
+            # setup_box.separator()
             
-            # Auto-generate AI checkbox
+            # Auto-generate AI checkbox (also controls refresh viewport)
             setup_box.prop(style_props, "auto_generate", icon='PLAY')
             
             # Background opacity slider
@@ -590,6 +823,10 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
             setup_box.label(text="Set Resolution:")
             setup_box.prop(style_props, "ai_resolution", text="")
             
+            # Save Iterations checkbox
+            setup_box.separator()
+            setup_box.prop(style_props, "save_iterations", icon='FILE_TICK')
+            
             # Output path
             setup_box.separator()
             setup_box.label(text="Output Path:")
@@ -598,22 +835,28 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
         # --- Image Generation - COLLAPSIBLE ---
         layout.separator()
         gen_box = layout.box()
-        row = gen_box.row(align=True)
+        header_row = gen_box.row(align=True)
         icon = 'TRIA_DOWN' if style_props.show_image_generation else 'TRIA_RIGHT'
-        row.prop(style_props, "show_image_generation", text="Image Generation", icon=icon, emboss=False)
+        header_row.prop(style_props, "show_image_generation", text="Image Generation", icon=icon, emboss=False, toggle=True)
         
         if style_props.show_image_generation:
-            # Lookup
-            gen_box.separator()
-            col = gen_box.column(align=True)
-            col.label(text="Lookup:")
-            col.prop(style_props, "lookup", text="")
+            # # Lookup - COMMENTED OUT
+            # gen_box.separator()
+            # col = gen_box.column(align=True)
+            # col.label(text="Lookup:")
+            # col.prop(style_props, "lookup", text="")
             
             # Global Prompt
             gen_box.separator()
             col = gen_box.column(align=True)
             col.label(text="Global Prompt:")
             col.prop(style_props, "global_prompt", text="")
+            
+            # Steps (moved out of Influence)
+            gen_box.separator()
+            col = gen_box.column(align=True)
+            col.label(text="Steps:")
+            col.prop(style_props, "steps", slider=True, text="")
             
             # Project Texture button
             gen_box.separator()
@@ -625,51 +868,90 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
             influence_box.label(text="Influence", icon='SHADERFX')
             influence_box.prop(style_props, "depth_influence", slider=True)
             influence_box.prop(style_props, "silhouette_influence", slider=True)
-            influence_box.separator()
-            influence_box.prop(style_props, "steps", slider=True)
             
-            # Groups section
+            # Image Reference section - COLLAPSIBLE
             gen_box.separator()
-            groups_box = gen_box.box()
-            row = groups_box.row(align=True)
-
-            icon = 'TRIA_DOWN' if style_props.show_groups else 'TRIA_RIGHT'
-            row.prop(style_props, "show_groups", text="Groups", icon=icon, emboss=False)
-
-            if style_props.show_groups:
-                # Group controls
-                control_row = groups_box.row(align=True)
-                control_row.operator("style_engine.add_group", icon='ADD', text="Add")
-                control_row.operator("style_engine.assign_group", icon='LINK_BLEND', text="Assign")
-                control_row.operator("style_engine.rename_group", icon='GREASEPENCIL', text="Rename")
-                control_row.operator("style_engine.delete_group", icon='TRASH', text="Delete")
+            ipadapter_box = gen_box.box()
+            header_row = ipadapter_box.row(align=True)
+            icon = 'TRIA_DOWN' if style_props.show_ipadapter else 'TRIA_RIGHT'
+            header_row.prop(style_props, "show_ipadapter", text="Image Reference", icon=icon, emboss=False, toggle=True)
+            
+            if style_props.show_ipadapter:
+                # Enable checkbox
+                ipadapter_box.prop(style_props, "use_ipadapter", icon='IMAGE_DATA')
                 
-                groups_box.separator()
-                
-                # Show message if no groups
-                if len(style_props.object_groups) == 0:
-                    groups_box.label(text="No groups. Click 'Add' to create one.", icon='INFO')
-                else:
-                    # Dynamic groups display
-                    header = groups_box.row()
-                    header.label(text="")  # Selection column
-                    header.label(text="Group Name")
-                    header.label(text="Keywords")
+                # Only show controls if enabled
+                if style_props.use_ipadapter:
+                    ipadapter_box.separator()
                     
-                    # Display all groups dynamically
-                    for idx, group in enumerate(style_props.object_groups):
-                        row = groups_box.row(align=True)
-                        
-                        # Selection radio button
-                        selected = style_props.active_group_index == idx
-                        row.operator("style_engine.select_group", text="", icon='RADIOBUT_ON' if selected else 'RADIOBUT_OFF', emboss=False).group_index = idx
-                        
-                        # Group name
-                        row.label(text=group.name.upper())
-                        
-                        # Keywords input
-                        row.prop(group, "keywords", text="")
-        
+                    # Reference image file picker
+                    col = ipadapter_box.column(align=True)
+                    col.label(text="Reference Image:")
+                    col.prop(style_props, "ipadapter_reference_image", text="")
+                    
+                    # Show filename if set
+                    if style_props.ipadapter_reference_image:
+                        import os
+                        filename = os.path.basename(style_props.ipadapter_reference_image)
+                        col.label(text=f"📷 {filename}", icon='NONE')
+                    
+                    ipadapter_box.separator()
+                    
+                    # Weight type dropdown
+                    ipadapter_box.label(text="Mode:")
+                    ipadapter_box.prop(style_props, "ipadapter_weight_type", text="")
+                    
+                    ipadapter_box.separator()
+                    
+                    # Strength slider
+                    ipadapter_box.label(text="Strength:")
+                    ipadapter_box.prop(style_props, "ipadapter_strength", slider=True, text="")
+                    col = ipadapter_box.column(align=True)
+                    col.scale_y = 0.7
+                    col.label(text="(0.0 = Off, 1.5 = Max)")
+            
+            # # Groups section - COMMENTED OUT FOR NOW
+            # gen_box.separator()
+            # groups_box = gen_box.box()
+            # row = groups_box.row(align=True)
+            #
+            # icon = 'TRIA_DOWN' if style_props.show_groups else 'TRIA_RIGHT'
+            # row.prop(style_props, "show_groups", text="Groups", icon=icon, emboss=False)
+            #
+            # if style_props.show_groups:
+            #     # Group controls
+            #     control_row = groups_box.row(align=True)
+            #     control_row.operator("style_engine.add_group", icon='ADD', text="Add")
+            #     control_row.operator("style_engine.assign_group", icon='LINK_BLEND', text="Assign")
+            #     control_row.operator("style_engine.rename_group", icon='GREASEPENCIL', text="Rename")
+            #     control_row.operator("style_engine.delete_group", icon='TRASH', text="Delete")
+            #     
+            #     groups_box.separator()
+            #     
+            #     # Show message if no groups
+            #     if len(style_props.object_groups) == 0:
+            #         groups_box.label(text="No groups. Click 'Add' to create one.", icon='INFO')
+            #     else:
+            #         # Dynamic groups display
+            #         header = groups_box.row()
+            #         header.label(text="")  # Selection column
+            #         header.label(text="Group Name")
+            #         header.label(text="Keywords")
+            #         
+            #         # Display all groups dynamically
+            #         for idx, group in enumerate(style_props.object_groups):
+            #             row = groups_box.row(align=True)
+            #             
+            #             # Selection radio button
+            #             selected = style_props.active_group_index == idx
+            #             row.operator("style_engine.select_group", text="", icon='RADIOBUT_ON' if selected else 'RADIOBUT_OFF', emboss=False).group_index = idx
+            #             
+            #             # Group name
+            #             row.label(text=group.name.upper())
+            #             
+            #             # Keywords input
+            #             row.prop(group, "keywords", text="")
+
         # --- Action Buttons ---
         layout.separator()
         button_row = layout.row(align=True)
