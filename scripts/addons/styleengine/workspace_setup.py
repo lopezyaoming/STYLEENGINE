@@ -651,6 +651,206 @@ class WM_OT_StartAutoRefresh(bpy.types.Operator):
 
 
 # ----------------------------------------------------------------
+# CLOUD GENERATION (RunComfy)
+# ----------------------------------------------------------------
+
+def generate_ai_image_cloud(context):
+    """
+    Cloud generation using RunComfy API.
+    This function replaces the local FastAPI/ComfyUI workflow.
+    """
+    from . import runcomfy_polling
+    from . import runcomfy_deployment
+    from . import runcomfy_client
+    
+    # 1. Check if generation already in progress
+    if runcomfy_polling.RunComfyPoller.active_requests:
+        print("[Style Engine] Generation already in progress, skipping")
+        return
+    
+    # 2. Render passes (same as local)
+    render_passes(context)
+    
+    # 3. Read session data (same as local)
+    session_json_path = Path(ADDON_ROOT) / "data" / "temp" / "ai_vision" / "session.json"
+    
+    try:
+        with open(session_json_path, 'r') as f:
+            session_data = json.load(f)
+    except Exception as e:
+        print(f"[Style Engine] Failed to read session.json: {e}")
+        return
+    
+    # 4. Encode images to base64
+    addon_root = Path(ADDON_ROOT)
+    combined_path = addon_root / "data" / "temp" / "ai_vision" / "combined0001.png"
+    depth_path = addon_root / "data" / "temp" / "ai_vision" / "depth0001.png"
+    
+    if not combined_path.exists() or not depth_path.exists():
+        print("[Style Engine] Render passes not found")
+        return
+    
+    try:
+        combined_b64 = runcomfy_client.encode_image_to_base64(str(combined_path))
+        depth_b64 = runcomfy_client.encode_image_to_base64(str(depth_path))
+    except runcomfy_client.RunComfyError as e:
+        print(f"[Style Engine] Failed to encode images: {e}")
+        return
+    
+    # 5. Determine workflow type
+    use_ipadapter = session_data.get('ipadapter', {}).get('enabled', False)
+    has_reference = session_data.get('ipadapter', {}).get('reference_image', '')
+    workflow_type = 'ipadapter' if (use_ipadapter and has_reference) else 'sdxl'
+    
+    print(f"[Style Engine] Using workflow: {workflow_type}")
+    
+    # 6. Ensure deployment exists
+    try:
+        deployment_id = runcomfy_deployment.DeploymentManager.ensure_deployment(workflow_type)
+    except runcomfy_client.RunComfyError as e:
+        print(f"[Style Engine] Failed to ensure deployment: {e}")
+        return
+    
+    # 7. Build overrides
+    overrides = build_runcomfy_overrides(
+        session_data=session_data,
+        combined_b64=combined_b64,
+        depth_b64=depth_b64,
+        workflow_type=workflow_type
+    )
+    
+    # 8. Submit inference
+    try:
+        client = runcomfy_deployment.get_runcomfy_client()
+        response = client.submit_inference(deployment_id, overrides)
+        request_id = response.get('request_id')
+        
+        # 9. Start polling
+        runcomfy_polling.RunComfyPoller.start_polling(
+            deployment_id=deployment_id,
+            request_id=request_id,
+            callback=lambda success, result=None, error=None: 
+                on_generation_complete(context, success, result, error),
+            workflow_type=workflow_type
+        )
+        
+        print(f"[Style Engine] ☁️ Cloud generation started (request_id: {request_id[:8]}...)")
+        
+    except runcomfy_client.RunComfyError as e:
+        print(f"[Style Engine] Failed to submit inference: {e}")
+
+
+def build_runcomfy_overrides(session_data, combined_b64, depth_b64, workflow_type):
+    """
+    Build overrides dict for RunComfy API submission.
+    
+    Args:
+        session_data: Session JSON data
+        combined_b64: Base64 encoded combined pass
+        depth_b64: Base64 encoded depth pass
+        workflow_type: 'sdxl' or 'ipadapter'
+    
+    Returns:
+        dict: Overrides for workflow nodes
+    """
+    from . import runcomfy_client
+    
+    if workflow_type == 'sdxl':
+        # Map to SDXLworkflow.json nodes
+        return {
+            "25": {"inputs": {"value": session_data.get('global_prompt', '')}},  # Prompt
+            "15": {"inputs": {"image": combined_b64}},  # Combined pass
+            "40": {"inputs": {"value": session_data.get('silhouette_influence', 0.75)}},  # Canny
+            "41": {"inputs": {"value": session_data.get('depth_influence', 0.5)}},  # Depth
+            "42": {"inputs": {"value": session_data.get('steps', 15)}},  # Steps
+        }
+    else:  # ipadapter
+        # Encode reference image
+        ref_image_path = session_data['ipadapter']['reference_image']
+        
+        try:
+            ref_image_b64 = runcomfy_client.encode_image_to_base64(ref_image_path)
+        except Exception as e:
+            print(f"[Style Engine] Failed to encode reference image: {e}")
+            # Fall back to SDXL workflow
+            return build_runcomfy_overrides(session_data, combined_b64, depth_b64, 'sdxl')
+        
+        # Map to IPAdapterworkflow.json nodes
+        return {
+            "25": {"inputs": {"value": session_data.get('global_prompt', '')}},
+            "15": {"inputs": {"image": combined_b64}},
+            "40": {"inputs": {"value": session_data.get('silhouette_influence', 0.75)}},
+            "41": {"inputs": {"value": session_data.get('depth_influence', 0.5)}},
+            "42": {"inputs": {"value": session_data.get('steps', 15)}},
+            "43": {"inputs": {"image": ref_image_b64}},  # IPAdapter reference
+            "49": {"inputs": {"weight_type": session_data['ipadapter']['weight_type']}},
+            "52": {"inputs": {"value": session_data['ipadapter']['strength']}},
+        }
+
+
+def on_generation_complete(context, success, result, error):
+    """
+    Callback when RunComfy generation finishes.
+    
+    Args:
+        context: Blender context
+        success: bool
+        result: Result dict if successful
+        error: Error message if failed
+    """
+    from . import runcomfy_client
+    import shutil
+    
+    if not success:
+        print(f"[Style Engine] ❌ Generation failed: {error}")
+        return
+    
+    # Extract image URL from result
+    outputs = result.get('outputs', {})
+    image_url = None
+    
+    # Find SaveImage node output (Node 9)
+    for node_id, node_output in outputs.items():
+        if 'images' in node_output and node_output['images']:
+            image_url = node_output['images'][0].get('url')
+            break
+    
+    if not image_url:
+        print("[Style Engine] No image found in result")
+        return
+    
+    # Download to temp (always)
+    addon_root = Path(ADDON_ROOT)
+    current_ai_path = addon_root / "data" / "temp" / "ai_vision" / "current_ai.png"
+    
+    print(f"[Style Engine] Downloading result from: {image_url[:50]}...")
+    
+    if runcomfy_client.download_image_from_url(image_url, str(current_ai_path)):
+        print("[Style Engine] ✅ Downloaded to temp")
+        
+        # Update camera background
+        refresh_ai_image()
+        
+        # Save to output_path if set
+        props = context.scene.style_engine_props
+        if hasattr(props, 'output_path') and props.output_path and os.path.exists(props.output_path):
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_dir = Path(props.output_path) / "generated"
+            output_dir.mkdir(exist_ok=True, parents=True)
+            
+            output_path = output_dir / f"{timestamp}_runcomfy.png"
+            try:
+                shutil.copy2(current_ai_path, output_path)
+                print(f"[Style Engine] 💾 Saved to {output_path}")
+            except Exception as e:
+                print(f"[Style Engine] Failed to save to output_path: {e}")
+        else:
+            print("[Style Engine] Output path not set, skipping save")
+    else:
+        print("[Style Engine] ❌ Download failed")
+
+
+# ----------------------------------------------------------------
 # REGISTRATION
 # ----------------------------------------------------------------
 classes = (

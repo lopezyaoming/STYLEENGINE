@@ -1,0 +1,334 @@
+{
+  "3": {
+    "inputs": {
+      "seed": 658412520759376,
+      "steps": [
+        "42",
+        0
+      ],
+      "cfg": 8,
+      "sampler_name": "dpmpp_2m",
+      "scheduler": "karras",
+      "denoise": 0.9500000000000002,
+      "model": [
+        "34",
+        0
+      ],
+      "positive": [
+        "14",
+        0
+      ],
+      "negative": [
+        "14",
+        1
+      ],
+      "latent_image": [
+        "5",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "4": {
+    "inputs": {
+      "ckpt_name": "sdxl/juggernautXL_version6Rundiffusion.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "Cargar Punto de Control"
+    }
+  },
+  "5": {
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "Imagen Latente Vacía"
+    }
+  },
+  "6": {
+    "inputs": {
+      "text": [
+        "25",
+        0
+      ],
+      "clip": [
+        "34",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "Codificar Texto CLIP (Prompt)"
+    }
+  },
+  "7": {
+    "inputs": {
+      "text": "text, watermark, blurry, deformed",
+      "clip": [
+        "34",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "Codificar Texto CLIP (Prompt)"
+    }
+  },
+  "8": {
+    "inputs": {
+      "samples": [
+        "3",
+        0
+      ],
+      "vae": [
+        "4",
+        2
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "Decodificación VAE"
+    }
+  },
+  "13": {
+    "inputs": {
+      "control_net_name": "sdxl/diffusers_xl_depth_mid.safetensors"
+    },
+    "class_type": "ControlNetLoader",
+    "_meta": {
+      "title": "Cargar Modelo ControlNet"
+    }
+  },
+  "14": {
+    "inputs": {
+      "strength": [
+        "41",
+        0
+      ],
+      "start_percent": 0,
+      "end_percent": 1,
+      "positive": [
+        "37",
+        0
+      ],
+      "negative": [
+        "37",
+        1
+      ],
+      "control_net": [
+        "13",
+        0
+      ],
+      "image": [
+        "39",
+        0
+      ],
+      "vae": [
+        "4",
+        2
+      ]
+    },
+    "class_type": "ControlNetApplyAdvanced",
+    "_meta": {
+      "title": "Aplicar ControlNet"
+    }
+  },
+  "15": {
+    "inputs": {
+      "image": "60a4a791-bcab-4a1d-9864-bbcf9e1b7034.jpg"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "AO"
+    }
+  },
+  "25": {
+    "inputs": {
+      "value": "reflective puffer jacket high fashion on neutral grey background"
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "Prompt"
+    }
+  },
+  "34": {
+    "inputs": {
+      "lora_name": "sdxl/xl_more_art-full_v1.safetensors",
+      "strength_model": 1,
+      "strength_clip": 1,
+      "model": [
+        "4",
+        0
+      ],
+      "clip": [
+        "4",
+        1
+      ]
+    },
+    "class_type": "LoraLoader",
+    "_meta": {
+      "title": "Cargar LoRA"
+    }
+  },
+  "36": {
+    "inputs": {
+      "low_threshold": 0.4,
+      "high_threshold": 0.8,
+      "image": [
+        "15",
+        0
+      ]
+    },
+    "class_type": "Canny",
+    "_meta": {
+      "title": "Canny"
+    }
+  },
+  "37": {
+    "inputs": {
+      "strength": [
+        "40",
+        0
+      ],
+      "start_percent": 0,
+      "end_percent": 1,
+      "positive": [
+        "6",
+        0
+      ],
+      "negative": [
+        "7",
+        0
+      ],
+      "control_net": [
+        "38",
+        0
+      ],
+      "image": [
+        "36",
+        0
+      ],
+      "vae": [
+        "4",
+        2
+      ]
+    },
+    "class_type": "ControlNetApplyAdvanced",
+    "_meta": {
+      "title": "Aplicar ControlNet"
+    }
+  },
+  "38": {
+    "inputs": {
+      "control_net_name": "sdxl/diffusers_xl_canny_mid.safetensors"
+    },
+    "class_type": "ControlNetLoader",
+    "_meta": {
+      "title": "Cargar Modelo ControlNet"
+    }
+  },
+  "39": {
+    "inputs": {
+      "ckpt_name": "depth_anything_vitl14.pth",
+      "resolution": 512,
+      "image": [
+        "15",
+        0
+      ]
+    },
+    "class_type": "DepthAnythingPreprocessor",
+    "_meta": {
+      "title": "Depth Anything"
+    }
+  },
+  "40": {
+    "inputs": {
+      "value": 1
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "cannyStrength"
+    }
+  },
+  "41": {
+    "inputs": {
+      "value": 1
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "depthStrength"
+    }
+  },
+  "42": {
+    "inputs": {
+      "value": 15
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Steps"
+    }
+  },
+  "43": {
+    "inputs": {
+      "image": "ComfyUI_00201_ 1.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load IPAdapter"
+    }
+  },
+  "50": {
+    "inputs": {
+      "images": [
+        "39",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Vista previa de imagen"
+    }
+  },
+  "51": {
+    "inputs": {
+      "images": [
+        "36",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Vista previa de imagen"
+    }
+  },
+  "52": {
+    "inputs": {
+      "value": 1.5
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "IPStrength"
+    }
+  },
+  "53": {
+    "inputs": {
+      "filename_prefix": "StyleEngine",
+      "only_preview": false,
+      "images": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "easy imageSave",
+    "_meta": {
+      "title": "Save Image"
+    }
+  }
+}

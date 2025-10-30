@@ -1,0 +1,480 @@
+Deployment Endpoints
+
+Copy page
+
+The Deployment API lets you create, retrieve, list, update, and delete deployments for RunComfy Serverless deployments. Use deployments to control capacity, hardware, and warm/cool-down behavior for your serverless (async queue) jobs, so your workloads run with the performance and cost profile you expect.
+Note: The Deployment API use the same settings and behavior as the actions available on the web page at Deployments.
+​
+Deployment Endpoints
+Base URL: https://api.runcomfy.net
+Endpoint	Method	Description
+/prod/v2/deployments	POST	Create a deployment
+/prod/v2/deployments/{deployment_id}	GET	Get a deployment
+/prod/v2/deployments/{deployment_id}	PATCH	Update a deployment
+/prod/v2/deployments	GET	List deployments
+/prod/v2/deployments/{deployment_id}	DELETE	Delete a deployment
+​
+Common path parameters
+deployment_id: string (UUID). The unique identifier of the deployment resource. Returned when you create a deployment and used for subsequent operations on that deployment.
+​
+Common query parameters
+includes: repeatable string. Use includes=readme and/or includes=payload to include extra fields.
+ids: repeatable string (UUID). Filter to one or more deployment IDs, e.g. ?ids=<id1>&ids=<id2>.
+​
+Create a Deployment
+
+Copy
+POST /prod/v2/deployments
+​
+Request body (JSON)
+Field	Type	Required	Description
+name	string	Yes	Human-readable name for dashboards/logs. Example: "image-to-video".
+workflow_id	string (UUID)	Yes	The workflow to deploy. Example: "00000000-0000-0000-0000-000000001111".
+workflow_version	string	Yes	The workflow version label or tag. Example: "v1".
+hardware	array of enum strings	Yes	Exactly one SKU. Although the field is an array, only a single value is supported for now. Example: ["AMPERE_48"]. Supplying multiple values (e.g., ["AMPERE_24", "AMPERE_48"]) will be rejected with a validation error.
+min_instances	integer (0–3)	Yes	Minimum instances kept warm (billable even when idle if > 0).
+max_instances	integer (1–10)	Yes	Upper bound for concurrent instances. Must be ≥ min_instances.
+queue_size	integer (≥ 0)	Yes	Target queue length per instance before adding capacity (subject to max_instances).
+keep_warm_duration_in_seconds	integer (≥ 0)	Yes	How long to keep an instance warm after its last job to avoid cold starts.
+​
+Hardware SKUs
+Valid hardware values:
+
+Copy
+TURING_16
+AMPERE_24
+AMPERE_48
+ADA_48_PLUS
+AMPERE_80
+ADA_80_PLUS
+HOPPER_141
+​
+Scaling Behavior
+If min_instances > 0, the deployment maintains at least min_instances warm instances to reduce cold starts, lower latency at higher cost. It will not scale below this floor, and those instances incur charges even when idle.
+If queue_size = 1, when a second request arrives for an instance, the platform may start another instance (up to max_instances).
+​
+Request example
+
+Copy
+curl --request POST \
+  --url https://api.runcomfy.net/prod/v2/deployments \
+  --header "Content-Type: application/json" \
+  --header "Authorization: Bearer <token>" \
+  --data '{
+    "name": "image-to-video",
+    "workflow_id": "00000000-0000-0000-0000-000000001111",
+    "workflow_version": "v1",
+    "hardware": ["AMPERE_48"],
+    "min_instances": 0,
+    "max_instances": 3,
+    "queue_size": 1,
+    "keep_warm_duration_in_seconds": 60
+  }'
+
+​
+Response example
+
+Copy
+{
+  "id": "a1b2c3d4-1111-2222-3333-abcdefabcdef",
+  "name": "image-to-video",
+  "created_at": "2025-09-08T11:00:07.864492Z",
+  "updated_at": "2025-09-08T11:00:07.864492Z",
+  "workflow_id": "00000000-0000-0000-0000-000000001111",
+  "workflow_version": "v1",
+  "hardware": ["AMPERE_48"],
+  "min_instances": 0,
+  "max_instances": 3,
+  "queue_size": 1,
+  "keep_warm_duration_in_seconds": 60,
+  "status": "standby",
+  "is_enabled": true,
+  "payload": {
+    "workflow_api_json": {},
+    "overrides": {},
+    "object_info_url": "",
+  }
+}
+​
+Payload Explanation
+The payload object includes key configuration details for the workflow.
+workflow_api_json contains the workflow structure in API format. For more details, refer to the documentation at workflow_api.json.
+overrides allows for dynamic modifications to workflow inputs. To learn about using overrides, check out using overrides.
+object_info_url provides a URL pointing to an object_info.json file, which serves as a schema registry for nodes. For more details, see object_info.json. Here’s an example of the object_info_url field:
+
+Copy
+"object_info_url": "https://serverless-api-storage.runcomfy.net/object-infos/example/object_info.json"
+​
+Get a Deployment
+
+Copy
+GET /prod/v2/deployments/{deployment_id}
+​
+Request example
+
+Copy
+curl --request GET \
+  --url https://api.runcomfy.net/prod/v2/deployments/a1b2c3d4-1111-2222-3333-abcdefabcdef \
+  --header "Accept: application/json" \
+  --header "Authorization: Bearer <token>"
+
+​
+Response example
+
+Copy
+{
+  "id": "a1b2c3d4-1111-2222-3333-abcdefabcdef",
+  "created_at": "2025-09-08T11:00:07.864492Z",
+  "updated_at": "2025-09-08T11:00:07.864492Z",
+  "name": "image-to-video",
+  "workflow_id": "00000000-0000-0000-0000-000000001111",
+  "workflow_version": "v1",
+  "hardware": ["AMPERE_48"],
+  "min_instances": 0,
+  "max_instances": 3,
+  "queue_size": 1,
+  "keep_warm_duration_in_seconds": 60,
+  "status": "standby",
+  "is_enabled": true,
+  "payload": {
+    "workflow_api_json": {},
+    "overrides": {},
+    "object_info_url": ""
+  }
+}
+
+​
+Update a Deployment
+
+Copy
+PATCH /prod/v2/deployments/{deployment_id}
+Partially update a deployment’s mutable fields. Only include the field(s) you want to change in the request body; omitted fields remain unchanged.
+​
+Updatable fields
+
+Copy
+name (string)
+workflow_version (string)
+hardware (array<enum string>; exactly 1 value)
+min_instances (integer 0–3)
+max_instances (integer 1–10)
+queue_size (integer >= 0)
+keep_warm_duration_in_seconds (integer >= 0)
+is_enabled (boolean)
+Tip: Set “is_enabled”: false to stop handling new requests (and stop warm capacity). Set it back to true to re-enable.
+​
+Request example
+
+Copy
+curl --request PATCH \
+  --url https://api.runcomfy.net/prod/v2/deployments/a1b2c3d4-1111-2222-3333-abcdefabcdef \
+  --header "Content-Type: application/json" \
+  --header "Authorization: Bearer <token>" \
+  --data '{
+    "hardware": ["AMPERE_24"]
+  }'
+
+
+Copy
+curl --request PATCH \
+  --url https://api.runcomfy.net/prod/v2/deployments/a1b2c3d4-1111-2222-3333-abcdefabcdef \
+  --header "Content-Type: application/json" \
+  --header "Authorization: Bearer <token>" \
+  --data '{
+    "min_instances": 1,
+    "max_instances": 5
+  }'
+
+​
+Response example
+
+Copy
+{
+  "id": "a1b2c3d4-1111-2222-3333-abcdefabcdef",
+  "created_at": "2025-09-08T11:00:07.864492Z",
+  "updated_at": "2025-09-08T12:41:05.796289Z",
+  "name": "image-to-video",
+  "workflow_id": "00000000-0000-0000-0000-000000001111",
+  "workflow_version": "v1",
+  "hardware": ["AMPERE_24"],
+  "min_instances": 0,
+  "max_instances": 2,
+  "queue_size": 2,
+  "keep_warm_duration_in_seconds": 120,
+  "status": "standby",
+  "is_enabled": true,
+  "payload": {
+    "workflow_api_json": {},
+    "overrides": {},
+    "object_info_url": ""
+  }
+}
+
+​
+List Deployments
+
+Copy
+GET /prod/v2/deployments
+​
+List All Deployments
+Get a summary list of all deployments without readme and payload data.
+​
+Request example
+
+Copy
+curl --request GET \
+  --url "https://api.runcomfy.net/prod/v2/deployments" \
+  --header "Authorization: Bearer <token>"
+
+​
+Response example
+
+Copy
+[
+  {
+    "id": "a1b2c3d4-1111-2222-3333-abcdefabcdef",
+    "created_at": "2025-08-01T09:00:00Z",
+    "updated_at": "2025-09-01T10:00:00Z",
+    "name": "text to video",
+    "workflow_id": "00000000-0000-0000-0000-000000001111",
+    "workflow_version": "v1",
+    "hardware": ["AMPERE_24"],
+    "min_instances": 0,
+    "max_instances": 2,
+    "queue_size": 1,
+    "keep_warm_duration_in_seconds": 60,
+    "status": "standby",
+    "is_enabled": true
+  },
+  {
+    "id": "b5c6d7e8-4444-5555-6666-123412341234",
+    "created_at": "2025-08-05T09:00:00Z",
+    "updated_at": "2025-09-02T10:00:00Z",
+    "name": "image to video",
+    "workflow_id": "00000000-0000-0000-0000-000000002222",
+    "workflow_version": "v1",
+    "hardware": ["AMPERE_48"],
+    "min_instances": 0,
+    "max_instances": 3,
+    "queue_size": 1,
+    "keep_warm_duration_in_seconds": 60,
+    "status": "standby",
+    "is_enabled": true
+  },
+  {
+    "id": "c9d0e1f2-7777-8888-9999-deadbeefdead",
+    "created_at": "2025-08-07T09:00:00Z",
+    "updated_at": "2025-09-03T10:00:00Z",
+    "name": "video to video",
+    "workflow_id": "00000000-0000-0000-0000-000000003333",
+    "workflow_version": "v1",
+    "hardware": ["AMPERE_80"],
+    "min_instances": 0,
+    "max_instances": 1,
+    "queue_size": 1,
+    "keep_warm_duration_in_seconds": 60,
+    "status": "standby",
+    "is_enabled": true
+  }
+]
+
+​
+List All Deployments (Details)
+Get all deployments including readme and payload data using query parameters.
+Extra fields with includes:
+?includes=payload → adds a payload (object): { "workflow_api_json": {}, "overrides": {}, "object_info_url": ""}
+?includes=readme → adds a readme (string, Markdown): ""
+Use both includes=readme&includes=payload to get both fields.
+Requesting readme and/or payload can significantly increase the response size.
+​
+Request example
+
+Copy
+curl --request GET \
+  --url "https://api.runcomfy.net/prod/v2/deployments?includes=readme&includes=payload" \
+  --header "Authorization: Bearer <token>"
+
+​
+Response example
+Note: The payload and readme fields are only included when using the ?includes=payload and ?includes=readme query parameters respectively.
+
+Copy
+[
+  {
+    "id": "a1b2c3d4-1111-2222-3333-abcdefabcdef",
+    "created_at": "2025-08-01T09:00:00Z",
+    "updated_at": "2025-09-01T10:00:00Z",
+    "name": "text to video",
+    "workflow_id": "00000000-0000-0000-0000-000000001111",
+    "workflow_version": "v1",
+    "hardware": ["AMPERE_24"],
+    "min_instances": 0,
+    "max_instances": 2,
+    "queue_size": 1,
+    "keep_warm_duration_in_seconds": 60,
+    "status": "standby",
+    "is_enabled": true,
+    "payload": { "workflow_api_json": {}, "overrides": {}, "object_info_url": ""},
+    "readme": ""
+  },
+  {
+    "id": "b5c6d7e8-4444-5555-6666-123412341234",
+    "created_at": "2025-08-05T09:00:00Z",
+    "updated_at": "2025-09-02T10:00:00Z",
+    "name": "image to video",
+    "workflow_id": "00000000-0000-0000-0000-000000002222",
+    "workflow_version": "v1",
+    "hardware": ["AMPERE_48"],
+    "min_instances": 0,
+    "max_instances": 3,
+    "queue_size": 1,
+    "keep_warm_duration_in_seconds": 60,
+    "status": "standby",
+    "is_enabled": true,
+    "payload": { "workflow_api_json": {}, "overrides": {}, "object_info_url": ""},
+    "readme": ""
+  },
+  {
+    "id": "c9d0e1f2-7777-8888-9999-deadbeefdead",
+    "created_at": "2025-08-07T09:00:00Z",
+    "updated_at": "2025-09-03T10:00:00Z",
+    "name": "video to video",
+    "workflow_id": "00000000-0000-0000-0000-000000003333",
+    "workflow_version": "v1",
+    "hardware": ["AMPERE_80"],
+    "min_instances": 0,
+    "max_instances": 1,
+    "queue_size": 1,
+    "keep_warm_duration_in_seconds": 60,
+    "status": "standby",
+    "is_enabled": true,
+    "payload": { "workflow_api_json": {}, "overrides": {}, "object_info_url": ""},
+    "readme": ""
+  }
+]
+
+​
+List deployments by IDs
+Filter deployments by specific IDs without readme and payload data.
+Filter by IDs with ids
+?ids=<deployment_id> (repeatable) → returns only those deployments
+​
+Request example
+
+Copy
+curl --request GET \
+  --url "https://api.runcomfy.net/prod/v2/deployments?ids=a1b2c3d4-1111-2222-3333-abcdefabcdef&ids=b5c6d7e8-4444-5555-6666-123412341234" \
+  --header "Authorization: Bearer <token>"
+
+​
+Response example
+
+Copy
+[
+  {
+    "id": "a1b2c3d4-1111-2222-3333-abcdefabcdef",
+    "created_at": "2025-08-01T09:00:00Z",
+    "updated_at": "2025-09-01T10:00:00Z",
+    "name": "text to video",
+    "workflow_id": "00000000-0000-0000-0000-000000001111",
+    "workflow_version": "v1",
+    "hardware": ["AMPERE_24"],
+    "min_instances": 0,
+    "max_instances": 2,
+    "queue_size": 1,
+    "keep_warm_duration_in_seconds": 60,
+    "status": "standby",
+    "is_enabled": true
+  },
+  {
+    "id": "b5c6d7e8-4444-5555-6666-123412341234",
+    "created_at": "2025-08-05T09:00:00Z",
+    "updated_at": "2025-09-02T10:00:00Z",
+    "name": "image to video",
+    "workflow_id": "00000000-0000-0000-0000-000000002222",
+    "workflow_version": "v1",
+    "hardware": ["AMPERE_48"],
+    "min_instances": 0,
+    "max_instances": 3,
+    "queue_size": 1,
+    "keep_warm_duration_in_seconds": 60,
+    "status": "standby",
+    "is_enabled": true
+  }
+]
+
+​
+List deployments by IDs (Details)
+Filter deployments by specific IDs and include readme and payload data.
+Filter by IDs with includes:
+?ids=<deployment_id>&includes=payload → adds payload for selected IDs
+?ids=<deployment_id>&includes=readme → adds readme for selected IDs
+?ids=<id1>&ids=<id2>&includes=readme&includes=payload → multiple IDs + both fields (ids is repeatable)
+​
+Request example
+
+Copy
+curl --request GET \
+  --url "https://api.runcomfy.net/prod/v2/deployments?includes=readme&includes=payload&ids=a1b2c3d4-1111-2222-3333-abcdefabcdef&ids=b5c6d7e8-4444-5555-6666-123412341234" \
+  --header "Authorization: Bearer <token>"
+
+​
+Response example
+Note: The payload and readme fields are only included when using the ?includes=payload and ?includes=readme query parameters respectively.
+
+Copy
+[
+  {
+    "id": "a1b2c3d4-1111-2222-3333-abcdefabcdef",
+    "created_at": "2025-08-01T09:00:00Z",
+    "updated_at": "2025-09-01T10:00:00Z",
+    "name": "text to video",
+    "workflow_id": "00000000-0000-0000-0000-000000001111",
+    "workflow_version": "v1",
+    "hardware": ["AMPERE_24"],
+    "min_instances": 0,
+    "max_instances": 2,
+    "queue_size": 1,
+    "keep_warm_duration_in_seconds": 60,
+    "status": "standby",
+    "is_enabled": true,
+    "payload": { "workflow_api_json": {}, "overrides": {}, "object_info_url": ""},
+    "readme": ""
+  },
+  {
+    "id": "b5c6d7e8-4444-5555-6666-123412341234",
+    "created_at": "2025-08-05T09:00:00Z",
+    "updated_at": "2025-09-02T10:00:00Z",
+    "name": "image to video",
+    "workflow_id": "00000000-0000-0000-0000-000000002222",
+    "workflow_version": "v1",
+    "hardware": ["AMPERE_48"],
+    "min_instances": 0,
+    "max_instances": 3,
+    "queue_size": 1,
+    "keep_warm_duration_in_seconds": 60,
+    "status": "standby",
+    "is_enabled": true,
+    "payload": { "workflow_api_json": {}, "overrides": {}, "object_info_url": ""},
+    "readme": ""
+  }
+]
+
+​
+Delete a Deployment
+
+Copy
+DELETE /prod/v2/deployments/{deployment_id}
+​
+Request example
+
+Copy
+curl --request DELETE \
+  --url https://api.runcomfy.net/prod/v2/deployments/a1b2c3d4-1111-2222-3333-abcdefabcdef \
+  --header "Authorization: Bearer <token>"
+
+​
+Response example
+
+Copy
+{ "success": true }

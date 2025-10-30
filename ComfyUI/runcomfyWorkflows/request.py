@@ -1,6 +1,6 @@
 import requests
 
-url = 'https://api.runcomfy.net/prod/v1/deployments/f0c32b81-8ea3-40bf-887f-d41c9a4d5ef5/inference'
+url = 'https://api.runcomfy.net/prod/v1/deployments/1c6fa9a6-f60a-4e89-863d-40b03ad2564e/inference'
 headers = {
   'Authorization': 'Bearer YOUR_API_TOKEN',
   'Content-Type': 'application/json'
@@ -11,9 +11,9 @@ payload = { 'overrides': {
       "image": "https://example.com/new-image.jpg or data:image/jpeg;base64,/9j/4AAQSkZJRgA..."
     }
   },
-  "39": {
+  "25": {
     "inputs": {
-      "value": "Nighttime view of a dense dystopian gotham city, dramatic lighting, dark hues and sketchy corridors, noir, damp after heavy rain, photorrealistic"
+      "value": "reflective puffer jacket high fashion on neutral grey background"
     }
   }
 } }

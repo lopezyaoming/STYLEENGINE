@@ -20,6 +20,11 @@ from . import ui_panel
 from . import prefs
 from . import workspace_setup
 
+# Import RunComfy modules (no registration needed, just make them available)
+from . import runcomfy_client
+from . import runcomfy_deployment
+from . import runcomfy_polling
+
 # List of modules to register
 modules = [
     prefs,
@@ -34,6 +39,10 @@ def register():
 
 def unregister():
     """Unregister all classes and properties."""
+    # Cleanup RunComfy poller
+    runcomfy_polling.cleanup_poller()
+    
+    # Unregister modules
     for module in reversed(modules):
         module.unregister()
 

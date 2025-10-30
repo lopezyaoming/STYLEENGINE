@@ -774,6 +774,45 @@ class WM_OT_ProjectTexture(bpy.types.Operator):
             print(f"[Style Engine] ❌ Error saving iteration image/material: {e}")
 
 
+class WM_OT_CancelGeneration(bpy.types.Operator):
+    """Cancel active RunComfy generation"""
+    bl_idname = "style_engine.cancel_generation"
+    bl_label = "Cancel Generation"
+    bl_description = "Cancel the active cloud generation request"
+    
+    request_id: bpy.props.StringProperty()
+    
+    def execute(self, context):
+        from . import runcomfy_polling
+        
+        if runcomfy_polling.RunComfyPoller.cancel_request(self.request_id):
+            self.report({'INFO'}, f"Cancelled request {self.request_id[:8]}")
+            print(f"[Style Engine] Cancelled request {self.request_id[:8]}")
+        else:
+            self.report({'WARNING'}, "Request not found or already completed")
+        
+        return {'FINISHED'}
+
+
+class WM_OT_TestCloudGeneration(bpy.types.Operator):
+    """Test cloud generation with current settings"""
+    bl_idname = "style_engine.test_cloud_generation"
+    bl_label = "Test Cloud Generation"
+    bl_description = "Trigger a test cloud generation"
+    
+    def execute(self, context):
+        from . import workspace_setup
+        
+        try:
+            workspace_setup.generate_ai_image_cloud(context)
+            self.report({'INFO'}, "Cloud generation started")
+        except Exception as e:
+            self.report({'ERROR'}, f"Failed to start generation: {e}")
+            print(f"[Style Engine] Error: {e}")
+        
+        return {'FINISHED'}
+
+
 # ----------------------------------------------------------------
 # 3. UI PANEL
 # ----------------------------------------------------------------
@@ -832,6 +871,39 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
             setup_box.label(text="Output Path:")
             setup_box.prop(style_props, "output_path", text="")
         
+        # --- Server Status Indicator ---
+        layout.separator()
+        status_box = layout.box()
+        row = status_box.row()
+        row.label(text="Server Status:", icon='NETWORK_DRIVE')
+        
+        # Get server status from poller
+        try:
+            from . import runcomfy_polling
+            server_status = runcomfy_polling.RunComfyPoller.get_server_status()
+            
+            status_icons = {
+                'Disconnected': 'CANCEL',
+                'Connecting': 'TIME',
+                'Active': 'CHECKMARK',
+                'Running Workflow': 'RENDER_ANIMATION'
+            }
+            row.label(text=server_status, icon=status_icons.get(server_status, 'QUESTION'))
+            
+            # Show active requests details if any
+            if runcomfy_polling.RunComfyPoller.active_requests:
+                for request_id, state in runcomfy_polling.RunComfyPoller.active_requests.items():
+                    row = status_box.row()
+                    import time
+                    elapsed = int(time.time() - state.start_time)
+                    row.label(text=f"  {state.workflow_type}: {elapsed}s", icon='DOT')
+                    
+                    # Cancel button
+                    cancel_op = row.operator("style_engine.cancel_generation", text="", icon='X')
+                    cancel_op.request_id = request_id
+        except Exception as e:
+            row.label(text="Error", icon='ERROR')
+        
         # --- Image Generation - COLLAPSIBLE ---
         layout.separator()
         gen_box = layout.box()
@@ -857,6 +929,10 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
             col = gen_box.column(align=True)
             col.label(text="Steps:")
             col.prop(style_props, "steps", slider=True, text="")
+            
+            # Cloud Generation button
+            gen_box.separator()
+            gen_box.operator("style_engine.test_cloud_generation", text="Generate (Cloud)", icon='WORLD')
             
             # Project Texture button
             gen_box.separator()
@@ -975,6 +1051,8 @@ classes = (
     WM_OT_SelectGroup,
     WM_OT_DeleteGroup,
     WM_OT_ProjectTexture,
+    WM_OT_CancelGeneration,
+    WM_OT_TestCloudGeneration,
     VIEW3D_PT_StyleEngine,
 )
 
