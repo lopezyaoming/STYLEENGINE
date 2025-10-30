@@ -101,7 +101,11 @@ def write_session_json(context):
         }
         
         # Write to temp file then rename (atomic write)
-        session_path = os.path.join(ADDON_ROOT, "data", "temp", "session.json")
+        session_path = os.path.join(ADDON_ROOT, "data", "temp", "ai_vision", "session.json")
+        
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(session_path), exist_ok=True)
+        
         session_tmp = session_path + ".tmp"
         
         with open(session_tmp, 'w') as f:
@@ -166,7 +170,8 @@ def refresh_ai_image():
 def auto_render_passes():
     """
     Auto-render timer that renders ai_camera every X seconds with all passes.
-    Only renders when previous AI generation is complete (no queue backup).
+    IMPORTANT: This timer is DISABLED when auto_generate is enabled.
+    Auto-generate uses its own cyclical system (render → generate → download → repeat).
     """
     try:
         # Check if refresh is still enabled
@@ -175,19 +180,11 @@ def auto_render_passes():
             # Stop the timer if refresh is disabled
             return None
         
-        # Check if auto-generate is enabled
-        if props.auto_generate:
-            # Check if server says it's ready for next render
-            try:
-                req = urllib.request.Request('http://localhost:8000/render/ready', method='GET')
-                with urllib.request.urlopen(req, timeout=1) as response:
-                    data = json.loads(response.read().decode())
-                    if not data.get('ready', True):  # Default True if server not responding
-                        print("[Style Engine] ⏸️ Waiting for AI generation to complete...")
-                        return RENDER_INTERVAL  # Try again later
-            except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError):
-                # Server not responding, continue with render anyway
-                pass
+        # ⚠️ DISABLE timer-based rendering when auto-generate is enabled
+        # Auto-generate uses cyclical system instead
+        if hasattr(props, 'auto_generate') and props.auto_generate:
+            print("[Style Engine] Auto-generate is active, skipping timer-based render")
+            return RENDER_INTERVAL  # Keep timer alive but skip rendering
         
         # Find the ai_camera
         if "ai_camera" not in bpy.data.objects:
@@ -227,6 +224,62 @@ def auto_render_passes():
     
     # Continue running every RENDER_INTERVAL seconds
     return RENDER_INTERVAL
+
+
+# ----------------------------------------------------------------
+# STANDALONE HELPER FOR DELAYED WORKSPACE SPLIT
+# ----------------------------------------------------------------
+
+def _delayed_split_setup_standalone(camera):
+    """
+    Standalone function for delayed workspace split setup.
+    Used to avoid operator lifetime issues with timer callbacks.
+    """
+    context = bpy.context
+    
+    # Find the 3D viewport in the current workspace
+    for area in context.screen.areas:
+        if area.type == 'VIEW_3D':
+            # Split the area vertically (left/right)
+            override = {'area': area, 'region': area.regions[-1]}
+            
+            try:
+                with context.temp_override(**override):
+                    bpy.ops.screen.area_split(direction='VERTICAL', factor=0.5)
+                
+                # Configure the viewports
+                view3d_areas = [a for a in context.screen.areas if a.type == 'VIEW_3D']
+                
+                if len(view3d_areas) >= 2:
+                    # Right area (the new one): camera view
+                    right_area = view3d_areas[-1]
+                    
+                    for space in right_area.spaces:
+                        if space.type == 'VIEW_3D':
+                            # Switch to camera view (like pressing Numpad 0)
+                            space.region_3d.view_perspective = 'CAMERA'
+                            space.lock_camera = True
+                            
+                            # Show background images in viewport
+                            space.shading.type = 'SOLID'
+                            
+                            # Ensure camera is visible in viewport
+                            space.overlay.show_extras = True
+                            
+                            print("[Style Engine] Right viewport configured as locked camera view")
+                    
+                    # Set the active object to the camera
+                    if camera:
+                        context.view_layer.objects.active = camera
+                    
+                    # Force redraw all areas
+                    for area in context.screen.areas:
+                        area.tag_redraw()
+                
+                break
+            except Exception as e:
+                print(f"[Style Engine] Error splitting viewport: {e}")
+                print("[Style Engine] Please split viewport manually: drag from top-right corner")
 
 
 class WM_OT_SetupWorkspace(bpy.types.Operator):
@@ -449,11 +502,12 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
         print("[Style Engine] Configuring workspace layout...")
         
         # The actual split needs to happen after switching to the workspace
-        # We'll use a timer to do this
-        bpy.app.timers.register(
-            lambda: self.delayed_split_setup(camera),
-            first_interval=0.1
-        )
+        # Use a standalone function to avoid operator lifetime issues
+        def delayed_setup():
+            _delayed_split_setup_standalone(camera)
+            return None  # Don't repeat timer
+        
+        bpy.app.timers.register(delayed_setup, first_interval=0.1)
         
         # Start the auto-refresh timer for the background image
         self.start_image_refresh_timer()
@@ -576,8 +630,8 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
         file_output = nodes.new(type='CompositorNodeOutputFile')
         file_output.location = (800, 0)
         
-        # Set base path to passes/ folder (absolute path from addon root)
-        passes_path = os.path.join(ADDON_ROOT, "data", "temp", "passes")
+        # Set base path to ai_vision/ folder (absolute path from addon root)
+        passes_path = os.path.join(ADDON_ROOT, "data", "temp", "ai_vision")
         os.makedirs(passes_path, exist_ok=True)
         # Use absolute path with forward slashes (Blender compatible)
         file_output.base_path = passes_path.replace("\\", "/") + "/"
@@ -651,6 +705,70 @@ class WM_OT_StartAutoRefresh(bpy.types.Operator):
 
 
 # ----------------------------------------------------------------
+# RENDER PASSES
+# ----------------------------------------------------------------
+
+def render_passes(context):
+    """
+    Render combined and depth passes from ai_camera.
+    Outputs to data/temp/ai_vision/ folder for cloud generation.
+    """
+    print("[Style Engine] Rendering passes for cloud generation...")
+    
+    # Find the ai_camera
+    if "ai_camera" not in bpy.data.objects:
+        print("[Style Engine] ERROR: ai_camera not found! Run 'Setup Workspace' first.")
+        raise RuntimeError("ai_camera not found. Please run 'Setup Workspace' first.")
+    
+    ai_camera = bpy.data.objects["ai_camera"]
+    scene = context.scene
+    
+    # Store original settings
+    original_camera = scene.camera
+    original_engine = scene.render.engine
+    original_samples = scene.eevee.taa_render_samples
+    
+    try:
+        # Configure render settings
+        scene.camera = ai_camera
+        scene.render.engine = 'BLENDER_EEVEE_NEXT'  # Blender 4.2+ uses EEVEE_NEXT
+        scene.eevee.taa_render_samples = 16
+        
+        # Set output path - compositor will handle the actual file outputs
+        # The compositor nodes are configured to save:
+        #   - combined0001.png (Combined pass)
+        #   - depth0001.png (Depth pass - inverted)
+        # to data/temp/ai_vision/
+        
+        # Render
+        print(f"[Style Engine] Rendering from ai_camera...")
+        bpy.ops.render.render(write_still=True, use_viewport=False)
+        
+        # Verify outputs exist
+        addon_root = Path(ADDON_ROOT)
+        combined_path = addon_root / "data" / "temp" / "ai_vision" / "combined0001.png"
+        depth_path = addon_root / "data" / "temp" / "ai_vision" / "depth0001.png"
+        
+        if not combined_path.exists():
+            print(f"[Style Engine] WARNING: Combined pass not found at {combined_path}")
+        else:
+            print(f"[Style Engine] ✓ Combined pass: {combined_path}")
+        
+        if not depth_path.exists():
+            print(f"[Style Engine] WARNING: Depth pass not found at {depth_path}")
+        else:
+            print(f"[Style Engine] ✓ Depth pass: {depth_path}")
+        
+        print(f"[Style Engine] Render passes complete!")
+        
+    finally:
+        # Restore original settings
+        scene.camera = original_camera
+        scene.render.engine = original_engine
+        scene.eevee.taa_render_samples = original_samples
+
+
+# ----------------------------------------------------------------
 # CLOUD GENERATION (RunComfy)
 # ----------------------------------------------------------------
 
@@ -671,8 +789,13 @@ def generate_ai_image_cloud(context):
     # 2. Render passes (same as local)
     render_passes(context)
     
-    # 3. Read session data (same as local)
+    # 3. Read session data (create if doesn't exist)
     session_json_path = Path(ADDON_ROOT) / "data" / "temp" / "ai_vision" / "session.json"
+    
+    # Ensure session.json exists
+    if not session_json_path.exists():
+        print("[Style Engine] session.json not found, creating it...")
+        write_session_json(context)
     
     try:
         with open(session_json_path, 'r') as f:
@@ -729,8 +852,8 @@ def generate_ai_image_cloud(context):
         runcomfy_polling.RunComfyPoller.start_polling(
             deployment_id=deployment_id,
             request_id=request_id,
-            callback=lambda success, result=None, error=None: 
-                on_generation_complete(context, success, result, error),
+            callback=lambda success, result=None, error=None, workflow_type=None: 
+                on_generation_complete(context, success, result, error, workflow_type or 'sdxl'),
             workflow_type=workflow_type
         )
         
@@ -783,12 +906,12 @@ def build_runcomfy_overrides(session_data, combined_b64, depth_b64, workflow_typ
             "41": {"inputs": {"value": session_data.get('depth_influence', 0.5)}},
             "42": {"inputs": {"value": session_data.get('steps', 15)}},
             "43": {"inputs": {"image": ref_image_b64}},  # IPAdapter reference
-            "49": {"inputs": {"weight_type": session_data['ipadapter']['weight_type']}},
             "52": {"inputs": {"value": session_data['ipadapter']['strength']}},
+            # Note: Node 49 (IPAdapterEmbeds) has upstream connections and should NOT be overridden
         }
 
 
-def on_generation_complete(context, success, result, error):
+def on_generation_complete(context, success, result, error, workflow_type='sdxl'):
     """
     Callback when RunComfy generation finishes.
     
@@ -797,26 +920,71 @@ def on_generation_complete(context, success, result, error):
         success: bool
         result: Result dict if successful
         error: Error message if failed
+        workflow_type: 'sdxl' or 'ipadapter' (determines which output node to check)
     """
     from . import runcomfy_client
     import shutil
     
+    print(f"[Style Engine] 🔍 Processing result for workflow: {workflow_type}")
+    
     if not success:
         print(f"[Style Engine] ❌ Generation failed: {error}")
+        # Even on failure, trigger next cycle if auto-generate is enabled
+        trigger_next_generation_cycle(context)
         return
     
     # Extract image URL from result
     outputs = result.get('outputs', {})
     image_url = None
     
-    # Find SaveImage node output (Node 9)
-    for node_id, node_output in outputs.items():
-        if 'images' in node_output and node_output['images']:
-            image_url = node_output['images'][0].get('url')
-            break
+    # Debug: Show all available output nodes
+    print(f"[Style Engine] DEBUG: Received {len(outputs)} output nodes")
+    for node_id in outputs.keys():
+        has_images = 'images' in outputs[node_id] and outputs[node_id]['images']
+        print(f"[Style Engine] DEBUG:   Node {node_id}: {'✓ has images' if has_images else '✗ no images'}")
+    
+    # Workflow-specific output node priority
+    if workflow_type == 'ipadapter':
+        # IPAdapter: Try Node 9 first (SaveImage - final output)
+        if '9' in outputs and 'images' in outputs['9'] and outputs['9']['images']:
+            image_url = outputs['9']['images'][0].get('url')
+            print("[Style Engine] ✅ Using output from Node 9 (IPAdapter final SaveImage)")
+        else:
+            print("[Style Engine] ⚠️ Node 9 not found in IPAdapter mode, checking fallback...")
+    else:
+        # SDXL: Try Node 53 first (easy imageSave - final output)
+        if '53' in outputs and 'images' in outputs['53'] and outputs['53']['images']:
+            image_url = outputs['53']['images'][0].get('url')
+            print("[Style Engine] ✅ Using output from Node 53 (SDXL final SaveImage)")
+        else:
+            print("[Style Engine] ⚠️ Node 53 not found in SDXL mode, checking fallback...")
+    
+    # Fallback: find any SaveImage output
+    # Priority: 'output' type images > 'temp' type images (last one wins)
+    if not image_url:
+        print("[Style Engine] Searching all nodes for images...")
+        
+        # First pass: Look for 'output' type images (final SaveImage nodes)
+        for node_id, node_output in outputs.items():
+            if 'images' in node_output and node_output['images']:
+                img_type = node_output['images'][0].get('type', '')
+                if img_type == 'output':
+                    image_url = node_output['images'][0].get('url')
+                    print(f"[Style Engine] ✅ Found 'output' type image in Node {node_id}")
+                    break
+        
+        # Second pass: Accept any image if no 'output' found (last one wins)
+        if not image_url:
+            for node_id, node_output in outputs.items():
+                if 'images' in node_output and node_output['images']:
+                    image_url = node_output['images'][0].get('url')
+                    img_type = node_output['images'][0].get('type', 'unknown')
+                    print(f"[Style Engine] ⚠️ Using '{img_type}' image from Node {node_id}")
+                    # Don't break - keep iterating to get the LAST one
     
     if not image_url:
         print("[Style Engine] No image found in result")
+        trigger_next_generation_cycle(context)
         return
     
     # Download to temp (always)
@@ -848,6 +1016,46 @@ def on_generation_complete(context, success, result, error):
             print("[Style Engine] Output path not set, skipping save")
     else:
         print("[Style Engine] ❌ Download failed")
+    
+    # ✅ CYCLICAL AUTO-GENERATION: Trigger next cycle if auto-generate is enabled
+    trigger_next_generation_cycle(context)
+
+
+def trigger_next_generation_cycle(context):
+    """
+    Trigger the next generation cycle if auto-generate is enabled.
+    This creates the cyclical loop: render → generate → download → repeat
+    """
+    try:
+        props = bpy.context.scene.style_engine_props
+        
+        # Only continue if auto-generate is still enabled
+        if hasattr(props, 'auto_generate') and props.auto_generate:
+            print("[Style Engine] 🔄 Auto-generate enabled, starting next cycle...")
+            # Small delay to prevent overwhelming the system
+            bpy.app.timers.register(lambda: start_generation_cycle(), first_interval=1.0)
+        else:
+            print("[Style Engine] Auto-generate disabled, stopping cycle")
+    except Exception as e:
+        print(f"[Style Engine] Error in trigger_next_generation_cycle: {e}")
+
+
+def start_generation_cycle():
+    """
+    Start a single generation cycle: render → submit to RunComfy
+    This is called when auto-generate is enabled.
+    """
+    try:
+        # Get context from window manager
+        context = bpy.context
+        
+        print("[Style Engine] 🎬 Starting generation cycle...")
+        generate_ai_image_cloud(context)
+        
+    except Exception as e:
+        print(f"[Style Engine] Error in generation cycle: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 # ----------------------------------------------------------------

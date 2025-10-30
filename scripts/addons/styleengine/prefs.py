@@ -45,29 +45,17 @@ class StyleEnginePreferences(AddonPreferences):
     # WORKFLOW CONFIGURATION
     # ----------------------------------------------------------------
     
-    # Workflow IDs (user will provide these)
-    runcomfy_workflow_id_sdxl: StringProperty(
-        name="SDXL Workflow ID",
-        description="RunComfy workflow ID for SDXL generation (provided by developer)",
-        default=""  # USER WILL SET THIS WHEN WORKFLOWS ARE READY
+    # Unified Workflow ID (same for both SDXL and IPAdapter)
+    runcomfy_workflow_id: StringProperty(
+        name="Workflow ID",
+        description="RunComfy workflow ID (provided by developer, used for both SDXL and IPAdapter)",
+        default="f7ade856-0739-4fc8-8fa3-3b3857e2ebcb"
     )
     
-    runcomfy_workflow_id_ipadapter: StringProperty(
-        name="IPAdapter Workflow ID",
-        description="RunComfy workflow ID for IPAdapter generation (provided by developer)",
-        default=""  # USER WILL SET THIS WHEN WORKFLOWS ARE READY
-    )
-    
-    # Deployment IDs (optional - auto-created if not set)
-    runcomfy_deployment_id_sdxl: StringProperty(
-        name="SDXL Deployment ID",
-        description="Deployment ID for SDXL workflow (auto-created if empty)",
-        default="1c6fa9a6-f60a-4e89-863d-40b03ad2564e"
-    )
-    
-    runcomfy_deployment_id_ipadapter: StringProperty(
-        name="IPAdapter Deployment ID",
-        description="Deployment ID for IPAdapter workflow (auto-created if empty)",
+    # Unified Deployment ID (same for both SDXL and IPAdapter)
+    runcomfy_deployment_id: StringProperty(
+        name="Deployment ID",
+        description="Deployment ID (optional - auto-created if empty, used for both SDXL and IPAdapter)",
         default="1c6fa9a6-f60a-4e89-863d-40b03ad2564e"
     )
     
@@ -228,7 +216,16 @@ class StyleEnginePreferences(AddonPreferences):
                 row.label(text="(not set)")
         
         # User ID field
-        col.prop(self, "runcomfy_user_id", text="User ID")
+        if self.show_api_keys:
+            col.prop(self, "runcomfy_user_id", text="User ID")
+        else:
+            # Show masked version
+            row = col.row(align=True)
+            row.label(text="User ID:")
+            if self.runcomfy_user_id or env_user_id:
+                row.label(text="••••••••••••••••")
+            else:
+                row.label(text="(not set)")
         
         # Test connection button
         runcomfy_box.separator()
@@ -246,23 +243,21 @@ class StyleEnginePreferences(AddonPreferences):
                        icon=icon, emboss=False, toggle=True)
         
         if self.show_workflow_config:
-            # Workflow IDs
+            # Unified Workflow ID
             col = workflow_box.column(align=True)
             col.label(text="Workflow IDs (provided by developer):", icon='FILE_SCRIPT')
-            col.prop(self, "runcomfy_workflow_id_sdxl", text="SDXL")
-            col.prop(self, "runcomfy_workflow_id_ipadapter", text="IPAdapter")
+            col.prop(self, "runcomfy_workflow_id", text="Workflow ID")
             
             workflow_box.separator()
             
-            # Deployment IDs
+            # Unified Deployment ID
             col = workflow_box.column(align=True)
             col.label(text="Deployment IDs (optional - auto-created if empty):", icon='NETWORK_DRIVE')
-            col.prop(self, "runcomfy_deployment_id_sdxl", text="SDXL")
-            col.prop(self, "runcomfy_deployment_id_ipadapter", text="IPAdapter")
+            col.prop(self, "runcomfy_deployment_id", text="Deployment ID")
             
             workflow_box.separator()
             col = workflow_box.column(align=True)
-            col.label(text="Note: Deployments are automatically created if IDs are not set.", icon='INFO')
+            col.label(text="Note: Both SDXL and IPAdapter workflows use the same deployment.", icon='INFO')
         
         # ----------------------------------------------------------------
         # HARDWARE SETTINGS
@@ -276,7 +271,7 @@ class StyleEnginePreferences(AddonPreferences):
         
         if self.show_hardware_settings:
             # Hardware tier
-            hardware_box.label(text="GPU Tier:", icon='GPU')
+            hardware_box.label(text="GPU Tier:", icon='SHADING_RENDERED')
             hardware_box.prop(self, "runcomfy_hardware_tier", text="")
             
             hardware_box.separator()
@@ -398,16 +393,54 @@ class WM_OT_TestConnection(bpy.types.Operator):
             self.report({'ERROR'}, "RunComfy User ID is not set!")
             return {'CANCELLED'}
         
-        # TODO: Implement actual API connection test
-        self.report({'INFO'}, f"Testing connection with User ID: {user_id[:8]}...")
-        print(f"[Style Engine] Testing RunComfy connection...")
-        print(f"  User ID: {user_id}")
-        print(f"  API Token: {'*' * len(api_token)}")
-        
-        # Placeholder success message
-        self.report({'INFO'}, "Connection test successful! (placeholder)")
-        
-        return {'FINISHED'}
+        # REAL API CONNECTION TEST
+        try:
+            from . import runcomfy_client
+            
+            self.report({'INFO'}, f"Testing connection with User ID: {user_id[:8]}...")
+            print(f"[Style Engine] Testing RunComfy connection...")
+            
+            # Create client
+            client = runcomfy_client.RunComfyClient(
+                api_token=api_token,
+                user_id=user_id,
+                timeout=10  # Short timeout for test
+            )
+            
+            # Test 1: List deployments (lightweight API call)
+            print("[Style Engine] Fetching deployments...")
+            deployments = client.list_deployments()
+            
+            # Success!
+            deployment_count = len(deployments)
+            self.report({'INFO'}, f"✅ Connection successful! Found {deployment_count} deployment(s)")
+            print(f"[Style Engine] ✅ API connection verified!")
+            print(f"  Active deployments: {deployment_count}")
+            
+            # Show deployment IDs if any
+            if deployments:
+                print("  Your deployments:")
+                for dep in deployments[:3]:  # Show first 3
+                    dep_id = dep.get('id', 'unknown')
+                    dep_name = dep.get('name', 'unnamed')
+                    print(f"    - {dep_name} ({dep_id[:8]}...)")
+            
+            return {'FINISHED'}
+            
+        except runcomfy_client.RunComfyError as e:
+            # API error - credentials likely invalid
+            error_msg = str(e)
+            self.report({'ERROR'}, f"❌ Connection failed: {error_msg}")
+            print(f"[Style Engine] ❌ Connection test failed: {error_msg}")
+            return {'CANCELLED'}
+            
+        except Exception as e:
+            # Unexpected error
+            self.report({'ERROR'}, f"❌ Unexpected error: {e}")
+            print(f"[Style Engine] ❌ Unexpected error during connection test: {e}")
+            import traceback
+            traceback.print_exc()
+            return {'CANCELLED'}
     
     @staticmethod
     def get_api_token(prefs):

@@ -103,7 +103,7 @@ class RunComfyPoller:
                 elapsed = current_time - state.start_time
                 if elapsed > prefs.runcomfy_request_timeout:
                     print(f"[RunComfy] Request {request_id[:8]} timed out after {elapsed:.0f}s")
-                    state.callback(success=False, error=f"Timeout after {elapsed:.0f}s")
+                    state.callback(success=False, error=f"Timeout after {elapsed:.0f}s", workflow_type=state.workflow_type)
                     completed.append(request_id)
                     continue
                 
@@ -119,7 +119,7 @@ class RunComfyPoller:
                 # Handle completion
                 if state.status == 'completed':
                     result = client.get_result(state.deployment_id, request_id)
-                    state.callback(success=True, result=result)
+                    state.callback(success=True, result=result, workflow_type=state.workflow_type)
                     completed.append(request_id)
                     print(f"[RunComfy] Request {request_id[:8]} completed!")
                 
@@ -127,7 +127,7 @@ class RunComfyPoller:
                 elif state.status == 'failed':
                     result = client.get_result(state.deployment_id, request_id)
                     error_msg = result.get('error', 'Unknown error')
-                    state.callback(success=False, error=error_msg)
+                    state.callback(success=False, error=error_msg, workflow_type=state.workflow_type)
                     completed.append(request_id)
                     print(f"[RunComfy] Request {request_id[:8]} failed: {error_msg}")
                 
@@ -196,20 +196,20 @@ class RunComfyPoller:
     @classmethod
     def get_server_status(cls):
         """
-        Get server status for UI display.
+        Get generation status for UI display.
         
         Returns:
-            str: Status string ("Disconnected", "Connecting", "Active", "Running Workflow")
+            str: Status string ("Idle", "Queued", "Active", "Generating")
         """
         if not cls.active_requests:
-            return "Disconnected"
+            return "Idle"
         
         statuses = [state.status for state in cls.active_requests.values()]
         
         if any(s == 'in_progress' for s in statuses):
-            return "Running Workflow"
+            return "Generating"
         elif any(s == 'in_queue' for s in statuses):
-            return "Connecting"
+            return "Queued"
         else:
             return "Active"
     

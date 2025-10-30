@@ -68,22 +68,15 @@ class DeploymentManager:
         prefs = get_addon_prefs()
         client = get_runcomfy_client()
         
-        # Determine which deployment to use
-        if workflow_type == 'sdxl':
-            deployment_id = prefs.runcomfy_deployment_id_sdxl
-            workflow_id = prefs.runcomfy_workflow_id_sdxl
-            deployment_name = "Style Engine - SDXL"
-        elif workflow_type == 'ipadapter':
-            deployment_id = prefs.runcomfy_deployment_id_ipadapter
-            workflow_id = prefs.runcomfy_workflow_id_ipadapter
-            deployment_name = "Style Engine - IPAdapter"
-        else:
-            raise RunComfyError(f"Unknown workflow type: {workflow_type}")
+        # Use unified deployment (same for both SDXL and IPAdapter)
+        deployment_id = prefs.runcomfy_deployment_id
+        workflow_id = prefs.runcomfy_workflow_id
+        deployment_name = f"Style Engine - {workflow_type.upper()}"
         
         # Check if workflow_id is set
         if not workflow_id:
             raise RunComfyError(
-                f"{workflow_type.upper()} workflow ID not configured. "
+                f"Workflow ID not configured. "
                 "Please set workflow ID in addon preferences."
             )
         
@@ -110,11 +103,8 @@ class DeploymentManager:
         new_deployment_id = new_deployment['id']
         print(f"[RunComfy] Created deployment: {new_deployment_id[:8]}...")
         
-        # Save deployment_id to preferences
-        if workflow_type == 'sdxl':
-            prefs.runcomfy_deployment_id_sdxl = new_deployment_id
-        else:
-            prefs.runcomfy_deployment_id_ipadapter = new_deployment_id
+        # Save deployment_id to preferences (unified for both workflows)
+        prefs.runcomfy_deployment_id = new_deployment_id
         
         return new_deployment_id
     

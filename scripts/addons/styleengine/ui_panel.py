@@ -170,6 +170,22 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         self.refresh_viewport = self.auto_generate
         # Update session JSON
         self.update_session_json(context)
+        
+        # ✅ Start cyclical auto-generation if enabled
+        if self.auto_generate:
+            # Check if ai_camera exists
+            if "ai_camera" not in bpy.data.objects:
+                print("[Style Engine] ⚠️ Cannot start auto-generate: ai_camera not found!")
+                print("[Style Engine] Please run 'Setup Workspace' first.")
+                self.auto_generate = False  # Disable to prevent infinite errors
+                return
+            
+            from . import workspace_setup
+            print("[Style Engine] 🚀 Auto-generate enabled! Starting cyclical generation...")
+            # Start the first generation cycle
+            bpy.app.timers.register(workspace_setup.start_generation_cycle, first_interval=0.5)
+        else:
+            print("[Style Engine] Auto-generate disabled. Stopping cyclical generation.")
     
     auto_generate: bpy.props.BoolProperty(
         name="Auto-Generate AI",
@@ -871,11 +887,11 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
             setup_box.label(text="Output Path:")
             setup_box.prop(style_props, "output_path", text="")
         
-        # --- Server Status Indicator ---
+        # --- Generation Status Indicator ---
         layout.separator()
         status_box = layout.box()
         row = status_box.row()
-        row.label(text="Server Status:", icon='NETWORK_DRIVE')
+        row.label(text="Generation Status:", icon='RENDER_ANIMATION')
         
         # Get server status from poller
         try:
@@ -883,10 +899,10 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
             server_status = runcomfy_polling.RunComfyPoller.get_server_status()
             
             status_icons = {
-                'Disconnected': 'CANCEL',
-                'Connecting': 'TIME',
+                'Idle': 'CHECKMARK',
+                'Queued': 'TIME',
                 'Active': 'CHECKMARK',
-                'Running Workflow': 'RENDER_ANIMATION'
+                'Generating': 'RENDER_ANIMATION'
             }
             row.label(text=server_status, icon=status_icons.get(server_status, 'QUESTION'))
             

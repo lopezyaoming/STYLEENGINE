@@ -4,12 +4,28 @@ Standalone test script for RunComfy API validation.
 Tests all API endpoints before integration into Blender addon.
 
 Usage:
+    # Interactive mode (will prompt for workflow choice):
     python tests/test_runcomfy_api.py
+    
+    # Or set workflow via environment variable:
+    WORKFLOW_MODE=sdxl python tests/test_runcomfy_api.py
+    WORKFLOW_MODE=ipadapter python tests/test_runcomfy_api.py
+    
+    # Test with batch mode (checks if models stay warm):
+    RUNCOMFY_BATCH_TEST=1 python tests/test_runcomfy_api.py
 
 Requirements:
     - Set RUNCOMFY_API_TOKEN environment variable
     - Set RUNCOMFY_USER_ID environment variable
     - Have a test image at tests/test_image.png (optional)
+    - For IPAdapter mode: Have tests/IPtest.jpeg (reference image)
+
+Environment Variables:
+    RUNCOMFY_API_TOKEN  - Your RunComfy API token (required)
+    RUNCOMFY_USER_ID    - Your RunComfy user ID (required)
+    WORKFLOW_MODE       - 'sdxl' or 'ipadapter' (optional, will prompt if not set)
+    RUNCOMFY_BATCH_TEST - '1' to enable batch testing (tests model warmth)
+    RUNCOMFY_AUTO_TEST  - '1' to skip confirmation prompts
 """
 
 import urllib.request
@@ -25,9 +41,14 @@ from pathlib import Path
 API_BASE = "https://api.runcomfy.net"
 TEST_PROMPT = "a beautiful sunset over mountains, photorealistic, 8k"
 TEST_IMAGE_PATH = Path(__file__).parent / "test_image.png"
+TEST_IPADAPTER_REFERENCE = Path(__file__).parent / "IPtest.jpeg"  # Reference image for IPAdapter mode
 
 # Deployment ID (from RunComfy)
 TEST_DEPLOYMENT_ID = "1c6fa9a6-f60a-4e89-863d-40b03ad2564e"  # NEW: Style Engine with easy imageSave
+
+# Workflow selection (can be set via environment variable or interactive prompt)
+# Options: 'sdxl' (default) or 'ipadapter'
+WORKFLOW_MODE = None  # Will be set interactively or via env var
 
 # Color codes for terminal output
 GREEN = '\033[92m'
@@ -120,11 +141,23 @@ class RunComfyTestClient:
 
 
 def encode_image_to_base64(image_path):
-    """Encode PNG to base64 data URI"""
+    """Encode image to base64 data URI (supports PNG and JPEG)"""
     try:
+        image_path = Path(image_path)
+        
+        # Determine MIME type from extension
+        ext = image_path.suffix.lower()
+        if ext in ['.jpg', '.jpeg']:
+            mime_type = 'image/jpeg'
+        elif ext == '.png':
+            mime_type = 'image/png'
+        else:
+            raise ValueError(f"Unsupported image format: {ext}")
+        
         with open(image_path, 'rb') as f:
             img_data = base64.b64encode(f.read()).decode('utf-8')
-        return f"data:image/png;base64,{img_data}"
+        
+        return f"data:{mime_type};base64,{img_data}"
     except Exception as e:
         raise Exception(f"Failed to encode image: {e}")
 
@@ -220,8 +253,10 @@ def test_get_deployment(client, deployment_id):
 
 
 def test_submit_inference(client, deployment_id):
-    """Test 4: Submit inference"""
+    """Test 4: Submit inference (supports SDXL and IPAdapter modes)"""
     log_info(f"Test 4: Submitting inference to {deployment_id[:8]}...")
+    log_info(f"  Workflow Mode: {WORKFLOW_MODE.upper()}")
+    
     try:
         # Generate random seed to avoid ComfyUI caching
         import random
@@ -229,7 +264,7 @@ def test_submit_inference(client, deployment_id):
         
         log_info(f"  Using random seed: {seed} to avoid caching")
         
-        # Test overrides matching SDXL workflow structure
+        # Base overrides (common to both workflows)
         overrides = {
             "25": {"inputs": {"value": TEST_PROMPT}},      # Prompt
             "40": {"inputs": {"value": 0.75}},             # Silhouette strength
@@ -237,6 +272,31 @@ def test_submit_inference(client, deployment_id):
             "42": {"inputs": {"value": 15}},               # Steps
             "3": {"inputs": {"seed": seed}}                # Random seed to force new generation
         }
+        
+        # Add IPAdapter-specific overrides
+        if WORKFLOW_MODE == 'ipadapter':
+            if not TEST_IPADAPTER_REFERENCE.exists():
+                log_error(f"  IPAdapter reference image not found: {TEST_IPADAPTER_REFERENCE}")
+                log_error(f"  Falling back to SDXL mode")
+            else:
+                log_info(f"  Encoding IPAdapter reference: {TEST_IPADAPTER_REFERENCE.name}")
+                try:
+                    ref_image_b64 = encode_image_to_base64(str(TEST_IPADAPTER_REFERENCE))
+                    ref_size_kb = len(ref_image_b64) / 1024
+                    log_info(f"  Reference image encoded: {ref_size_kb:.2f} KB")
+                    
+                    # Add IPAdapter-specific nodes
+                    overrides.update({
+                        "43": {"inputs": {"image": ref_image_b64}},           # IPAdapter reference image
+                        "52": {"inputs": {"value": 0.8}}                      # IPAdapter strength
+                    })
+                    # Note: Node 49 (IPAdapterEmbeds) has upstream connections and should NOT be overridden
+                    
+                    log_success(f"  IPAdapter mode enabled with reference image")
+                except Exception as e:
+                    log_error(f"  Failed to encode reference image: {e}")
+                    log_error(f"  Falling back to SDXL mode")
+        
         # Note: Node 15 (combined image) is optional for testing without actual image
         
         response = client.submit_inference(deployment_id, overrides)
@@ -246,6 +306,8 @@ def test_submit_inference(client, deployment_id):
         return request_id
     except Exception as e:
         log_error(f"Failed to submit inference: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 
@@ -543,41 +605,94 @@ def test_poll_status(client, deployment_id, request_id):
 
 
 def test_get_result(client, deployment_id, request_id, api_token):
-    """Test 6: Get result and download image"""
+    """Test 6: Get result and download image (with detailed debugging)"""
     log_info(f"Test 6: Getting result for request {request_id[:8]}...")
+    log_info(f"  Workflow Mode: {WORKFLOW_MODE.upper()}")
+    
     try:
         result = client.get_result(deployment_id, request_id)
         
         # DEBUG: Print the entire result structure
-        log_info("=== FULL RESULT STRUCTURE ===")
+        log_info("=" * 80)
+        log_info("  🔍 FULL RESULT STRUCTURE")
+        log_info("=" * 80)
         print(json.dumps(result, indent=2))
-        log_info("=============================")
+        log_info("=" * 80)
         
         # Check for instance_id
         instance_id = result.get('instance_id')
         if instance_id:
-            log_info(f"Found instance_id: {instance_id[:16]}...")
+            log_info(f"✓ Found instance_id: {instance_id[:16]}...")
         else:
-            log_warning("No instance_id in result")
+            log_warning("✗ No instance_id in result")
         
         # Extract image URL
         outputs = result.get('outputs', {})
-        image_url = None
+        log_info(f"\n📊 Outputs Analysis:")
+        log_info(f"  Total output nodes: {len(outputs)}")
         
-        # Try Node 53 first (easy imageSave - new deployment)
-        if '53' in outputs and 'images' in outputs['53']:
-            node_output = outputs['53']
-            log_info("Checking Node 53 (easy imageSave): Found!")
-        # Fallback to any node with images
+        # Debug: Show all output node IDs and their structure
+        for node_id, node_output in outputs.items():
+            log_info(f"\n  Node {node_id}:")
+            log_info(f"    Keys: {list(node_output.keys())}")
+            if 'images' in node_output:
+                images = node_output['images']
+                log_info(f"    Has 'images': YES ({len(images)} image(s))")
+                if images:
+                    first_img = images[0]
+                    if isinstance(first_img, dict):
+                        log_info(f"    First image keys: {list(first_img.keys())}")
+                        if 'url' in first_img:
+                            log_success(f"    First image URL: {first_img['url'][:60]}...")
+                        elif 'filename' in first_img:
+                            log_warning(f"    First image filename: {first_img.get('filename')}")
+                    else:
+                        log_info(f"    First image type: {type(first_img)}")
+            else:
+                log_warning(f"    Has 'images': NO")
+        
+        log_info("")
+        image_url = None
+        node_output = None
+        
+        # Workflow-specific output node detection
+        if WORKFLOW_MODE == 'ipadapter':
+            # IPAdapter workflow outputs to Node 9 (SaveImage)
+            if '9' in outputs and 'images' in outputs['9']:
+                node_output = outputs['9']
+                log_success("✓ Found output in Node 9 (IPAdapter SaveImage)")
+            else:
+                log_warning("✗ Node 9 not found in IPAdapter mode, checking all nodes...")
         else:
-            log_info("Node 53 not found, checking all nodes...")
+            # SDXL workflow outputs to Node 53 (easy imageSave)
+            if '53' in outputs and 'images' in outputs['53']:
+                node_output = outputs['53']
+                log_success("✓ Found output in Node 53 (SDXL easy imageSave)")
+            else:
+                log_warning("✗ Node 53 not found in SDXL mode, checking all nodes...")
+        
+        # Fallback: check any node with images
+        # Priority: 'output' type images > 'temp' type images (last one wins)
+        if not node_output:
+            log_info("Searching all nodes for images...")
+            
+            # First pass: Look for 'output' type images (final SaveImage nodes)
             for node_id, node_data in outputs.items():
                 if 'images' in node_data and node_data['images']:
-                    node_output = node_data
-                    log_info(f"Found images in Node {node_id}")
-                    break
-            else:
-                node_output = None
+                    img_type = node_data['images'][0].get('type', '')
+                    if img_type == 'output':
+                        node_output = node_data
+                        log_success(f"✓ Found 'output' type image in Node {node_id}")
+                        break
+            
+            # Second pass: Accept any image if no 'output' found (last one wins)
+            if not node_output:
+                for node_id, node_data in outputs.items():
+                    if 'images' in node_data and node_data['images']:
+                        node_output = node_data
+                        img_type = node_data['images'][0].get('type', 'unknown')
+                        log_warning(f"Using '{img_type}' image from Node {node_id}")
+                        # Don't break - keep iterating to get the LAST one
         
         if node_output and 'images' in node_output and node_output['images']:
             first_image = node_output['images'][0]
@@ -723,6 +838,7 @@ def test_batch_inference(client, deployment_id, api_token, batch_size=2):
     """Test batch inference to check if models stay warm"""
     log_info(f"\n{'='*60}")
     log_info(f"  🚀 BATCH INFERENCE TEST ({batch_size} requests)")
+    log_info(f"  Workflow Mode: {WORKFLOW_MODE.upper()}")
     log_info(f"{'='*60}\n")
     
     request_data = []
@@ -735,6 +851,7 @@ def test_batch_inference(client, deployment_id, api_token, batch_size=2):
         
         log_info(f"\n[Request {i+1}/{batch_size}] Submitting with seed: {seed}")
         
+        # Base overrides
         overrides = {
             "25": {"inputs": {"value": TEST_PROMPT}},
             "40": {"inputs": {"value": 0.75}},
@@ -742,6 +859,17 @@ def test_batch_inference(client, deployment_id, api_token, batch_size=2):
             "42": {"inputs": {"value": 15}},
             "3": {"inputs": {"seed": seed}}
         }
+        
+        # Add IPAdapter overrides if needed
+        if WORKFLOW_MODE == 'ipadapter' and TEST_IPADAPTER_REFERENCE.exists():
+            try:
+                ref_image_b64 = encode_image_to_base64(str(TEST_IPADAPTER_REFERENCE))
+                overrides.update({
+                    "43": {"inputs": {"image": ref_image_b64}},
+                    "52": {"inputs": {"value": 0.8}}
+                })
+            except Exception as e:
+                log_error(f"  Failed to encode IPAdapter reference: {e}")
         
         # Submit directly with custom seed
         try:
@@ -810,6 +938,8 @@ def test_batch_inference(client, deployment_id, api_token, batch_size=2):
 
 def run_all_tests():
     """Run all tests"""
+    global WORKFLOW_MODE
+    
     print("\n" + "="*60)
     print("  RunComfy API Test Suite")
     print("="*60 + "\n")
@@ -829,6 +959,44 @@ def run_all_tests():
     log_success("Credentials found")
     log_info(f"User ID: {user_id}")
     log_info(f"API Token: {'*' * len(api_token)}")
+    print()
+    
+    # Workflow selection (interactive or from env var)
+    env_workflow = os.environ.get('WORKFLOW_MODE', '').lower()
+    
+    if env_workflow in ['sdxl', 'ipadapter']:
+        WORKFLOW_MODE = env_workflow
+        log_info(f"Using workflow from environment: {WORKFLOW_MODE.upper()}")
+    else:
+        # Interactive selection
+        print("="*60)
+        print("  🎨 Select Workflow Mode:")
+        print("="*60)
+        print(f"{BLUE}[1]{RESET} SDXL (Standard ControlNet workflow)")
+        print(f"{BLUE}[2]{RESET} IPAdapter (Image-to-Image with reference)")
+        print()
+        
+        try:
+            choice = input(f"Enter your choice (1 or 2) [{BLUE}1{RESET}]: ").strip()
+        except EOFError:
+            choice = '1'
+        
+        if choice == '2':
+            WORKFLOW_MODE = 'ipadapter'
+        else:
+            WORKFLOW_MODE = 'sdxl'
+    
+    # Display workflow mode
+    print()
+    log_success(f"Workflow Mode: {WORKFLOW_MODE.upper()}")
+    
+    if WORKFLOW_MODE == 'ipadapter':
+        if TEST_IPADAPTER_REFERENCE.exists():
+            log_success(f"  IPAdapter reference: {TEST_IPADAPTER_REFERENCE.name} ✓")
+        else:
+            log_error(f"  IPAdapter reference NOT FOUND: {TEST_IPADAPTER_REFERENCE}")
+            log_error(f"  Please ensure IPtest.jpeg exists in tests/ folder")
+            return False
     
     if batch_mode:
         log_info("🚀 BATCH MODE ENABLED")
