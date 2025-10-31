@@ -907,7 +907,8 @@ def build_runcomfy_overrides(session_data, combined_b64, depth_b64, workflow_typ
             "42": {"inputs": {"value": session_data.get('steps', 15)}},
             "43": {"inputs": {"image": ref_image_b64}},  # IPAdapter reference
             "52": {"inputs": {"value": session_data['ipadapter']['strength']}},
-            # Note: Node 49 (IPAdapterEmbeds) has upstream connections and should NOT be overridden
+            # Note: Node 49 (IPAdapterEmbeds) weight_type cannot be overridden due to upstream connections
+            # It uses the hardcoded value from the deployed workflow: "style transfer"
         }
 
 

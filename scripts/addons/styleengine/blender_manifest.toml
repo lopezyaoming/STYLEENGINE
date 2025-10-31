@@ -2,7 +2,7 @@ schema_version = "1.0.0"
 
 # Example of manifest file for a Blender extension
 # Change the values according to your extension
-id = "style_engine"
+id = "styleengine"
 version = "0.0.1"
 name = "Style Engine"
 tagline = "In-house AI Generation integration for Blender Workflows"
@@ -58,18 +58,17 @@ license = [
 # # Keep this a single short sentence without a period (.) at the end.
 # # For longer explanations use the documentation or detail page.
 #
-# [permissions]
-# network = "Need to sync motion-capture data to server"
-# files = "Import/export FBX from/to disk"
-# clipboard = "Copy and paste bone transforms"
+[permissions]
+network = "Connect to RunComfy API for cloud-based AI image generation"
+files = "Read/write render passes, session data, and generated images"
 
-# # Optional: advanced build settings.
-# # https://docs.blender.org/manual/en/dev/advanced/extensions/command_line_arguments.html#command-line-args-extension-build
-# [build]
-# # These are the default build excluded patterns.
-# # You only need to edit them if you want different options.
-# paths_exclude_pattern = [
-#   "__pycache__/",
-#   "/.git/",
-#   "/*.zip",
-# ]
+# Optional: advanced build settings.
+# https://docs.blender.org/manual/en/dev/advanced/extensions/command_line_arguments.html#command-line-args-extension-build
+[build]
+# Exclude unnecessary files from addon package
+paths_exclude_pattern = [
+  "__pycache__/",
+  "*.pyc",
+  ".git/",
+  "*.zip",
+]

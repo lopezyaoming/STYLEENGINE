@@ -55,8 +55,8 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
     
     output_path: bpy.props.StringProperty(
         name="Output Path",
-        description="Local directory to store renders and outputs",
-        default="C:\\output",
+        description="Local directory to store renders and outputs (leave empty to use default)",
+        default="",
         subtype='DIR_PATH',
         update=update_session_json
     )
@@ -278,10 +278,10 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
     
     ipadapter_strength: bpy.props.FloatProperty(
         name="Strength",
-        description="IPAdapter influence (0.0=off, 1.5=maximum)",
+        description="IPAdapter influence (0.0=off, 5.0=maximum)",
         default=0.75,
         min=0.0,
-        max=1.5,
+        max=5.0,
         step=5,
         precision=2,
         update=update_session_json
@@ -1000,7 +1000,7 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                     ipadapter_box.prop(style_props, "ipadapter_strength", slider=True, text="")
                     col = ipadapter_box.column(align=True)
                     col.scale_y = 0.7
-                    col.label(text="(0.0 = Off, 1.5 = Max)")
+                    col.label(text="(0.0 = Off, 5.0 = Max)")
             
             # # Groups section - COMMENTED OUT FOR NOW
             # gen_box.separator()

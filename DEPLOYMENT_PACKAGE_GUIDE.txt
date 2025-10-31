@@ -1,0 +1,132 @@
+===============================================
+   STYLE ENGINE - PACKAGING FOR DEPLOYMENT
+===============================================
+
+QUICK STEPS TO PACKAGE THE ADDON
+---------------------------------------------------
+
+Option 1: ZIP FILE (Recommended for Distribution)
+---------------------------------------------------
+
+1. Navigate to:
+   C:\Coding\STYLEENGINE\scripts\addons\
+
+2. Create a ZIP file containing the 'styleengine' folder:
+   - Right-click on 'styleengine' folder
+   - Send to → Compressed (zipped) folder
+   - Name it: styleengine.zip
+
+3. Share the ZIP file with users
+   - They install via: Edit → Preferences → Add-ons → Install
+
+
+Option 2: FOLDER COPY (Development/Internal Use)
+---------------------------------------------------
+
+1. Simply copy the entire folder:
+   C:\Coding\STYLEENGINE\scripts\addons\styleengine\
+
+2. Users paste it into their Blender addons folder:
+   Windows: C:\Users\[Name]\AppData\Roaming\Blender Foundation\Blender\[Version]\scripts\addons\
+   macOS:   ~/Library/Application Support/Blender/[Version]/scripts/addons/
+   Linux:   ~/.config/blender/[Version]/scripts/addons/
+
+
+FILES TO INCLUDE IN PACKAGE
+---------------------------------------------------
+
+✅ REQUIRED FILES (All in styleengine/ folder):
+   - __init__.py
+   - blender_manifest.toml
+   - prefs.py
+   - ui_panel.py
+   - workspace_setup.py
+   - runcomfy_client.py
+   - runcomfy_deployment.py
+   - runcomfy_polling.py
+   - utils.py
+
+📄 OPTIONAL (Helpful for users):
+   - README.md
+
+❌ DO NOT INCLUDE:
+   - __pycache__/ folders
+   - Any .pyc files
+   - Any test files
+
+
+WHAT USERS NEED
+---------------------------------------------------
+
+From you (the developer):
+✓ The styleengine.zip or styleengine/ folder
+✓ The Deployment ID: 1c6fa9a6-f60a-4e89-863d-40b03ad2564e
+✓ Installation instructions (see CREDENTIALS.txt)
+
+From them (the user):
+✓ Their own RunComfy API Token
+✓ Their own RunComfy User ID
+✓ Blender 4.2.0 or newer installed
+
+
+CURRENT DEPLOYMENT SETTINGS
+---------------------------------------------------
+
+Workflow ID (Built-in):
+f7ade856-0739-4fc8-8fa3-3b3857e2ebcb
+
+Deployment ID (Shared):
+1c6fa9a6-f60a-4e89-863d-40b03ad2564e
+
+Hardware Tier:
+A6000 48GB (AMPERE_48)
+
+Min Instances:
+0 (scales to zero when idle)
+
+Max Instances:
+1
+
+
+BEFORE PACKAGING - OPTIONAL UPDATES
+---------------------------------------------------
+
+1. Update permissions in blender_manifest.toml:
+   Add these lines around line 61:
+
+   [permissions]
+   network = "Connect to RunComfy API for cloud-based AI image generation"
+   files = "Read/write render passes, session data, and generated images"
+
+2. Update version number if needed:
+   - In __init__.py, line 9: "version": (0, 0, 1)
+   - In blender_manifest.toml, line 6: version = "0.0.1"
+
+
+TESTING BEFORE DEPLOYMENT
+---------------------------------------------------
+
+1. Clean install test:
+   - Install the addon on a fresh Blender installation
+   - Test with valid RunComfy credentials
+   - Try both SDXL and IPAdapter modes
+
+2. Cross-platform test (if possible):
+   - Test on Windows ✓ (your dev environment)
+   - Test on macOS (if available)
+   - Test on Linux (if available)
+
+
+SHARING WITH TEAM/USERS
+---------------------------------------------------
+
+Package contents:
+1. styleengine.zip (the addon)
+2. CREDENTIALS.txt (setup instructions + deployment ID)
+3. This guide (optional, for developers)
+
+
+===============================================
+           READY TO DEPLOY! 🚀
+===============================================
+

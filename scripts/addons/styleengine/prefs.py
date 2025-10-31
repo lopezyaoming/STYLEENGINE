@@ -156,7 +156,7 @@ class StyleEnginePreferences(AddonPreferences):
     # ComfyUI Installation Path (for local version reference)
     comfy_path: StringProperty(
         name="ComfyUI Path",
-        description="Path to your ComfyUI installation folder (e.g., C:\\ComfyUI or C:\\ComfyUI_windows_portable\\ComfyUI)",
+        description="Path to your ComfyUI installation folder (cross-platform support)",
         default="",
         subtype='DIR_PATH'
     )
@@ -357,9 +357,9 @@ class StyleEnginePreferences(AddonPreferences):
         comfy_box.separator()
         col = comfy_box.column(align=True)
         col.label(text="Example paths:")
-        col.label(text="  • C:\\ComfyUI")
-        col.label(text="  • C:\\ComfyUI_windows_portable\\ComfyUI")
-        col.label(text="  • D:\\AI\\ComfyUI")
+        col.label(text="  • Windows: C:\\ComfyUI or D:\\AI\\ComfyUI")
+        col.label(text="  • macOS: /Applications/ComfyUI")
+        col.label(text="  • Linux: /home/user/ComfyUI or ~/ComfyUI")
         
         # Instructions
         layout.separator()
