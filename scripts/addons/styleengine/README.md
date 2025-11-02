@@ -1,4 +1,54 @@
-# Style Engine - User Guide
+# Style Engine - Blender Addon
+
+AI-powered visual feedback for 3D modeling. See your scenes through AI eyes in real-time.
+
+---
+
+## 🚀 Quick Start Guide
+
+### Installation (2 minutes)
+
+**Method 1: Install ZIP (Recommended)**
+1. Download `styleengine.zip`
+2. Open Blender 4.2+
+3. Go to **Edit → Preferences → Add-ons**
+4. Click **Install from Disk...**
+5. Select `styleengine.zip`
+6. Enable **Style Engine** checkbox
+
+**Method 2: Development Install**
+```powershell
+# Run PowerShell as Administrator
+New-Item -ItemType SymbolicLink -Path "$env:APPDATA\Blender Foundation\Blender\4.4\scripts\addons\styleengine" -Target "C:\Coding\STYLEENGINE\scripts\addons\styleengine"
+```
+Then reload scripts in Blender (F3 → "Reload Scripts")
+
+### First Use (1 minute)
+
+1. **Open Style Engine panel:**
+   - Press `N` key in 3D viewport
+   - Find "Style Engine" tab
+
+2. **Configure RunComfy API** (in addon preferences):
+   - Expand Style Engine addon details
+   - Enter your `RUNCOMFY_API_TOKEN`
+   - Enter your `RUNCOMFY_USER_ID`
+   - Click "Test Connection"
+
+3. **Setup workspace:**
+   - Session ID: `myproject-001`
+   - Resolution: `1024x1024`
+   - Check ✓ **Refresh Viewport**
+   - Click **Setup Workspace**
+
+4. **Start creating:**
+   - Global Prompt: `"futuristic cityscape at sunset"`
+   - Add object groups with keywords
+   - Model in left view, see AI interpretation on right
+
+**That's it!** The addon auto-renders every 5 seconds and shows AI feedback in the camera view.
+
+---
 
 ## What is Style Engine?
 

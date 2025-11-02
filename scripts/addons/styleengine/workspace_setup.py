@@ -11,14 +11,39 @@ from pathlib import Path
 import urllib.request
 import urllib.error
 
-# Get the project root directory (C:\Coding\STYLEENGINE)
-# __file__ = .../scripts/addons/styleengine/workspace_setup.py
-# Go up 4 levels: styleengine -> addons -> scripts -> STYLEENGINE
-file_dir = os.path.abspath(__file__)  # workspace_setup.py
-addon_dir = os.path.dirname(file_dir)  # styleengine/
-addons_dir = os.path.dirname(addon_dir)  # addons/
-scripts_dir = os.path.dirname(addons_dir)  # scripts/
-ADDON_ROOT = os.path.dirname(scripts_dir)  # STYLEENGINE/
+# Get the addon directory (works both in dev and when installed from ZIP)
+ADDON_DIR = Path(__file__).parent
+
+def get_temp_directory(context=None):
+    """
+    Get the temp directory for storing AI vision data.
+    Priority:
+    1. Use .blend file directory if file is saved (//temp/ai_vision/)
+    2. Use output_path from preferences if set
+    3. Fall back to system temp directory
+    """
+    # Try to use .blend file directory first (relative path)
+    if bpy.data.is_saved:
+        blend_dir = Path(bpy.path.abspath("//"))
+        temp_dir = blend_dir / "temp" / "ai_vision"
+        return temp_dir
+    
+    # Try to use user's output_path setting
+    if context:
+        try:
+            props = context.scene.style_engine_props
+            if hasattr(props, 'output_path') and props.output_path:
+                output_path = Path(props.output_path)
+                if output_path.exists():
+                    temp_dir = output_path / "temp" / "ai_vision"
+                    return temp_dir
+        except:
+            pass
+    
+    # Fall back to system temp directory
+    import tempfile
+    temp_dir = Path(tempfile.gettempdir()) / "blender_styleengine" / "ai_vision"
+    return temp_dir
 
 # Global variable to track last modification time
 _last_image_mtime = 0
@@ -101,18 +126,19 @@ def write_session_json(context):
         }
         
         # Write to temp file then rename (atomic write)
-        session_path = os.path.join(ADDON_ROOT, "data", "temp", "ai_vision", "session.json")
+        temp_dir = get_temp_directory(context)
+        session_path = temp_dir / "session.json"
         
         # Ensure directory exists
-        os.makedirs(os.path.dirname(session_path), exist_ok=True)
+        temp_dir.mkdir(parents=True, exist_ok=True)
         
-        session_tmp = session_path + ".tmp"
+        session_tmp = str(session_path) + ".tmp"
         
         with open(session_tmp, 'w') as f:
             json.dump(session_data, f, indent=2)
         
         # Atomic replace
-        os.replace(session_tmp, session_path)
+        os.replace(session_tmp, str(session_path))
         
     except Exception as e:
         print(f"[Style Engine] Error writing session.json: {e}")
@@ -133,15 +159,16 @@ def refresh_ai_image():
             if bpy.app.timers.is_registered(refresh_ai_image):
                 return None  # Don't repeat
             
-        # Use the addon's installation directory
-        img_path = os.path.join(ADDON_ROOT, "data", "temp", "ai_vision", "current_ai.png")
+        # Get temp directory and image path
+        temp_dir = get_temp_directory(bpy.context)
+        img_path = temp_dir / "current_ai.png"
         
         # Check if file exists
-        if not os.path.exists(img_path):
+        if not img_path.exists():
             return 1.0  # Check again in 1 second
         
         # Get current modification time
-        current_mtime = os.path.getmtime(img_path)
+        current_mtime = img_path.stat().st_mtime
         
         # If the file has been modified since last check
         if current_mtime != _last_image_mtime:
@@ -205,8 +232,10 @@ def auto_render_passes():
         scene.eevee.taa_render_samples = 16
         
         # Set output path for the main render
-        passes_path = os.path.join(ADDON_ROOT, "data", "temp", "passes")
-        scene.render.filepath = os.path.join(passes_path, "combined")
+        temp_dir = get_temp_directory(bpy.context)
+        passes_dir = temp_dir.parent / "passes"
+        passes_dir.mkdir(parents=True, exist_ok=True)
+        scene.render.filepath = str(passes_dir / "combined")
         
         # Render
         print(f"[Style Engine] Auto-rendering from ai_camera...")
@@ -217,7 +246,7 @@ def auto_render_passes():
         scene.render.engine = original_engine
         scene.eevee.taa_render_samples = original_samples
         
-        print(f"[Style Engine] Render complete - saved to: {passes_path}")
+        print(f"[Style Engine] Render complete - saved to: {passes_dir}")
         
     except Exception as e:
         print(f"[Style Engine] Error in auto-render: {e}")
@@ -290,7 +319,7 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
     
     def execute(self, context):
         # Create temp directory for AI images
-        self.ensure_temp_directory()
+        self.ensure_temp_directory(context)
         
         # Create or get the AI camera
         ai_camera = self.create_ai_camera(context)
@@ -299,7 +328,7 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
         self.align_camera_to_view(context, ai_camera)
         
         # Setup camera background image
-        self.setup_camera_background(ai_camera)
+        self.setup_camera_background(context, ai_camera)
         
         # Create the AI workspace
         workspace = self.create_ai_workspace(context)
@@ -326,18 +355,18 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
         
         return {'FINISHED'}
     
-    def ensure_temp_directory(self):
+    def ensure_temp_directory(self, context):
         """Create the data/temp/ai_vision directory if it doesn't exist."""
-        # Use the addon's installation directory
-        temp_path = os.path.join(ADDON_ROOT, "data", "temp", "ai_vision")
-        os.makedirs(temp_path, exist_ok=True)
+        # Get temp directory using the new helper function
+        temp_path = get_temp_directory(context)
+        temp_path.mkdir(parents=True, exist_ok=True)
         
         print(f"[Style Engine] Temp directory: {temp_path}")
         
         # Create a placeholder image if it doesn't exist
-        placeholder_path = os.path.join(temp_path, "current_ai.png")
-        if not os.path.exists(placeholder_path):
-            self.create_placeholder_image(placeholder_path)
+        placeholder_path = temp_path / "current_ai.png"
+        if not placeholder_path.exists():
+            self.create_placeholder_image(str(placeholder_path))
         
         return temp_path
     
@@ -396,7 +425,7 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
         camera.rotation_euler = (1.1, 0, 0)
         context.scene.camera = camera
     
-    def setup_camera_background(self, camera):
+    def setup_camera_background(self, context, camera):
         """Setup the background image for the camera."""
         cam_data = camera.data
         
@@ -412,17 +441,18 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
         else:
             bg_img = cam_data.background_images.new()
         
-        # Use the addon's installation directory
-        img_path = os.path.join(ADDON_ROOT, "data", "temp", "ai_vision", "current_ai.png")
+        # Get temp directory and image path
+        temp_dir = get_temp_directory(context)
+        img_path = temp_dir / "current_ai.png"
         
         # Load or create the image
         if "current_ai.png" in bpy.data.images:
             img = bpy.data.images["current_ai.png"]
-            img.filepath = img_path
+            img.filepath = str(img_path)
             img.reload()
         else:
-            if os.path.exists(img_path):
-                img = bpy.data.images.load(img_path)
+            if img_path.exists():
+                img = bpy.data.images.load(str(img_path))
                 img.name = "current_ai.png"
             else:
                 # Create a placeholder
@@ -630,11 +660,11 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
         file_output = nodes.new(type='CompositorNodeOutputFile')
         file_output.location = (800, 0)
         
-        # Set base path to ai_vision/ folder (absolute path from addon root)
-        passes_path = os.path.join(ADDON_ROOT, "data", "temp", "ai_vision")
-        os.makedirs(passes_path, exist_ok=True)
+        # Set base path to ai_vision/ folder
+        temp_dir = get_temp_directory(context)
+        temp_dir.mkdir(parents=True, exist_ok=True)
         # Use absolute path with forward slashes (Blender compatible)
-        file_output.base_path = passes_path.replace("\\", "/") + "/"
+        file_output.base_path = str(temp_dir).replace("\\", "/") + "/"
         
         # Set format and overwrite settings
         file_output.format.file_format = 'PNG'
@@ -667,7 +697,7 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
         links.new(render_layers.outputs['AO'], file_output.inputs['ao'])
         
         print(f"[Style Engine] Compositor setup complete")
-        print(f"[Style Engine] Render passes output to: {passes_path}")
+        print(f"[Style Engine] Render passes output to: {temp_dir}")
         print(f"[Style Engine] Enabled passes: Combined, Mist (depth), AO")
         print(f"[Style Engine] Mist range: 0.0 - 100.0, Color ramp: 0.000 (white) to 0.010 (black)")
 
@@ -745,9 +775,9 @@ def render_passes(context):
         bpy.ops.render.render(write_still=True, use_viewport=False)
         
         # Verify outputs exist
-        addon_root = Path(ADDON_ROOT)
-        combined_path = addon_root / "data" / "temp" / "ai_vision" / "combined0001.png"
-        depth_path = addon_root / "data" / "temp" / "ai_vision" / "depth0001.png"
+        temp_dir = get_temp_directory(context)
+        combined_path = temp_dir / "combined0001.png"
+        depth_path = temp_dir / "depth0001.png"
         
         if not combined_path.exists():
             print(f"[Style Engine] WARNING: Combined pass not found at {combined_path}")
@@ -790,7 +820,8 @@ def generate_ai_image_cloud(context):
     render_passes(context)
     
     # 3. Read session data (create if doesn't exist)
-    session_json_path = Path(ADDON_ROOT) / "data" / "temp" / "ai_vision" / "session.json"
+    temp_dir = get_temp_directory(context)
+    session_json_path = temp_dir / "session.json"
     
     # Ensure session.json exists
     if not session_json_path.exists():
@@ -805,9 +836,8 @@ def generate_ai_image_cloud(context):
         return
     
     # 4. Encode images to base64
-    addon_root = Path(ADDON_ROOT)
-    combined_path = addon_root / "data" / "temp" / "ai_vision" / "combined0001.png"
-    depth_path = addon_root / "data" / "temp" / "ai_vision" / "depth0001.png"
+    combined_path = temp_dir / "combined0001.png"
+    depth_path = temp_dir / "depth0001.png"
     
     if not combined_path.exists() or not depth_path.exists():
         print("[Style Engine] Render passes not found")
@@ -989,8 +1019,8 @@ def on_generation_complete(context, success, result, error, workflow_type='sdxl'
         return
     
     # Download to temp (always)
-    addon_root = Path(ADDON_ROOT)
-    current_ai_path = addon_root / "data" / "temp" / "ai_vision" / "current_ai.png"
+    temp_dir = get_temp_directory(context)
+    current_ai_path = temp_dir / "current_ai.png"
     
     print(f"[Style Engine] Downloading result from: {image_url[:50]}...")
     
