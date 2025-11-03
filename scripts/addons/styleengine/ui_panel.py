@@ -291,54 +291,7 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
 # ----------------------------------------------------------------
 # 2. OPERATORS
 # ----------------------------------------------------------------
-class WM_OT_Visualize(bpy.types.Operator):
-    """Activates automatic projection of image."""
-    bl_idname = "style_engine.visualize"
-    bl_label = "Visualize (30s)"
-
-    def execute(self, context):
-        # Validate API credentials
-        is_valid, error_msg = utils.validate_runcomfy_credentials()
-        if not is_valid:
-            self.report({'ERROR'}, error_msg)
-            return {'CANCELLED'}
-        
-        props = context.scene.style_engine_props
-        api_token = utils.get_runcomfy_api_token()
-        user_id = utils.get_runcomfy_user_id()
-        
-        print(f"[Style Engine] Visualize Operation")
-        print(f"  User ID: {user_id}")
-        print(f"  API Token: {'*' * min(len(api_token), 20)}")
-        print(f"  Depth Influence: {props.depth_influence:.2f}")
-        print(f"  Silhouette Influence: {props.silhouette_influence:.2f}")
-        
-        # TODO: Implement actual API call to RunComfy
-        
-        self.report({'INFO'}, "Visualize operation started!")
-        return {'FINISHED'}
-
-class WM_OT_Create3D(bpy.types.Operator):
-    """Creates a specific asset."""
-    bl_idname = "style_engine.create_3d"
-    bl_label = "Create 3D"
-
-    def execute(self, context):
-        props = context.scene.style_engine_props
-        print(f"Create 3D Clicked: Depth={props.depth_influence:.2f}, Silhouette={props.silhouette_influence:.2f}")
-        self.report({'INFO'}, "Create 3D Operator Executed!")
-        return {'FINISHED'}
-
-class WM_OT_Render(bpy.types.Operator):
-    """Renders the image."""
-    bl_idname = "style_engine.render"
-    bl_label = "Render"
-
-    def execute(self, context):
-        props = context.scene.style_engine_props
-        print(f"Render Clicked: Depth={props.depth_influence:.2f}, Silhouette={props.silhouette_influence:.2f}")
-        self.report({'INFO'}, "Render Operator Executed!")
-        return {'FINISHED'}
+# Legacy operators removed - no longer needed
 
 
 class WM_OT_AddGroup(bpy.types.Operator):
@@ -1044,12 +997,7 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
             #             # Keywords input
             #             row.prop(group, "keywords", text="")
 
-        # --- Action Buttons ---
-        layout.separator()
-        button_row = layout.row(align=True)
-        button_row.operator("style_engine.visualize")
-        button_row.operator("style_engine.create_3d")
-        button_row.operator("style_engine.render")
+        # Legacy action buttons removed (Visualize, Create 3D, Render)
 
 
 # ----------------------------------------------------------------
@@ -1058,9 +1006,6 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
 classes = (
     ObjectGroup,
     StyleEngineProperties,
-    WM_OT_Visualize,
-    WM_OT_Create3D,
-    WM_OT_Render,
     WM_OT_AddGroup,
     WM_OT_AssignGroup,
     WM_OT_RenameGroup,

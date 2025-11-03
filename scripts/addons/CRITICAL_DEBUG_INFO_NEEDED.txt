@@ -1,0 +1,187 @@
+================================================================
+    🚨 CRITICAL DEBUG INFO NEEDED - Path Investigation
+================================================================
+
+STATUS: ZIP structure is VERIFIED CORRECT ✅
+ISSUE:  macOS Blender seems to be installing files incorrectly ❓
+
+================================================================
+ZIP STRUCTURE - VERIFIED CORRECT:
+================================================================
+
+Our styleengine.zip contains:
+```
+styleengine/              ← Folder at root ✅
+├── __init__.py
+├── utils.py
+├── prefs.py
+├── ui_panel.py
+├── workspace_setup.py
+├── runcomfy_client.py
+├── runcomfy_deployment.py
+├── runcomfy_polling.py
+└── README.md
+```
+
+This is the CORRECT structure for a Blender multi-file addon!
+
+================================================================
+WHAT THE ERROR TOLD US:
+================================================================
+
+Your error message was:
+```
+Directory: /Users/.../Blender/4.5/scripts/addons
+Missing files: ['__init__.py', 'utils.py', 'ui_panel.py', 'prefs.py']
+```
+
+This means:
+- addon_dir = /Users/.../addons  (WRONG - missing /styleengine)
+- Expected: addon_dir = /Users/.../addons/styleengine
+
+If addon_dir = os.path.dirname(__file__), then:
+- __file__ must be: /Users/.../addons/__init__.py
+- But it SHOULD be: /Users/.../addons/styleengine/__init__.py
+
+This suggests Blender on macOS might be:
+1. Extracting files to wrong location, OR
+2. Installing the addon differently than expected
+
+================================================================
+NEW DEBUG VERSION - INSTALL THIS:
+================================================================
+
+The new styleengine.zip now prints these debug lines:
+
+```
+[Style Engine] DEBUG: __file__ = ...
+[Style Engine] DEBUG: os.path.abspath(__file__) = ...
+[Style Engine] DEBUG: addon_dir = ...
+```
+
+PLEASE INSTALL THE NEW ZIP AND SEND ME THESE 3 DEBUG LINES!
+
+================================================================
+INSTALLATION STEPS:
+================================================================
+
+1. Delete/Uninstall any previous version of Style Engine
+
+2. Open Blender System Console:
+   Window → Toggle System Console
+   (KEEP THIS OPEN!)
+
+3. Install the NEW styleengine.zip:
+   Blender → Preferences → Add-ons
+   → Install from Disk
+   → Select styleengine.zip
+
+4. LOOK FOR THE DEBUG LINES IN THE CONSOLE:
+   ```
+   [Style Engine] DEBUG: __file__ = ???
+   [Style Engine] DEBUG: os.path.abspath(__file__) = ???
+   [Style Engine] DEBUG: addon_dir = ???
+   ```
+
+5. COPY AND PASTE THOSE 3 LINES TO ME!
+
+================================================================
+WHAT THE DEBUG LINES WILL TELL US:
+================================================================
+
+Scenario A: __file__ is correct
+```
+__file__ = /Users/.../addons/styleengine/__init__.py  ← Correct!
+addon_dir = /Users/.../addons/styleengine  ← Correct!
+```
+→ Path calculation is working, but something else is wrong
+
+Scenario B: __file__ is wrong (most likely)
+```
+__file__ = /Users/.../addons/__init__.py  ← WRONG!
+addon_dir = /Users/.../addons  ← WRONG!
+```
+→ Blender is installing files to wrong location
+→ This would be a Blender macOS bug or ZIP extraction issue
+
+Scenario C: __file__ has weird path
+```
+__file__ = styleengine  ← Relative path?
+addon_dir = /some/weird/path  ← Unexpected!
+```
+→ Something unusual is happening with path resolution
+
+================================================================
+POSSIBLE CAUSES:
+================================================================
+
+1. Blender macOS extracts ZIP differently than Windows
+   - Windows: Preserves folder structure
+   - macOS: Might flatten or rearrange?
+
+2. Blender 4.5 changed addon installation on macOS
+   - Different from 4.2/4.4 behavior
+   - New security or path handling
+
+3. macOS file system handling
+   - Case sensitivity issues?
+   - Special character handling?
+
+================================================================
+WHAT TO SEND ME:
+================================================================
+
+After installing the new styleengine.zip:
+
+1. The 3 DEBUG lines from console
+2. The full error message (if any)
+3. Any other [Style Engine] messages
+
+Example of what I need to see:
+```
+[Style Engine] DEBUG: __file__ = /Users/juanjoselopez/Library/Application Support/Blender/4.5/scripts/addons/styleengine/__init__.py
+[Style Engine] DEBUG: os.path.abspath(__file__) = /Users/juanjoselopez/Library/Application Support/Blender/4.5/scripts/addons/styleengine/__init__.py
+[Style Engine] DEBUG: addon_dir = /Users/juanjoselopez/Library/Application Support/Blender/4.5/scripts/addons/styleengine
+```
+
+OR if the path is wrong:
+```
+[Style Engine] DEBUG: __file__ = /Users/juanjoselopez/Library/Application Support/Blender/4.5/scripts/addons/__init__.py
+[Style Engine] DEBUG: os.path.abspath(__file__) = /Users/juanjoselopez/Library/Application Support/Blender/4.5/scripts/addons/__init__.py
+[Style Engine] DEBUG: addon_dir = /Users/juanjoselopez/Library/Application Support/Blender/4.5/scripts/addons
+```
+
+================================================================
+ADDITIONAL DIAGNOSTIC (Optional):
+================================================================
+
+If you can, please also check:
+
+1. Navigate to: /Users/juanjoselopez/Library/Application Support/Blender/4.5/scripts/addons/
+
+2. Look for either:
+   - A folder named "styleengine"
+   - OR files directly in "addons" folder
+
+3. Tell me what you see:
+   - Is there a "styleengine" folder? YES/NO
+   - If YES, does it contain __init__.py? YES/NO
+   - If NO, are files directly in "addons"? YES/NO
+
+================================================================
+PACKAGE LOCATION:
+================================================================
+
+File: C:\Coding\STYLEENGINE\scripts\addons\styleengine.zip
+Size: 38 KB
+Version: With __file__ debug output
+Status: ✅ ZIP structure verified correct, ready for macOS testing
+
+================================================================
+
+PLEASE INSTALL AND SEND ME THE DEBUG OUTPUT!
+This will definitively show us what's happening on macOS.
+
+================================================================
+
+

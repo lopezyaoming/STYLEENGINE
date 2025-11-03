@@ -372,11 +372,16 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
     
     def create_placeholder_image(self, path):
         """Create a placeholder image for testing."""
+        # Get resolution from user's settings
+        props = bpy.context.scene.style_engine_props
+        res_str = props.ai_resolution  # e.g., "1024x1024"
+        width, height = map(int, res_str.split('x'))
+        
         # Create a simple colored image in Blender
-        img = bpy.data.images.new("ai_placeholder", width=1920, height=1080)
+        img = bpy.data.images.new("ai_placeholder", width=width, height=height)
         
         # Fill with a gradient or pattern (optional visual feedback)
-        pixels = [0.1, 0.1, 0.2, 1.0] * (1920 * 1080)  # Dark blue
+        pixels = [0.1, 0.1, 0.2, 1.0] * (width * height)  # Dark blue
         img.pixels = pixels
         
         # Save it
@@ -384,7 +389,7 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
         img.file_format = 'PNG'
         img.save()
         
-        print(f"[Style Engine] Created placeholder image: {path}")
+        print(f"[Style Engine] Created placeholder image: {path} ({width}x{height})")
     
     def create_ai_camera(self, context):
         """Create or get the AI camera object."""
@@ -455,8 +460,11 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
                 img = bpy.data.images.load(str(img_path))
                 img.name = "current_ai.png"
             else:
-                # Create a placeholder
-                img = bpy.data.images.new("current_ai.png", width=1920, height=1080)
+                # Create a placeholder with correct resolution
+                props = context.scene.style_engine_props
+                res_str = props.ai_resolution
+                width, height = map(int, res_str.split('x'))
+                img = bpy.data.images.new("current_ai.png", width=width, height=height)
         
         # Setup background image properties
         bg_img.image = img
@@ -468,13 +476,16 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
         bg_img.display_depth = 'FRONT'  # Display in front
         bg_img.frame_method = 'STRETCH'
         
-        # Set render resolution to match image resolution
-        img_width, img_height = img.size
-        bpy.context.scene.render.resolution_x = img_width
-        bpy.context.scene.render.resolution_y = img_height
+        # Set render resolution based on user's ai_resolution setting
+        props = context.scene.style_engine_props
+        res_str = props.ai_resolution  # e.g., "1024x1024"
+        render_width, render_height = map(int, res_str.split('x'))
+        
+        context.scene.render.resolution_x = render_width
+        context.scene.render.resolution_y = render_height
         
         print(f"[Style Engine] Background image set: {img_path}")
-        print(f"[Style Engine] Camera resolution set to: {img_width}x{img_height}")
+        print(f"[Style Engine] Render resolution set to: {render_width}x{render_height} (from ai_resolution setting)")
     
     def create_ai_workspace(self, context):
         """Create the AI workspace or return existing one."""

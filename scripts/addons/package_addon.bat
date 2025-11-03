@@ -65,7 +65,7 @@ echo.
 
 REM Create ZIP using PowerShell (available on all modern Windows)
 echo Creating ZIP archive...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Type -Assembly System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::CreateFromDirectory('%TEMP_ADDON%', '%OUTPUT_ZIP%', 'Optimal', $false)"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Type -Assembly System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::CreateFromDirectory('%TEMP_DIR%', '%OUTPUT_ZIP%', 'Optimal', $false)"
 
 if !errorlevel! neq 0 (
     echo ERROR: Failed to create ZIP archive
@@ -82,21 +82,60 @@ if exist "%OUTPUT_ZIP%" (
     set /a ZIP_SIZE_KB=!ZIP_SIZE! / 1024
     
     echo ===============================================
-    echo   SUCCESS!
+    echo   ZIP CREATED
     echo ===============================================
     echo.
     echo Package created: %OUTPUT_ZIP%
     echo Size: !ZIP_SIZE_KB! KB
     echo.
-    echo Installation steps:
-    echo 1. Open Blender 4.2+
-    echo 2. Edit -^> Preferences -^> Add-ons
-    echo 3. Click Install from Disk...
-    echo 4. Select: %OUTPUT_ZIP%
-    echo 5. Enable the Style Engine addon
+    
+    REM Run validation if Python is available
+    echo Running validation checks...
     echo.
-    echo Cross-platform compatible: Windows, macOS, Linux
+    where python >nul 2>nul
+    if !errorlevel! equ 0 (
+        python validate_package.py "%OUTPUT_ZIP%"
+        set VALIDATION_RESULT=!errorlevel!
+    ) else (
+        where py >nul 2>nul
+        if !errorlevel! equ 0 (
+            py validate_package.py "%OUTPUT_ZIP%"
+            set VALIDATION_RESULT=!errorlevel!
+        ) else (
+            echo [!] Python not found in PATH - skipping validation
+            echo [!] To validate manually, run:
+            echo [!]   python validate_package.py styleengine.zip
+            set VALIDATION_RESULT=0
+        )
+    )
     echo.
+    
+    if !VALIDATION_RESULT! equ 0 (
+        echo ===============================================
+        echo   SUCCESS!
+        echo ===============================================
+        echo.
+        echo Installation steps:
+        echo 1. Open Blender 4.2+
+        echo 2. Edit -^> Preferences -^> Add-ons
+        echo 3. Click Install from Disk...
+        echo 4. Select: %OUTPUT_ZIP%
+        echo 5. Enable the Style Engine addon
+        echo.
+        echo Cross-platform compatible: Windows, macOS, Linux
+        echo.
+        echo For macOS testing checklist, see:
+        echo   CROSS_PLATFORM_TESTING.md
+        echo.
+    ) else (
+        echo ===============================================
+        echo   WARNING: Validation issues found
+        echo ===============================================
+        echo.
+        echo Package created but validation detected issues.
+        echo Review the errors above before distribution.
+        echo.
+    )
 ) else (
     echo ERROR: Failed to create ZIP package
     exit /b 1

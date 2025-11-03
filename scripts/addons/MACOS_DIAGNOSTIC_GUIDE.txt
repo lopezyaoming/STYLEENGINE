@@ -1,0 +1,190 @@
+================================================================
+    macOS DIAGNOSTIC GUIDE - Debug Information Enabled
+================================================================
+
+Package: styleengine.zip (38 KB)
+Status: ✅ Ready for diagnostic testing
+
+================================================================
+CHANGES MADE:
+================================================================
+
+1. ✅ Added detailed debug output
+2. ✅ Added path verification
+3. ✅ Added explicit error messages
+4. ✅ Load utils.py first (required by other modules)
+5. ✅ Verify addon_dir points to correct location
+
+================================================================
+INSTALL ON macOS AND CHECK CONSOLE OUTPUT:
+================================================================
+
+STEP 1: Open Blender System Console
+------------------------------------
+Window → Toggle System Console
+(Keep this open to see debug messages)
+
+STEP 2: Install the Addon
+--------------------------
+1. Blender → Preferences → Add-ons
+2. Click "Install from Disk..."
+3. Select styleengine.zip
+4. Click "Install Add-on"
+
+STEP 3: Look for These Debug Messages:
+---------------------------------------
+
+If fallback imports are triggered, you'll see:
+
+✅ EXPECTED OUTPUT (if working):
+```
+[Style Engine] Using fallback imports (macOS compatibility mode)
+[Style Engine] Addon directory: /Users/.../Blender/4.5/scripts/addons/styleengine
+[Style Engine] Import error: ...
+[Style Engine] Created package: styleengine
+[Style Engine] Loading module: styleengine.utils from /Users/.../styleengine/utils.py
+[Style Engine] Successfully loaded: styleengine.utils
+[Style Engine] Loading module: styleengine.ui_panel from /Users/.../styleengine/ui_panel.py
+[Style Engine] Successfully loaded: styleengine.ui_panel
+[Style Engine] Loading module: styleengine.prefs from /Users/.../styleengine/prefs.py
+[Style Engine] Successfully loaded: styleengine.prefs
+... (more modules)
+[Style Engine] All modules loaded successfully!
+```
+
+❌ IF PATH IS WRONG, YOU'LL SEE:
+```
+[Style Engine] Using fallback imports (macOS compatibility mode)
+[Style Engine] Addon directory: /Users/.../Blender/4.5/scripts/addons  ← WRONG! Missing /styleengine
+[Style Engine] Addon directory path is incorrect!
+  Directory: /Users/.../Blender/4.5/scripts/addons
+  Missing files: ['__init__.py', 'utils.py', 'ui_panel.py', 'prefs.py']
+  This usually means the ZIP structure is wrong.
+```
+
+❌ IF FILE NOT FOUND:
+```
+[Style Engine] Loading module: styleengine.utils from /Users/.../utils.py
+[Style Engine] Module file not found!
+  Expected: /Users/.../utils.py
+  Addon directory: /Users/.../addons
+  Check ZIP structure: should have styleengine/ folder at root
+```
+
+================================================================
+WHAT TO REPORT BACK:
+================================================================
+
+Please copy and paste the EXACT console output you see, specifically:
+
+1. The "Addon directory:" line
+2. Any error messages
+3. Which modules successfully loaded (if any)
+
+Example of what to send:
+```
+[Style Engine] Using fallback imports (macOS compatibility mode)
+[Style Engine] Addon directory: /Users/juanjoselopez/Library/Application Support/Blender/4.5/scripts/addons/styleengine
+[Style Engine] Loading module: styleengine.utils from /Users/juanjoselopez/Library/Application Support/Blender/4.5/scripts/addons/styleengine/utils.py
+[Style Engine] Successfully loaded: styleengine.utils
+...
+```
+
+================================================================
+VERIFY ZIP STRUCTURE:
+================================================================
+
+Before installing, you can verify the ZIP structure:
+
+1. Unzip styleengine.zip to a folder
+2. Check the structure:
+   ```
+   styleengine/              ← This folder MUST be at root
+   ├── __init__.py
+   ├── utils.py
+   ├── ui_panel.py
+   ├── prefs.py
+   ├── workspace_setup.py
+   ├── runcomfy_client.py
+   ├── runcomfy_deployment.py
+   ├── runcomfy_polling.py
+   └── README.md
+   ```
+
+3. If you see files DIRECTLY in the root (without styleengine folder),
+   the ZIP is packaged incorrectly!
+
+================================================================
+EXPECTED BEHAVIOR:
+================================================================
+
+✅ SCENARIO A: Relative imports work (Windows/some macOS)
+   - No fallback messages
+   - Addon installs silently
+   - Panel appears in 3D View sidebar
+
+✅ SCENARIO B: Fallback imports work (strict macOS)
+   - Fallback messages appear
+   - All modules load successfully
+   - Panel appears in 3D View sidebar
+
+❌ SCENARIO C: Path is wrong
+   - Fallback messages appear
+   - "Addon directory path is incorrect" error
+   - Need to fix ZIP structure
+
+❌ SCENARIO D: File not found
+   - Fallback messages appear
+   - "Module file not found" error
+   - Check addon_dir path from console
+
+================================================================
+NEXT STEPS BASED ON OUTPUT:
+================================================================
+
+IF: All modules load successfully
+→ GREAT! The addon should work. Test the features.
+
+IF: "Addon directory path is incorrect"
+→ ZIP structure is wrong. Verify styleengine/ folder exists.
+
+IF: "Module file not found"
+→ addon_dir is pointing to wrong location.
+→ Send console output so we can diagnose.
+
+IF: Module loads but fails during execution
+→ Check which module failed
+→ Look for the error after "Failed to load"
+→ This tells us which module has an issue
+
+================================================================
+COMMON ISSUES:
+================================================================
+
+ISSUE: addon_dir = "/Users/.../addons" (missing /styleengine)
+CAUSE: ZIP was created with files at root, not in subfolder
+FIX:   Repackage ZIP with proper structure
+
+ISSUE: "No such file or directory: '.../addons/utils.py'"
+CAUSE: Same as above - missing styleengine subfolder
+FIX:   Verify ZIP structure
+
+ISSUE: "ImportError: cannot import name 'X' from 'styleengine.Y'"
+CAUSE: Circular import or missing dependency
+FIX:   Load modules in correct order (utils first)
+
+================================================================
+PACKAGE LOCATION:
+================================================================
+
+File: C:\Coding\STYLEENGINE\scripts\addons\styleengine.zip
+Size: 38 KB
+Created: With debug output enabled
+
+================================================================
+
+Ready for testing! Install on macOS and send console output.
+
+================================================================
+
+
