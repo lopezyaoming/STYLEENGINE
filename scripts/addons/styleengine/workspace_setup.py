@@ -196,40 +196,47 @@ def refresh_ai_image():
 
 def auto_render_passes():
     """
-    Auto-render timer that renders ai_camera every X seconds with all passes.
-    IMPORTANT: This timer is DISABLED when auto_generate is enabled.
-    Auto-generate uses its own cyclical system (render → generate → download → repeat).
+    Auto-render timer with SURGICAL camera handling.
+    DEPRECATED: Rendering should only happen when needed (cyclical with generation).
+    This timer is kept for compatibility but should remain disabled.
     """
     try:
         # Check if refresh is still enabled
         props = bpy.context.scene.style_engine_props
+        prefs = bpy.context.preferences.addons['styleengine'].preferences
+        
         if not props.refresh_viewport:
             # Stop the timer if refresh is disabled
             return None
         
-        # ⚠️ DISABLE timer-based rendering when auto-generate is enabled
-        # Auto-generate uses cyclical system instead
-        if hasattr(props, 'auto_generate') and props.auto_generate:
-            print("[Style Engine] Auto-generate is active, skipping timer-based render")
-            return RENDER_INTERVAL  # Keep timer alive but skip rendering
+        # ⚠️ ALWAYS SKIP timer-based rendering - wasteful!
+        # Rendering happens cyclically with generation instead:
+        # 1. Render on setup (initial)
+        # 2. Render before sending to AI (in generate_ai_image_cloud)
+        # 3. After receiving AI result, render for next iteration
+        if prefs.debug_mode:
+            print("[Style Engine] Skipping timer-based render (wasteful - use cyclical generation instead)")
+        return RENDER_INTERVAL  # Keep timer alive but never render
+        
+        camera_name = prefs.camera_name_override
         
         # Find the ai_camera
-        if "ai_camera" not in bpy.data.objects:
-            print("[Style Engine] ai_camera not found, skipping render")
+        if camera_name not in bpy.data.objects:
+            print(f"[Style Engine] {camera_name} not found, skipping render")
             return RENDER_INTERVAL
         
-        ai_camera = bpy.data.objects["ai_camera"]
+        ai_camera = bpy.data.objects[camera_name]
         scene = bpy.context.scene
         
         # Store original settings
-        original_camera = scene.camera
         original_engine = scene.render.engine
         original_samples = scene.eevee.taa_render_samples
+        original_file_format = scene.render.image_settings.file_format
         
         # Configure render settings
-        scene.camera = ai_camera
         scene.render.engine = 'BLENDER_EEVEE_NEXT'  # Blender 4.2+ uses EEVEE_NEXT
         scene.eevee.taa_render_samples = 16
+        scene.render.image_settings.file_format = 'PNG'  # Force PNG
         
         # Set output path for the main render
         temp_dir = get_temp_directory(bpy.context)
@@ -237,16 +244,16 @@ def auto_render_passes():
         passes_dir.mkdir(parents=True, exist_ok=True)
         scene.render.filepath = str(passes_dir / "combined")
         
-        # Render
-        print(f"[Style Engine] Auto-rendering from ai_camera...")
-        bpy.ops.render.render(write_still=True)
+        # SURGICAL: Render from ai_camera without changing active camera
+        print(f"[Style Engine] Auto-rendering from {camera_name}...")
+        render_from_camera_safe(scene, ai_camera, prefs)
         
         # Restore original settings
-        scene.camera = original_camera
         scene.render.engine = original_engine
         scene.eevee.taa_render_samples = original_samples
+        scene.render.image_settings.file_format = original_file_format
         
-        print(f"[Style Engine] Render complete - saved to: {passes_dir}")
+        print(f"[Style Engine] Auto-render complete")
         
     except Exception as e:
         print(f"[Style Engine] Error in auto-render: {e}")
@@ -259,56 +266,195 @@ def auto_render_passes():
 # STANDALONE HELPER FOR DELAYED WORKSPACE SPLIT
 # ----------------------------------------------------------------
 
-def _delayed_split_setup_standalone(camera):
+def _delayed_horizontal_split_standalone(camera, original_area):
     """
-    Standalone function for delayed workspace split setup.
-    Used to avoid operator lifetime issues with timer callbacks.
+    Second delayed callback for horizontal split (text editor).
+    Called after vertical split has had time to calculate layout.
     """
     context = bpy.context
+    prefs = context.preferences.addons['styleengine'].preferences
+    
+    from . import utils
+    prompt_text = utils.get_or_create_prompt_text()
+    
+    # Find the right area (should be sized now)
+    view3d_areas = [a for a in context.screen.areas if a.type == 'VIEW_3D']
+    
+    right_area = None
+    for a in view3d_areas:
+        if a != original_area:
+            right_area = a
+            break
+    
+    if not right_area:
+        right_area = view3d_areas[-1] if len(view3d_areas) > 0 else None
+    
+    if not right_area:
+        print("[Style Engine] ERROR: Could not find right area for horizontal split")
+        return
+    
+    print(f"[Style Engine] DEBUG: Right area NOW: {right_area.width}x{right_area.height} at ({right_area.x}, {right_area.y})")
+    
+    # Check if area is sized now
+    if right_area.width == 0 or right_area.height == 0:
+        print(f"[Style Engine] ERROR: Area still 0x0 after delay - cannot split")
+        print("[Style Engine] Please manually split the camera view and add text editor")
+        return
+    
+    # Split horizontally
+    print(f"[Style Engine] DEBUG: Attempting horizontal split on sized area...")
+    
+    try:
+        override = {'area': right_area, 'region': right_area.regions[-1]}
+        with context.temp_override(**override):
+            result = bpy.ops.screen.area_split(direction='HORIZONTAL', factor=0.33)  # JUST USE 0.33
+        
+        print(f"[Style Engine] DEBUG: Horizontal split returned: {result}")
+        
+        if result != {'FINISHED'}:
+            print(f"[Style Engine] WARNING: Horizontal split failed: {result}")
+            return
+        
+        # Check if new area was created
+        view3d_after = [a for a in context.screen.areas if a.type == 'VIEW_3D']
+        
+        if len(view3d_after) < 3:
+            print(f"[Style Engine] WARNING: Horizontal split didn't create new area (still {len(view3d_after)} areas)")
+            return
+        
+        print("[Style Engine] ✓ Horizontal split successful")
+        
+        # Find and convert bottom area to text editor
+        right_areas = [a for a in view3d_after if a != original_area]
+        
+        if len(right_areas) >= 2:
+            # Bottom area has LOWER Y position (closer to 0), top area has HIGHER Y
+            bottom_area = min(right_areas, key=lambda a: a.y)
+            
+            print(f"[Style Engine] DEBUG: Converting area {bottom_area.width}x{bottom_area.height} to text editor")
+            
+            bottom_area.type = 'TEXT_EDITOR'
+            
+            if bottom_area.type == 'TEXT_EDITOR':
+                bottom_area.spaces.active.text = prompt_text
+                bottom_area.spaces.active.show_line_numbers = True
+                bottom_area.spaces.active.show_syntax_highlight = True
+                print("[Style Engine] ✓ Text editor configured (bottom)")
+            else:
+                print(f"[Style Engine] ERROR: Failed to convert to text editor")
+        else:
+            print(f"[Style Engine] WARNING: Could not find bottom area")
+        
+        # Set camera as active
+        if camera:
+            context.view_layer.objects.active = camera
+        
+        # Redraw
+        for area in context.screen.areas:
+            area.tag_redraw()
+        
+        print("[Style Engine] ✓ Workspace layout complete: Modeling | Camera + Prompt")
+        
+    except Exception as e:
+        print(f"[Style Engine] ERROR: Horizontal split exception: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+def _delayed_split_setup_standalone(camera):
+    """
+    Standalone function for delayed workspace split setup with text editor integration.
+    Creates: Left 75% = modeling view, Right 25% = camera (top 2/3) + text editor (bottom 1/3)
+    
+    TIMING: This does the vertical split, then schedules a second callback for horizontal split.
+    """
+    context = bpy.context
+    prefs = context.preferences.addons['styleengine'].preferences
+    
+    if not prefs.enable_viewport_split:
+        if prefs.debug_mode:
+            print("[Style Engine] Viewport split disabled in preferences")
+        return
+    
+    # Import utils for text editor functions
+    from . import utils
+    
+    # Create/get the prompt text block
+    prompt_text = utils.get_or_create_prompt_text()
     
     # Find the 3D viewport in the current workspace
     for area in context.screen.areas:
         if area.type == 'VIEW_3D':
-            # Split the area vertically (left/right)
-            override = {'area': area, 'region': area.regions[-1]}
-            
-            try:
-                with context.temp_override(**override):
-                    bpy.ops.screen.area_split(direction='VERTICAL', factor=0.5)
-                
-                # Configure the viewports
-                view3d_areas = [a for a in context.screen.areas if a.type == 'VIEW_3D']
-                
-                if len(view3d_areas) >= 2:
-                    # Right area (the new one): camera view
-                    right_area = view3d_areas[-1]
-                    
-                    for space in right_area.spaces:
-                        if space.type == 'VIEW_3D':
-                            # Switch to camera view (like pressing Numpad 0)
-                            space.region_3d.view_perspective = 'CAMERA'
-                            space.lock_camera = True
-                            
-                            # Show background images in viewport
-                            space.shading.type = 'SOLID'
-                            
-                            # Ensure camera is visible in viewport
-                            space.overlay.show_extras = True
-                            
-                            print("[Style Engine] Right viewport configured as locked camera view")
-                    
-                    # Set the active object to the camera
-                    if camera:
-                        context.view_layer.objects.active = camera
-                    
-                    # Force redraw all areas
-                    for area in context.screen.areas:
-                        area.tag_redraw()
-                
-                break
-            except Exception as e:
-                print(f"[Style Engine] Error splitting viewport: {e}")
-                print("[Style Engine] Please split viewport manually: drag from top-right corner")
+            original_area = area
+            break
+    else:
+        print("[Style Engine] ERROR: No 3D viewport found")
+        return
+    
+    # STEP 1: Split vertically (left 75% / right 25%)
+    try:
+        override = {'area': original_area, 'region': original_area.regions[-1]}
+        with context.temp_override(**override):
+            result = bpy.ops.screen.area_split(direction='VERTICAL', factor=0.75)
+        
+        if result != {'FINISHED'}:
+            print(f"[Style Engine] ERROR: Vertical split failed: {result}")
+            return
+        
+        print("[Style Engine] ✓ Vertical split successful")
+        
+    except Exception as e:
+        print(f"[Style Engine] ERROR: Vertical split exception: {e}")
+        return
+    
+    # STEP 2: Find the right area (the newly created one)
+    view3d_areas = [a for a in context.screen.areas if a.type == 'VIEW_3D']
+    if len(view3d_areas) < 2:
+        print(f"[Style Engine] ERROR: Expected 2 VIEW_3D areas after split, but got {len(view3d_areas)}")
+        return
+    
+    # The right area is the one that's NOT the original
+    right_area = None
+    for a in view3d_areas:
+        if a != original_area:
+            right_area = a
+            break
+    
+    if not right_area:
+        # Fallback: use the last one
+        right_area = view3d_areas[-1]
+    
+    if prefs.debug_mode:
+        print(f"[Style Engine] Right area found: {right_area.width}x{right_area.height} at position ({right_area.x}, {right_area.y})")
+    
+    # STEP 3: Configure right area as camera view
+    for space in right_area.spaces:
+        if space.type == 'VIEW_3D':
+            space.region_3d.view_perspective = 'CAMERA'
+            space.lock_camera = True
+            space.shading.type = 'SOLID'
+            space.overlay.show_extras = True
+    
+    print("[Style Engine] ✓ Camera view configured (top)")
+    
+    # STEP 4: Schedule delayed horizontal split (needs time for layout to calculate)
+    # The area is currently 0x0, so we can't split it immediately
+    # Use a timer callback like we did for the initial vertical split
+    print(f"[Style Engine] Scheduling horizontal split (0.2s delay for layout calculation)...")
+    
+    def delayed_horizontal_split():
+        _delayed_horizontal_split_standalone(camera, original_area)
+        return None  # Don't repeat
+    
+    bpy.app.timers.register(delayed_horizontal_split, first_interval=0.2)
+    
+    # Set the active object to the camera
+    if camera:
+        context.view_layer.objects.active = camera
+    
+    # Force redraw all areas
+    for area in context.screen.areas:
+        area.tag_redraw()
 
 
 class WM_OT_SetupWorkspace(bpy.types.Operator):
@@ -488,55 +634,66 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
         print(f"[Style Engine] Render resolution set to: {render_width}x{render_height} (from ai_resolution setting)")
     
     def create_ai_workspace(self, context):
-        """Create the AI workspace or return existing one."""
+        """
+        Create a fresh AI workspace from scratch.
+        This avoids issues with pre-split layouts from other addons (HEAVYPOLY, etc.)
+        """
         # Check if workspace already exists
         if "AI" in bpy.data.workspaces:
-            print("[Style Engine] AI workspace already exists")
+            print("[Style Engine] AI workspace already exists, using it")
             return bpy.data.workspaces["AI"]
         
-        # Duplicate the Layout workspace to create AI workspace
+        # Store current workspace to avoid messing it up
+        original_workspace = context.workspace
+        original_name = original_workspace.name
+        
+        # Switch to the default "Layout" workspace if it exists (guaranteed clean)
         layout_workspace = bpy.data.workspaces.get("Layout")
         
-        if not layout_workspace:
-            # If no Layout workspace, use the current one
-            layout_workspace = context.workspace
+        if layout_workspace:
+            print("[Style Engine] Using clean 'Layout' workspace as base")
+            context.window.workspace = layout_workspace
+            base_workspace = layout_workspace
+        else:
+            # If no Layout workspace exists, use General (another default)
+            general_workspace = bpy.data.workspaces.get("General")
+            if general_workspace:
+                print("[Style Engine] Using 'General' workspace as base")
+                context.window.workspace = general_workspace
+                base_workspace = general_workspace
+            else:
+                print("[Style Engine] Using current workspace as base")
+                base_workspace = original_workspace
         
-        # Store the original name
-        original_name = layout_workspace.name
+        # Store the base workspace name to restore it later
+        base_name = base_workspace.name
         
-        # Switch to Layout workspace
-        context.window.workspace = layout_workspace
+        # Count workspaces before duplication
+        workspaces_before = set(bpy.data.workspaces)
         
-        # Duplicate the workspace using operator
+        # Duplicate to create AI workspace
         bpy.ops.workspace.duplicate()
         
-        # After duplication, the ORIGINAL gets renamed to "Layout.001"
-        # and the CURRENT workspace is still "Layout"
-        # We need to swap their names
+        # Find the NEW workspace (the one that wasn't there before)
+        workspaces_after = set(bpy.data.workspaces)
+        new_workspaces = workspaces_after - workspaces_before
         
-        # Current workspace is the original (now named something like "Layout")
-        current_ws = context.workspace
-        
-        # Find the duplicate (should be named something like "Layout.001")
-        duplicated_ws = None
-        for ws in bpy.data.workspaces:
-            if ws != current_ws and ws.name.startswith(original_name):
-                duplicated_ws = ws
-                break
-        
-        if duplicated_ws:
-            # Rename duplicate to "AI"
-            duplicated_ws.name = "AI"
-            # Restore original name to the original workspace
-            current_ws.name = original_name
+        if new_workspaces:
+            new_workspace = list(new_workspaces)[0]
+            # Rename it to "AI" immediately
+            new_workspace.name = "AI"
             
-            print(f"[Style Engine] Created new AI workspace from {original_name}")
-            return duplicated_ws
+            # Make sure the base workspace keeps its original name
+            if base_workspace.name != base_name:
+                base_workspace.name = base_name
+            
+            print(f"[Style Engine] Created fresh AI workspace from clean {base_name} layout")
+            return new_workspace
         else:
-            # Fallback if we couldn't find the duplicate
-            current_ws.name = "AI"
-            print(f"[Style Engine] Created AI workspace")
-            return current_ws
+            # Fallback: just rename current workspace
+            context.workspace.name = "AI"
+            print(f"[Style Engine] Created AI workspace (fallback)")
+            return context.workspace
     
     def setup_workspace_layout(self, workspace, camera):
         """Setup the split layout for the AI workspace."""
@@ -613,7 +770,7 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
         print("[Style Engine] Groups cleared for new session")
     
     def start_image_refresh_timer(self):
-        """Start timers for auto-refresh and auto-render."""
+        """Start timer for auto-refresh only (no wasteful auto-render)."""
         # Check if refresh_viewport is enabled
         props = bpy.context.scene.style_engine_props
         
@@ -623,10 +780,12 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
                 bpy.app.timers.register(refresh_ai_image, first_interval=1.0, persistent=True)
                 print("[Style Engine] Auto-refresh timer started")
             
-            # Start auto-render timer (renders passes every X seconds)
-            if not bpy.app.timers.is_registered(auto_render_passes):
-                bpy.app.timers.register(auto_render_passes, first_interval=RENDER_INTERVAL, persistent=True)
-                print(f"[Style Engine] Auto-render timer started (every {RENDER_INTERVAL}s)")
+            # DO NOT start auto-render timer - it's wasteful!
+            # Rendering happens cyclically with generation:
+            # - Initial render on setup (below)
+            # - Render before each AI generation
+            # - Render after receiving result (for next iteration)
+            # No need for continuous 5-second renders!
     
     def setup_compositor(self, context):
         """Setup the compositor nodes for render passes output."""
@@ -749,41 +908,71 @@ class WM_OT_StartAutoRefresh(bpy.types.Operator):
 # RENDER PASSES
 # ----------------------------------------------------------------
 
+def render_from_camera_safe(scene, camera, prefs):
+    """
+    Render from specific camera without permanently changing scene.camera.
+    This is SURGICAL - only affects the render operation itself.
+    """
+    if prefs.debug_mode:
+        print(f"[Style Engine] Rendering from camera: {camera.name}")
+        print(f"[Style Engine] Current scene camera: {scene.camera.name if scene.camera else 'None'}")
+    
+    # Save original camera
+    original_camera = scene.camera
+    
+    try:
+        # Temporarily set camera ONLY for this render
+        scene.camera = camera
+        
+        if prefs.debug_mode:
+            print(f"[Style Engine] → Switched to: {camera.name} (temporary)")
+        
+        # Render
+        bpy.ops.render.render(write_still=True, use_viewport=False)
+        
+    finally:
+        # IMMEDIATELY restore original camera (even if render failed)
+        scene.camera = original_camera
+        
+        if prefs.debug_mode:
+            print(f"[Style Engine] → Restored to: {original_camera.name if original_camera else 'None'}")
+
+
 def render_passes(context):
     """
     Render combined and depth passes from ai_camera.
-    Outputs to data/temp/ai_vision/ folder for cloud generation.
+    Now uses SURGICAL approach - doesn't disturb user's active camera.
     """
     print("[Style Engine] Rendering passes for cloud generation...")
     
-    # Find the ai_camera
-    if "ai_camera" not in bpy.data.objects:
-        print("[Style Engine] ERROR: ai_camera not found! Run 'Setup Workspace' first.")
-        raise RuntimeError("ai_camera not found. Please run 'Setup Workspace' first.")
+    prefs = context.preferences.addons['styleengine'].preferences
+    camera_name = prefs.camera_name_override
     
-    ai_camera = bpy.data.objects["ai_camera"]
+    # Find the ai_camera
+    if camera_name not in bpy.data.objects:
+        print(f"[Style Engine] ERROR: {camera_name} not found! Run 'Setup Workspace' first.")
+        raise RuntimeError(f"{camera_name} not found. Please run 'Setup Workspace' first.")
+    
+    ai_camera = bpy.data.objects[camera_name]
     scene = context.scene
     
-    # Store original settings
-    original_camera = scene.camera
+    # Store original settings (but NOT camera - we'll handle that surgically)
     original_engine = scene.render.engine
     original_samples = scene.eevee.taa_render_samples
+    original_file_format = scene.render.image_settings.file_format
     
     try:
         # Configure render settings
-        scene.camera = ai_camera
         scene.render.engine = 'BLENDER_EEVEE_NEXT'  # Blender 4.2+ uses EEVEE_NEXT
         scene.eevee.taa_render_samples = 16
+        scene.render.image_settings.file_format = 'PNG'  # Force PNG for Style Engine
         
-        # Set output path - compositor will handle the actual file outputs
-        # The compositor nodes are configured to save:
-        #   - combined0001.png (Combined pass)
-        #   - depth0001.png (Depth pass - inverted)
-        # to data/temp/ai_vision/
+        if prefs.debug_mode:
+            print(f"[Style Engine] Original camera: {scene.camera.name if scene.camera else 'None'}")
         
-        # Render
-        print(f"[Style Engine] Rendering from ai_camera...")
-        bpy.ops.render.render(write_still=True, use_viewport=False)
+        # SURGICAL: Render from ai_camera without permanently changing scene.camera
+        print(f"[Style Engine] Rendering from {camera_name}...")
+        render_from_camera_safe(scene, ai_camera, prefs)
         
         # Verify outputs exist
         temp_dir = get_temp_directory(context)
@@ -803,10 +992,10 @@ def render_passes(context):
         print(f"[Style Engine] Render passes complete!")
         
     finally:
-        # Restore original settings
-        scene.camera = original_camera
+        # Restore original settings (camera was already restored in render_from_camera_safe)
         scene.render.engine = original_engine
         scene.eevee.taa_render_samples = original_samples
+        scene.render.image_settings.file_format = original_file_format
 
 
 # ----------------------------------------------------------------
@@ -821,6 +1010,13 @@ def generate_ai_image_cloud(context):
     from . import runcomfy_polling
     from . import runcomfy_deployment
     from . import runcomfy_client
+    from . import utils
+    
+    # 0. AUTO-SYNC: Load prompt from text editor (cyclical/automatic)
+    prompt_from_editor = utils.get_prompt_from_text_editor()
+    if prompt_from_editor:
+        context.scene.style_engine_props.global_prompt = prompt_from_editor
+        print(f"[Style Engine] ✓ Auto-synced prompt from text editor ({len(prompt_from_editor)} chars)")
     
     # 1. Check if generation already in progress
     if runcomfy_polling.RunComfyPoller.active_requests:

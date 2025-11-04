@@ -153,6 +153,61 @@ class StyleEnginePreferences(AddonPreferences):
         default=False
     )
     
+    # ----------------------------------------------------------------
+    # ROBUSTNESS SETTINGS - Conflict Resolution
+    # ----------------------------------------------------------------
+    
+    # Resource naming overrides
+    camera_name_override: StringProperty(
+        name="Camera Name",
+        description="Custom camera name (change if conflicts with other addons like HEAVYPOLY)",
+        default="ai_camera"
+    )
+    
+    workspace_name_override: StringProperty(
+        name="Workspace Name",
+        description="Custom workspace name",
+        default="StyleEngine_AI"
+    )
+    
+    image_name_override: StringProperty(
+        name="Image Name",
+        description="Custom image name for AI output",
+        default="STYLEENGINE_current_ai.png"
+    )
+    
+    # Feature toggles for compatibility
+    enable_camera_switching: BoolProperty(
+        name="Allow Camera Switching",
+        description="Allow addon to temporarily change active camera during rendering (safe - restores immediately). Disable if using HEAVYPOLY or custom camera systems and experiencing issues",
+        default=True
+    )
+    
+    enable_workspace_creation: BoolProperty(
+        name="Enable Workspace Creation",
+        description="Create custom StyleEngine workspace. Disable if conflicts with UI addons like HEAVYPOLY",
+        default=True
+    )
+    
+    enable_viewport_split: BoolProperty(
+        name="Enable Viewport Splitting",
+        description="Automatically split viewport into dual view. Disable if conflicts with UI addons",
+        default=True
+    )
+    
+    enable_auto_render: BoolProperty(
+        name="Enable Auto-Render Timer",
+        description="DEPRECATED: Wasteful! Renders happen cyclically with generation instead. Keep this OFF.",
+        default=False
+    )
+    
+    # Debug settings
+    debug_mode: BoolProperty(
+        name="Debug Mode",
+        description="Enable verbose console logging for troubleshooting conflicts and issues",
+        default=False
+    )
+    
     # ComfyUI Installation Path (for local version reference)
     comfy_path: StringProperty(
         name="ComfyUI Path",
@@ -315,6 +370,41 @@ class StyleEnginePreferences(AddonPreferences):
             col = advanced_box.column(align=True)
             col.label(text="Note: Higher timeout allows longer generations.", icon='INFO')
             col.label(text="Lower poll interval provides faster status updates.")
+            
+            # ----------------------------------------------------------------
+            # ROBUSTNESS SETTINGS - Conflict Resolution
+            # ----------------------------------------------------------------
+            advanced_box.separator()
+            advanced_box.separator()
+            advanced_box.label(text="Conflict Resolution (for HEAVYPOLY, etc.):", icon='ERROR')
+            
+            # Debug mode (prominent)
+            col = advanced_box.column(align=True)
+            col.prop(self, "debug_mode", text="🐛 Debug Mode (Verbose Logging)")
+            
+            advanced_box.separator()
+            
+            # Resource naming
+            col = advanced_box.column(align=True)
+            col.label(text="Resource Naming:", icon='FILE_TEXT')
+            col.prop(self, "camera_name_override", text="Camera Name")
+            col.prop(self, "workspace_name_override", text="Workspace Name")
+            col.prop(self, "image_name_override", text="Image Name")
+            
+            advanced_box.separator()
+            
+            # Feature toggles
+            col = advanced_box.column(align=True)
+            col.label(text="Feature Toggles:", icon='PREFERENCES')
+            col.prop(self, "enable_camera_switching")
+            col.prop(self, "enable_workspace_creation")
+            col.prop(self, "enable_viewport_split")
+            col.prop(self, "enable_auto_render")
+            
+            advanced_box.separator()
+            col = advanced_box.column(align=True)
+            col.label(text="Note: Disable features if conflicts occur with other addons.", icon='INFO')
+            col.label(text="Camera switching is SURGICAL (temporary, instant restore).")
         
         # ComfyUI Path Settings
         layout.separator()

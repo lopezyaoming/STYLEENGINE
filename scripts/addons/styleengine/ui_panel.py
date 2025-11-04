@@ -71,7 +71,7 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
     global_prompt: bpy.props.StringProperty(
         name="Global Prompt",
         description="Master prompt for AI generation",
-        default="This is scene 1. Gotham, Hamster, Dark",
+        default="This is scene 1. Gotham, Hamster, Dark [Updated: 2025-11-04 23:30]",
         update=update_session_json
     )
     
@@ -292,6 +292,55 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
 # 2. OPERATORS
 # ----------------------------------------------------------------
 # Legacy operators removed - no longer needed
+
+
+class WM_OT_AlignAICameraToView(bpy.types.Operator):
+    """Align AI camera to current 3D viewport."""
+    bl_idname = "style_engine.align_camera_to_view"
+    bl_label = "Reposition AI Camera"
+    bl_description = "Move AI camera to match current 3D viewport view (like Ctrl+Alt+Numpad0)"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    def execute(self, context):
+        prefs = context.preferences.addons['styleengine'].preferences
+        camera_name = prefs.camera_name_override
+        
+        # Find ai_camera
+        if camera_name not in bpy.data.objects:
+            self.report({'ERROR'}, f"Camera '{camera_name}' not found. Run 'Setup Workspace' first.")
+            return {'CANCELLED'}
+        
+        ai_camera = bpy.data.objects[camera_name]
+        
+        if ai_camera.type != 'CAMERA':
+            self.report({'ERROR'}, f"'{camera_name}' is not a camera!")
+            return {'CANCELLED'}
+        
+        # Find active 3D viewport
+        for area in context.screen.areas:
+            if area.type == 'VIEW_3D':
+                for space in area.spaces:
+                    if space.type == 'VIEW_3D':
+                        # Get current view matrix
+                        view_matrix = space.region_3d.view_matrix.inverted()
+                        
+                        # Align camera to view
+                        ai_camera.matrix_world = view_matrix
+                        
+                        self.report({'INFO'}, "AI camera repositioned to current view")
+                        
+                        if prefs.debug_mode:
+                            print(f"[Style Engine] ✓ Camera '{camera_name}' aligned to view")
+                            print(f"[Style Engine]   Location: {ai_camera.location}")
+                        
+                        return {'FINISHED'}
+        
+        self.report({'WARNING'}, "No 3D viewport found")
+        return {'CANCELLED'}
+
+
+# Prompt editor operators removed - text editor now auto-created in workspace layout
+# and auto-syncs on generation (no manual buttons needed)
 
 
 class WM_OT_AddGroup(bpy.types.Operator):
@@ -813,6 +862,14 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
             
             setup_box.operator("style_engine.setup_workspace", icon='WINDOW')
             
+            # Show camera reposition button if AI camera exists
+            prefs = context.preferences.addons['styleengine'].preferences
+            camera_name = prefs.camera_name_override
+            if camera_name in bpy.data.objects:
+                setup_box.operator("style_engine.align_camera_to_view", 
+                                   text="Reposition AI Camera", 
+                                   icon='VIEW_CAMERA')
+            
             # # Auto-refresh checkbox - COMMENTED OUT (now automatic with Auto-Generate)
             # setup_box.prop(style_props, "refresh_viewport", icon='FILE_REFRESH')
             # 
@@ -887,10 +944,18 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
             # col.label(text="Lookup:")
             # col.prop(style_props, "lookup", text="")
             
-            # Global Prompt
+            # Global Prompt - Auto-syncs from text editor on generate
             gen_box.separator()
             col = gen_box.column(align=True)
-            col.label(text="Global Prompt:")
+            
+            # Info: Text editor is in workspace layout (bottom-right)
+            info_row = col.row(align=True)
+            info_row.label(text="Prompt (auto-syncs from text editor below camera)", icon='INFO')
+            
+            col.separator()
+            
+            # Quick view/edit (read-only preview of what will be used)
+            col.label(text="Current Prompt:", icon='TEXT')
             col.prop(style_props, "global_prompt", text="")
             
             # Steps (moved out of Influence)
@@ -1006,6 +1071,8 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
 classes = (
     ObjectGroup,
     StyleEngineProperties,
+    WM_OT_AlignAICameraToView,
+    # Prompt editor operators removed - now automatic
     WM_OT_AddGroup,
     WM_OT_AssignGroup,
     WM_OT_RenameGroup,

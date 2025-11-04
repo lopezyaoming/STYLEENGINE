@@ -5,6 +5,7 @@
 
 import bpy
 import os
+from datetime import datetime
 
 
 def get_preferences():
@@ -82,5 +83,97 @@ def get_api_headers():
         'Authorization': f'Bearer {api_token}',
         'Content-Type': 'application/json'
     }
+
+
+# ================================================================
+#    Text Editor Integration for Prompts
+# ================================================================
+
+def get_or_create_prompt_text():
+    """
+    Get or create the Style Engine prompt text block.
+    This allows users to write long, multi-line prompts in Blender's text editor.
+    
+    Returns:
+        bpy.types.Text: The text block for prompt editing
+    """
+    text_name = "STYLEENGINE_Prompt"
+    
+    if text_name not in bpy.data.texts:
+        # Create new text block
+        text = bpy.data.texts.new(text_name)
+        
+        # Add header with instructions
+        now = datetime.now().strftime("%Y-%m-%d %H:%M")
+        text.write("# ===================================\n")
+        text.write("# STYLE ENGINE PROMPT EDITOR\n")
+        text.write(f"# Created: {now}\n")
+        text.write("# ===================================\n")
+        text.write("#\n")
+        text.write("# Lines starting with # are comments (ignored)\n")
+        text.write("# Empty lines are also ignored\n")
+        text.write("# All other lines become your prompt\n")
+        text.write("#\n")
+        text.write("# Click 'Sync from Editor' to load into generator\n")
+        text.write("# ===================================\n\n")
+        
+        # Add default prompt
+        text.write("This is scene 1. Gotham, Hamster, Dark\n")
+        
+        print(f"[Style Engine] Created prompt text block: {text_name}")
+    else:
+        text = bpy.data.texts[text_name]
+    
+    return text
+
+
+def get_prompt_from_text_editor():
+    """
+    Read the prompt from the text editor, filtering out comments and empty lines.
+    
+    Returns:
+        str: The cleaned prompt text, or empty string if not found
+    """
+    text = bpy.data.texts.get("STYLEENGINE_Prompt")
+    
+    if not text:
+        return ""
+    
+    lines = []
+    for line in text.as_string().split('\n'):
+        stripped = line.strip()
+        # Skip comments (lines starting with #) and empty lines
+        if stripped and not stripped.startswith('#'):
+            lines.append(stripped)
+    
+    # Join with spaces (cross-platform safe)
+    prompt = ' '.join(lines)
+    return prompt
+
+
+def save_prompt_to_text_editor(prompt_text):
+    """
+    Save the current prompt to the text editor.
+    
+    Args:
+        prompt_text (str): The prompt text to save
+    """
+    text = get_or_create_prompt_text()
+    
+    # Clear existing content
+    text.clear()
+    
+    # Write header
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    text.write("# ===================================\n")
+    text.write("# STYLE ENGINE PROMPT EDITOR\n")
+    text.write(f"# Last saved: {now}\n")
+    text.write("# ===================================\n\n")
+    
+    # Write the prompt
+    text.write(prompt_text)
+    text.write("\n")
+    
+    print(f"[Style Engine] Saved prompt to text editor ({len(prompt_text)} chars)")
 
 
