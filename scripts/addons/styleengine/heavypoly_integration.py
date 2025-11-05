@@ -50,8 +50,8 @@ class SE_OT_generate_ai_quick(Operator):
             # Render combined pass first (using Workbench for speed)
             workspace_setup.render_passes(context)
             
-            # Then trigger cloud generation
-            bpy.ops.style_engine.generate_ai_image_cloud()
+            # Then trigger cloud generation (direct function call)
+            workspace_setup.generate_ai_image_cloud(context)
             
             self.report({'INFO'}, "AI generation started!")
             return {'FINISHED'}

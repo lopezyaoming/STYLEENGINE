@@ -438,6 +438,9 @@ def _delayed_split_setup_standalone(camera):
             space.shading.type = 'SOLID'
             space.overlay.show_extras = True
             
+            # 📐 FIT CAMERA FRAME TO VIEWPORT (auto-fit regardless of screen size)
+            space.region_3d.view_camera_zoom = 0
+            
             # Hide UI elements for clean AI preview
             space.show_region_toolbar = False  # Hide T panel (left toolbar: select, move, etc.)
             space.show_region_ui = False  # Hide N panel (right sidebar)
@@ -500,6 +503,9 @@ def _hijack_heavypoly_areas_standalone(screen, camera):
                     # Lock to camera
                     space.region_3d.view_perspective = 'CAMERA'
                     space.camera = camera
+                    
+                    # 📐 FIT CAMERA FRAME TO VIEWPORT (auto-fit regardless of screen size)
+                    space.region_3d.view_camera_zoom = 0
                     
                     # Set shading to solid with textures
                     space.shading.type = 'SOLID'
@@ -1006,6 +1012,9 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
                                 # Switch to camera view (like pressing Numpad 0)
                                 space.region_3d.view_perspective = 'CAMERA'
                                 space.lock_camera = True
+                                
+                                # 📐 FIT CAMERA FRAME TO VIEWPORT (auto-fit regardless of screen size)
+                                space.region_3d.view_camera_zoom = 0
                                 
                                 # Show background images in viewport
                                 space.shading.type = 'SOLID'

@@ -165,8 +165,8 @@ def execute(self, context):
     # 1. Render combined pass (Workbench - fast!)
     workspace_setup.render_passes(context)
     
-    # 2. Trigger cloud generation
-    bpy.ops.style_engine.generate_ai_image_cloud()
+    # 2. Trigger cloud generation (direct function call)
+    workspace_setup.generate_ai_image_cloud(context)
     
     # 3. Done!
     return {'FINISHED'}
@@ -177,6 +177,10 @@ def execute(self, context):
 - Uploads to RunComfy
 - Starts AI generation
 - Returns immediately (non-blocking)
+
+### Bugfix (2025-11-05):
+- ❌ **Bug:** Called non-existent operator `bpy.ops.style_engine.generate_ai_image_cloud()`
+- ✅ **Fix:** Changed to direct function call `workspace_setup.generate_ai_image_cloud(context)`
 
 ---
 
