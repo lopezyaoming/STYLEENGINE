@@ -71,7 +71,7 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
     global_prompt: bpy.props.StringProperty(
         name="Global Prompt",
         description="Master prompt for AI generation",
-        default="This is scene 1. Gotham, Hamster, Dark [Updated: 2025-11-04 23:30]",
+        default="",  # Start blank - user writes their own prompt
         update=update_session_json
     )
     
@@ -85,6 +85,12 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         name="Show Image Generation",
         description="Expand or collapse the image generation section",
         default=True
+    )
+    
+    show_settings: bpy.props.BoolProperty(
+        name="Show Settings",
+        description="Expand or collapse the settings section",
+        default=False
     )
     
     show_groups: bpy.props.BoolProperty(
@@ -188,8 +194,8 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
             print("[Style Engine] Auto-generate disabled. Stopping cyclical generation.")
     
     auto_generate: bpy.props.BoolProperty(
-        name="Auto-Generate AI",
-        description="Automatically send workflow to ComfyUI when render passes update (also enables viewport refresh)",
+        name="Generate Images",
+        description="Toggle continuous AI generation ON/OFF (when enabled, continuously renders and generates images)",
         default=False,
         update=update_auto_generate
     )
@@ -215,9 +221,81 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         update=update_background_opacity
     )
     
+    def update_ai_resolution(self, context):
+        """
+        ROCK SOLID: Update resolution immediately when user changes dropdown.
+        This is CRITICAL - SDXL native resolutions directly influence output quality.
+        Updates Blender's render settings, camera background, and session.json in real-time.
+        """
+        from . import workspace_setup
+        
+        try:
+            # 1. Parse new resolution (SDXL native format)
+            res_str = self.ai_resolution
+            width, height = map(int, res_str.split('x'))
+            
+            # 2. Update Blender's render resolution IMMEDIATELY
+            context.scene.render.resolution_x = width
+            context.scene.render.resolution_y = height
+            
+            print(f"[Style Engine] ✓ Resolution set to: {width}x{height} (SDXL native)")
+            
+            # 3. Update camera background image if camera exists
+            prefs = context.preferences.addons['styleengine'].preferences
+            camera_name = prefs.camera_name_override
+            
+            if camera_name in bpy.data.objects:
+                camera = bpy.data.objects[camera_name]
+                if camera.type == 'CAMERA':
+                    # Get temp directory
+                    temp_dir = workspace_setup.get_temp_directory(context)
+                    placeholder_path = temp_dir / "current_ai.png"
+                    
+                    # Resize existing image or create new placeholder
+                    if "current_ai.png" in bpy.data.images:
+                        img = bpy.data.images["current_ai.png"]
+                        
+                        # Check if image needs resizing
+                        if img.size[0] != width or img.size[1] != height:
+                            # Recreate image at new resolution
+                            bpy.data.images.remove(img)
+                            new_img = bpy.data.images.new("current_ai.png", width=width, height=height)
+                            
+                            # Fill with placeholder color (dark blue)
+                            pixels = [0.1, 0.1, 0.2, 1.0] * (width * height)
+                            new_img.pixels = pixels
+                            
+                            # Save to disk
+                            new_img.filepath_raw = str(placeholder_path)
+                            new_img.file_format = 'PNG'
+                            new_img.save()
+                            
+                            # Update camera background reference
+                            if len(camera.data.background_images) > 0:
+                                bg_img = camera.data.background_images[0]
+                                bg_img.image = new_img
+                                
+                                # Maintain opacity setting
+                                bg_img.alpha = self.background_opacity
+                                
+                                print(f"[Style Engine] ✓ Camera background resized to {width}x{height}")
+                    
+                    # Force viewport redraw for immediate visual feedback
+                    for area in context.screen.areas:
+                        if area.type == 'VIEW_3D':
+                            area.tag_redraw()
+            
+            # 4. Update session.json (critical for workflow JSON compatibility)
+            workspace_setup.write_session_json(context)
+            
+        except Exception as e:
+            print(f"[Style Engine] Error updating resolution: {e}")
+            import traceback
+            traceback.print_exc()
+    
     ai_resolution: bpy.props.EnumProperty(
         name="AI Resolution",
-        description="Resolution for AI generation",
+        description="Resolution for AI generation (SDXL native resolutions - directly affects output quality)",
         items=[
             ('640x1536', '640 x 1536', 'Portrait tall'),
             ('768x1344', '768 x 1344', 'Portrait'),
@@ -230,7 +308,7 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
             ('1536x640', '1536 x 640', 'Landscape wide'),
         ],
         default='1024x1024',
-        update=update_session_json
+        update=update_ai_resolution  # Live, instant update - CRITICAL for SDXL workflow
     )
     
     save_iterations: bpy.props.BoolProperty(
@@ -813,19 +891,19 @@ class WM_OT_CancelGeneration(bpy.types.Operator):
 
 
 class WM_OT_TestCloudGeneration(bpy.types.Operator):
-    """Test cloud generation with current settings"""
+    """Test workflow with current settings (dev tool)"""
     bl_idname = "style_engine.test_cloud_generation"
-    bl_label = "Test Cloud Generation"
-    bl_description = "Trigger a test cloud generation"
+    bl_label = "Test Workflow"
+    bl_description = "Test the workflow JSON with current settings (development/debugging)"
     
     def execute(self, context):
         from . import workspace_setup
         
         try:
             workspace_setup.generate_ai_image_cloud(context)
-            self.report({'INFO'}, "Cloud generation started")
+            self.report({'INFO'}, "Test workflow started")
         except Exception as e:
-            self.report({'ERROR'}, f"Failed to start generation: {e}")
+            self.report({'ERROR'}, f"Failed to start test: {e}")
             print(f"[Style Engine] Error: {e}")
         
         return {'FINISHED'}
@@ -846,62 +924,10 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
         layout = self.layout
         style_props = context.scene.style_engine_props
 
-        # --- Workspace Setup (TOP) - COLLAPSIBLE ---
-        setup_box = layout.box()
-        header_row = setup_box.row(align=True)
-        icon = 'TRIA_DOWN' if style_props.show_workspace_setup else 'TRIA_RIGHT'
-        header_row.prop(style_props, "show_workspace_setup", text="Workspace Setup", icon=icon, emboss=False, toggle=True)
-        
-        if style_props.show_workspace_setup:
-            # # Session ID - COMMENTED OUT
-            # row = setup_box.row(align=True)
-            # row.label(text="Session ID:")
-            # row.prop(style_props, "library_id", text="")
-            # 
-            # setup_box.separator()
-            
-            setup_box.operator("style_engine.setup_workspace", icon='WINDOW')
-            
-            # Show camera reposition button if AI camera exists
-            prefs = context.preferences.addons['styleengine'].preferences
-            camera_name = prefs.camera_name_override
-            if camera_name in bpy.data.objects:
-                setup_box.operator("style_engine.align_camera_to_view", 
-                                   text="Reposition AI Camera", 
-                                   icon='VIEW_CAMERA')
-            
-            # # Auto-refresh checkbox - COMMENTED OUT (now automatic with Auto-Generate)
-            # setup_box.prop(style_props, "refresh_viewport", icon='FILE_REFRESH')
-            # 
-            # setup_box.separator()
-            
-            # Auto-generate AI checkbox (also controls refresh viewport)
-            setup_box.prop(style_props, "auto_generate", icon='PLAY')
-            
-            # Background opacity slider
-            setup_box.separator()
-            setup_box.label(text="Background Opacity:")
-            setup_box.prop(style_props, "background_opacity", slider=True, text="")
-            
-            # Resolution dropdown
-            setup_box.separator()
-            setup_box.label(text="Set Resolution:")
-            setup_box.prop(style_props, "ai_resolution", text="")
-            
-            # Save Iterations checkbox
-            setup_box.separator()
-            setup_box.prop(style_props, "save_iterations", icon='FILE_TICK')
-            
-            # Output path
-            setup_box.separator()
-            setup_box.label(text="Output Path:")
-            setup_box.prop(style_props, "output_path", text="")
-        
-        # --- Generation Status Indicator ---
-        layout.separator()
+        # --- Server Status Indicator (TOP) ---
         status_box = layout.box()
         row = status_box.row()
-        row.label(text="Generation Status:", icon='RENDER_ANIMATION')
+        row.label(text="Server:", icon='WORLD')
         
         # Get server status from poller
         try:
@@ -930,6 +956,43 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
         except Exception as e:
             row.label(text="Error", icon='ERROR')
         
+        # --- Workspace Setup - COLLAPSIBLE ---
+        layout.separator()
+        setup_box = layout.box()
+        header_row = setup_box.row(align=True)
+        icon = 'TRIA_DOWN' if style_props.show_workspace_setup else 'TRIA_RIGHT'
+        header_row.prop(style_props, "show_workspace_setup", text="Workspace Setup", icon=icon, emboss=False, toggle=True)
+        
+        if style_props.show_workspace_setup:
+            setup_box.operator("style_engine.setup_workspace", icon='WINDOW')
+            
+            # Show camera reposition button if AI camera exists
+            prefs = context.preferences.addons['styleengine'].preferences
+            camera_name = prefs.camera_name_override
+            if camera_name in bpy.data.objects:
+                setup_box.operator("style_engine.align_camera_to_view", 
+                                   text="Reposition AI Camera", 
+                                   icon='VIEW_CAMERA')
+            
+            # Resolution dropdown (moved up)
+            setup_box.separator()
+            setup_box.label(text="Set Resolution:")
+            setup_box.prop(style_props, "ai_resolution", text="")
+            
+            # Background opacity slider
+            setup_box.separator()
+            setup_box.label(text="Background Opacity:")
+            setup_box.prop(style_props, "background_opacity", slider=True, text="")
+            
+            # Output path
+            setup_box.separator()
+            setup_box.label(text="Output Path:")
+            setup_box.prop(style_props, "output_path", text="")
+            
+            # Save Iterations checkbox (moved to bottom)
+            setup_box.separator()
+            setup_box.prop(style_props, "save_iterations", icon='FILE_TICK')
+        
         # --- Image Generation - COLLAPSIBLE ---
         layout.separator()
         gen_box = layout.box()
@@ -944,33 +1007,25 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
             # col.label(text="Lookup:")
             # col.prop(style_props, "lookup", text="")
             
-            # Global Prompt - Auto-syncs from text editor on generate
-            gen_box.separator()
-            col = gen_box.column(align=True)
+            # # Global Prompt - COMMENTED OUT (now using text editor)
+            # gen_box.separator()
+            # col = gen_box.column(align=True)
+            # 
+            # # Info: Text editor is in workspace layout (bottom-right)
+            # info_row = col.row(align=True)
+            # info_row.label(text="Prompt (auto-syncs from text editor below camera)", icon='INFO')
+            # 
+            # col.separator()
+            # 
+            # # Quick view/edit (read-only preview of what will be used)
+            # col.label(text="Current Prompt:", icon='TEXT')
+            # col.prop(style_props, "global_prompt", text="")
             
-            # Info: Text editor is in workspace layout (bottom-right)
-            info_row = col.row(align=True)
-            info_row.label(text="Prompt (auto-syncs from text editor below camera)", icon='INFO')
-            
-            col.separator()
-            
-            # Quick view/edit (read-only preview of what will be used)
-            col.label(text="Current Prompt:", icon='TEXT')
-            col.prop(style_props, "global_prompt", text="")
-            
-            # Steps (moved out of Influence)
+            # Steps
             gen_box.separator()
             col = gen_box.column(align=True)
             col.label(text="Steps:")
             col.prop(style_props, "steps", slider=True, text="")
-            
-            # Cloud Generation button
-            gen_box.separator()
-            gen_box.operator("style_engine.test_cloud_generation", text="Generate (Cloud)", icon='WORLD')
-            
-            # Project Texture button
-            gen_box.separator()
-            gen_box.operator("style_engine.project_texture", icon='UV')
             
             # Influence section
             gen_box.separator()
@@ -1020,6 +1075,17 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                     col.scale_y = 0.7
                     col.label(text="(0.0 = Off, 5.0 = Max)")
             
+            # Project Texture button
+            gen_box.separator()
+            gen_box.operator("style_engine.project_texture", icon='UV')
+            
+            # Generate Images - BIG TOGGLE SWITCH (ON = continuous generation, OFF = stopped)
+            gen_box.separator()
+            gen_box.separator()
+            gen_row = gen_box.row()
+            gen_row.scale_y = 2.5  # Make it BIG
+            gen_row.prop(style_props, "auto_generate", text="Generate Images", icon='PLAY', toggle=True)
+            
             # # Groups section - COMMENTED OUT FOR NOW
             # gen_box.separator()
             # groups_box = gen_box.box()
@@ -1061,6 +1127,20 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
             #             
             #             # Keywords input
             #             row.prop(group, "keywords", text="")
+        
+        # --- Settings - COLLAPSIBLE ---
+        layout.separator()
+        settings_box = layout.box()
+        header_row = settings_box.row(align=True)
+        icon = 'TRIA_DOWN' if style_props.show_settings else 'TRIA_RIGHT'
+        header_row.prop(style_props, "show_settings", text="Settings", icon=icon, emboss=False, toggle=True)
+        
+        if style_props.show_settings:
+            # Test Workflow button (formerly Generate Cloud, moved from Image Generation)
+            settings_box.operator("style_engine.test_cloud_generation", text="Test Workflow", icon='EXPERIMENTAL')
+            
+            settings_box.separator()
+            settings_box.label(text="(Advanced settings in addon preferences)", icon='INFO')
 
         # Legacy action buttons removed (Visualize, Create 3D, Render)
 

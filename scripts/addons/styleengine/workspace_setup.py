@@ -337,8 +337,9 @@ def _delayed_horizontal_split_standalone(camera, original_area):
             
             if bottom_area.type == 'TEXT_EDITOR':
                 bottom_area.spaces.active.text = prompt_text
-                bottom_area.spaces.active.show_line_numbers = True
-                bottom_area.spaces.active.show_syntax_highlight = True
+                bottom_area.spaces.active.show_line_numbers = False  # Clean look
+                bottom_area.spaces.active.show_syntax_highlight = False  # No syntax coloring
+                bottom_area.spaces.active.show_word_wrap = True  # Wrap long prompts
                 print("[Style Engine] ✓ Text editor configured (bottom)")
             else:
                 print(f"[Style Engine] ERROR: Failed to convert to text editor")
@@ -1115,9 +1116,17 @@ def build_runcomfy_overrides(session_data, combined_b64, depth_b64, workflow_typ
     """
     from . import runcomfy_client
     
+    # Extract resolution from session data (CRITICAL for SDXL native resolutions)
+    resolution = session_data.get('resolution', {})
+    width = resolution.get('width', 1024)
+    height = resolution.get('height', 1024)
+    
+    print(f"[Style Engine] 📐 Workflow resolution override: {width}x{height}")
+    
     if workflow_type == 'sdxl':
         # Map to SDXLworkflow.json nodes
         return {
+            "5": {"inputs": {"width": width, "height": height}},  # EmptyLatentImage - CRITICAL!
             "25": {"inputs": {"value": session_data.get('global_prompt', '')}},  # Prompt
             "15": {"inputs": {"image": combined_b64}},  # Combined pass
             "40": {"inputs": {"value": session_data.get('silhouette_influence', 0.75)}},  # Canny
@@ -1137,6 +1146,7 @@ def build_runcomfy_overrides(session_data, combined_b64, depth_b64, workflow_typ
         
         # Map to IPAdapterworkflow.json nodes
         return {
+            "5": {"inputs": {"width": width, "height": height}},  # EmptyLatentImage - CRITICAL!
             "25": {"inputs": {"value": session_data.get('global_prompt', '')}},
             "15": {"inputs": {"image": combined_b64}},
             "40": {"inputs": {"value": session_data.get('silhouette_influence', 0.75)}},

@@ -103,22 +103,8 @@ def get_or_create_prompt_text():
         # Create new text block
         text = bpy.data.texts.new(text_name)
         
-        # Add header with instructions
-        now = datetime.now().strftime("%Y-%m-%d %H:%M")
-        text.write("# ===================================\n")
-        text.write("# STYLE ENGINE PROMPT EDITOR\n")
-        text.write(f"# Created: {now}\n")
-        text.write("# ===================================\n")
-        text.write("#\n")
-        text.write("# Lines starting with # are comments (ignored)\n")
-        text.write("# Empty lines are also ignored\n")
-        text.write("# All other lines become your prompt\n")
-        text.write("#\n")
-        text.write("# Click 'Sync from Editor' to load into generator\n")
-        text.write("# ===================================\n\n")
-        
-        # Add default prompt
-        text.write("This is scene 1. Gotham, Hamster, Dark\n")
+        # Start with blank prompt - user writes their own
+        # Prompt auto-syncs on generation
         
         print(f"[Style Engine] Created prompt text block: {text_name}")
     else:
