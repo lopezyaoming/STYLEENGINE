@@ -1,0 +1,151 @@
+═══════════════════════════════════════════════════════════════
+  macOS Path Detection - FINAL FIX (2025-11-05)
+═══════════════════════════════════════════════════════════════
+
+🎯 KEY DIAGNOSTIC DISCOVERY (UPDATED!)
+───────────────────────────────────────
+
+**CRITICAL ISSUE FOUND:** The ZIP structure was WRONG!
+
+Your screenshot showed:
+  Directory contents: ['styleengine\prefs.py', ...]
+                                    ^
+                                    BACKSLASH!
+
+The ZIP contained:
+  styleengine\__init__.py  ← Backslash (Windows path)
+
+But it SHOULD contain:
+  styleengine/__init__.py  ← Forward slash (ZIP standard)
+
+On macOS/Linux, backslashes create FILES with \ in their NAMES,
+not DIRECTORIES!
+
+→ This is why Blender couldn't find the styleengine directory!
+
+═══════════════════════════════════════════════════════════════
+
+✅ WHAT WE FIXED
+─────────────────
+
+1. ZIP STRUCTURE (CRITICAL!)
+   - OLD: Used Compress-Archive → backslashes in entry names
+   - NEW: Manual ZipArchive creation → forward slashes
+   - Windows creates ZIP correctly now
+   - macOS/Linux will extract proper directory structure
+
+2. Enhanced Path Detection (3 layers)
+   - Standard: Check if __file__ is in styleengine/
+   - Fallback 1: Look for styleengine/ subdirectory
+   - Fallback 2: Use __name__ to find correct path
+   - Debug: List directory contents if all fail
+
+3. Better Error Messages
+   - Shows exactly what's wrong
+   - Lists possible causes
+   - Includes debug info (paths, directory contents)
+   - Gives clear troubleshooting steps
+
+4. Cross-Platform Path Safety
+   - ALL path operations use os.path.join()
+   - No hardcoded / or \ separators
+   - Works on Windows, macOS, Linux
+
+═══════════════════════════════════════════════════════════════
+
+📦 INSTALLATION STEPS FOR MACOS
+────────────────────────────────
+
+1. UNINSTALL OLD VERSION (CRITICAL!)
+   - Edit → Preferences → Add-ons
+   - Search "Style Engine"
+   - Click ❌ REMOVE (not disable!)
+   - Confirm removal
+
+2. QUIT BLENDER COMPLETELY
+   - Cmd+Q or Blender → Quit Blender
+
+3. RESTART BLENDER
+   - Fresh start with no cached modules
+
+4. INSTALL FRESH ZIP
+   - Edit → Preferences → Add-ons
+   - Install from Disk...
+   - Select: styleengine.zip
+   - Enable checkbox
+
+5. VERIFY IN CONSOLE
+   Look for:
+   [Style Engine] utils.py exists: True
+                                   ^^^^ Must be True!
+
+═══════════════════════════════════════════════════════════════
+
+📂 FILES CREATED
+─────────────────
+
+• styleengine.zip
+  → Fresh addon package with all fixes
+
+• MACOS_CLEAN_INSTALL_GUIDE.md
+  → Detailed installation instructions
+
+• QUICK_FIX_FOR_MACOS_2025-11-05.md
+  → Quick summary for Ian's Mac
+
+• MACOS_PATH_FIX_2025-11-05.md
+  → Technical details (updated with diagnostic tip)
+
+• PATH_FIX_SUMMARY_2025-11-05.txt
+  → This file!
+
+═══════════════════════════════════════════════════════════════
+
+🔍 WHAT TO SHARE WITH IAN
+──────────────────────────
+
+Send him:
+1. styleengine.zip (fresh package)
+2. QUICK_FIX_FOR_MACOS_2025-11-05.md (instructions)
+
+That's it! Everything else is backup documentation.
+
+═══════════════════════════════════════════════════════════════
+
+🛠️ IF STILL HAVING ISSUES
+───────────────────────────
+
+Ask Ian to send console output:
+
+macOS: Check Terminal when Blender launches, or:
+  Window → Toggle System Console
+
+Look for lines starting with:
+  [Style Engine] Initial path detection:
+  [Style Engine] Final addon_dir: ...
+  [Style Engine] utils.py exists: ...
+
+Send those debug lines back.
+
+═══════════════════════════════════════════════════════════════
+
+✨ COMPATIBILITY
+─────────────────
+
+✅ Windows (tested)
+✅ macOS Blender 4.2 - 4.5+
+✅ Linux (uses os.path.join everywhere)
+✅ Works with HEAVYPOLY and other heavily modded installs
+
+═══════════════════════════════════════════════════════════════
+
+🎉 READY TO TEST!
+
+The key insight was discovering the OLD VERSION was still installed
+(single underscore typo in error message was the giveaway).
+
+With the enhanced path detection AND a clean install, this should
+finally be rock-solid on macOS.
+
+═══════════════════════════════════════════════════════════════
+

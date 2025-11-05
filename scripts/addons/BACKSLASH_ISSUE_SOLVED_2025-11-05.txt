@@ -1,0 +1,102 @@
+═══════════════════════════════════════════════════════════════
+  🎯 FOUND IT! The Backslash Bug (2025-11-05)
+═══════════════════════════════════════════════════════════════
+
+Thank you for the screenshot! It revealed the REAL issue:
+
+YOUR SCREENSHOT SHOWED:
+───────────────────────
+Directory contents: ['styleengine\prefs.py', 'styleengine\README.md', ...]
+                                  ^
+                                  BACKSLASH!
+
+═══════════════════════════════════════════════════════════════
+
+🔍 WHAT THIS MEANS
+───────────────────
+
+The ZIP file contained entries like:
+  styleengine\__init__.py  ← Backslash (Windows path separator)
+  styleengine\prefs.py
+
+On WINDOWS:
+  ✓ Works fine (Windows understands backslashes)
+
+On macOS/LINUX:
+  ✗ Backslash is a VALID CHARACTER in filenames!
+  ✗ Creates files WITH backslashes in their NAMES
+  ✗ NOT a directory structure!
+
+So macOS extracted:
+  /addons/styleengine\__init__.py  ← File with \ in name
+  /addons/styleengine\prefs.py     ← File with \ in name
+
+NOT:
+  /addons/styleengine/__init__.py  ← File in directory
+  /addons/styleengine/prefs.py
+
+When Blender looked for:
+  /addons/styleengine/utils.py
+
+It couldn't find it because the file was actually named:
+  /addons/styleengine\utils.py  ← Different file!
+
+═══════════════════════════════════════════════════════════════
+
+✅ THE FIX
+───────────
+
+Changed from:
+  powershell Compress-Archive  ← Preserves Windows backslashes
+
+To:
+  Manual ZipArchive creation with explicit forward slashes:
+    $entryName = "styleengine/$file"  ← Forward slash!
+
+NOW the ZIP contains:
+  styleengine/__init__.py  ← Forward slash (ZIP standard)
+  styleengine/prefs.py
+  styleengine/utils.py
+
+═══════════════════════════════════════════════════════════════
+
+📦 VERIFICATION
+───────────────
+
+BEFORE (broken):
+  styleengine\prefs.py  ← Backslashes
+  [ERROR] Wrong structure
+
+AFTER (fixed):
+  styleengine/prefs.py  ← Forward slashes
+  [OK] Correct structure
+
+═══════════════════════════════════════════════════════════════
+
+🚀 READY TO TEST
+─────────────────
+
+The fresh styleengine.zip now has:
+✅ Forward slashes in all paths
+✅ Proper directory structure
+✅ Will extract correctly on macOS
+
+INSTALLATION:
+1. Uninstall old version (if any)
+2. Restart Blender
+3. Install fresh styleengine.zip
+4. Enable addon
+
+VERIFY in console:
+  [Style Engine] utils.py exists: True  ← Must say True!
+
+═══════════════════════════════════════════════════════════════
+
+🎉 THIS SHOULD FINALLY WORK!
+
+The backslash issue was invisible on Windows but fatal on macOS.
+Your screenshot was the key to finding it!
+
+═══════════════════════════════════════════════════════════════
+
+

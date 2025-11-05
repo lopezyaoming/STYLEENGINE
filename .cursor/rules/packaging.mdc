@@ -1,0 +1,139 @@
+---
+alwaysApply: true
+---
+
+# Blender Addon Packaging Rules
+
+## Cross-Platform ZIP Requirements
+
+### Path Separators
+- ALWAYS use forward slashes `/` in ZIP entry names
+- NEVER use backslashes `\` (breaks macOS/Linux)
+- Use PowerShell .NET APIs for ZIP creation on Windows
+
+### File Exclusions
+- Exclude: `__pycache__/`, `*.pyc`, `*.pyo`, `*.pyd`
+- Exclude: `.DS_Store`, `__MACOSX`, resource forks (`._*`)
+- Exclude: `.git/`, `.svn/`, `.idea/`, `.vscode/`
+- Exclude: `build/`, `dist/`, `*.egg-info/`
+- Only include: core Python files, README.md, LICENSE
+
+### File Structure
+```
+styleengine.zip
+└── styleengine/
+    ├── __init__.py          (with bl_info, register, unregister)
+    ├── prefs.py             (addon preferences)
+    ├── ui_panel.py          (UI components)
+    ├── workspace_setup.py   (Blender workspace setup)
+    ├── utils.py             (utilities)
+    ├── runcomfy_client.py   (API client)
+    ├── runcomfy_deployment.py
+    ├── runcomfy_polling.py
+    └── README.md
+```
+
+## macOS Compatibility
+
+### Import System
+- macOS Blender has issues with relative imports in addons
+- MUST implement fallback import system in `__init__.py`
+- Use `types.ModuleType` and `sys.modules` workaround
+
+### Character Restrictions
+- Avoid: `:` `*` `?` `"` `<` `>` `|` in filenames
+- No trailing spaces or dots in filenames
+- Be aware of case-insensitive filesystem (APFS can be either)
+
+## Windows Compatibility
+
+### Reserved Names
+- NEVER use: `CON`, `PRN`, `AUX`, `NUL`, `COM1-9`, `LPT1-9`
+- No trailing spaces or dots in filenames
+- Path length limit: 260 characters (use ≤200 to be safe)
+
+## Validation Process
+
+1. **Before packaging:** Clean source directory
+2. **During packaging:** Use `package_addon.bat` or `package_addon.py`
+3. **After packaging:** Run `validate_package.py styleengine.zip`
+4. **Fix all errors** before distribution
+5. **Test on actual platforms:** Windows, macOS, Linux
+
+## Packaging Scripts
+
+### `package_addon.bat` (Windows)
+- Creates temp directory for staging
+- Selectively copies files (no cache, no junk)
+- Uses PowerShell to create ZIP with forward slashes
+- Runs validation automatically
+- Provides installation instructions
+
+### `validate_package.py` (All platforms)
+- Exhaustive cross-platform validation
+- Checks 11+ different categories
+- Categorized errors/warnings
+- Detailed statistics and reporting
+- Use `--verbose` for detailed analysis
+
+## bl_info Requirements
+
+```python
+bl_info = {
+    "name": "Addon Name",           # REQUIRED
+    "author": "Author Name",        # REQUIRED
+    "version": (1, 0, 0),          # REQUIRED
+    "blender": (4, 2, 0),          # REQUIRED
+    "category": "Category",         # REQUIRED
+    "description": "...",           # RECOMMENDED
+    "location": "View3D > Sidebar", # RECOMMENDED
+    "warning": "",                  # Optional
+    "doc_url": "",                  # Optional
+    "support": "COMMUNITY",         # Optional
+}
+```
+
+## Code Quality Standards
+
+### Python
+- Valid UTF-8 encoding
+- Consistent line endings (prefer LF)
+- No syntax errors
+- Minimal wildcard imports
+- PEP8 compliant (when possible)
+
+### Blender API
+- Implement both `register()` and `unregister()`
+- Clean up resources in unregister
+- Handle Blender version compatibility
+- Use proper operator ID naming (lowercase, underscores)
+
+## Distribution Checklist
+
+- [ ] Run `package_addon.bat`
+- [ ] Validation passes (no errors)
+- [ ] Tested in Blender on Windows
+- [ ] Tested in Blender on macOS
+- [ ] Tested in Blender on Linux
+- [ ] README.md is up-to-date
+- [ ] Version numbers match everywhere
+- [ ] No sensitive data in package
+- [ ] License file included
+- [ ] Installation instructions clear
+
+## Common Mistakes to Avoid
+
+1. **Using os.path.join() for ZIP paths** - Creates backslashes on Windows
+2. **Including __pycache__** - Bloats package, platform-specific
+3. **Forgetting macOS import fallback** - Addon won't load on macOS
+4. **Mixed line endings** - Git autocrlf can cause issues
+5. **Not testing on other platforms** - "Works on my machine" syndrome
+6. **Reserved filenames** - `aux.py` will fail on Windows
+7. **Case conflicts** - `File.py` and `file.py` conflict on some systems
+
+## References
+
+- Full validation docs: `EXHAUSTIVE_VALIDATION_2025-11-05.md`
+- Quick reference: `VALIDATOR_QUICK_REFERENCE.md`
+- macOS fixes: `MACOS_*_2025-11-05.md`
+- Packaging guide: Comments in `package_addon.bat`

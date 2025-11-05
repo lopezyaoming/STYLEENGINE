@@ -63,18 +63,41 @@ echo   [-] .git/
 echo   [-] *.zip files
 echo.
 
-REM Create ZIP using PowerShell (available on all modern Windows)
-echo Creating ZIP archive...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Type -Assembly System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::CreateFromDirectory('%TEMP_DIR%', '%OUTPUT_ZIP%', 'Optimal', $false)"
+REM Create ZIP with forward slashes (macOS-compatible)
+echo Creating ZIP archive with forward slashes (cross-platform)...
+echo.
 
-if !errorlevel! neq 0 (
+REM Create temporary PowerShell script
+set "PS_SCRIPT=%TEMP%\create_styleengine_zip_%RANDOM%.ps1"
+(
+echo Add-Type -Assembly System.IO.Compression.FileSystem
+echo Add-Type -Assembly System.IO.Compression
+echo $zip = [System.IO.File]::Create('%OUTPUT_ZIP%'^)
+echo $archive = New-Object System.IO.Compression.ZipArchive($zip, [System.IO.Compression.ZipArchiveMode]::Create^)
+echo Get-ChildItem -Path '%TEMP_ADDON%' -File ^| ForEach-Object {
+echo     $entryName = "styleengine/$($_.Name)"
+echo     $entry = $archive.CreateEntry($entryName, [System.IO.Compression.CompressionLevel]::Optimal^)
+echo     $entryStream = $entry.Open(^)
+echo     $fileStream = [System.IO.File]::OpenRead($_.FullName^)
+echo     $fileStream.CopyTo($entryStream^)
+echo     $fileStream.Close(^)
+echo     $entryStream.Close(^)
+echo }
+echo $archive.Dispose(^)
+echo $zip.Close(^)
+) > "%PS_SCRIPT%"
+
+powershell -NoProfile -ExecutionPolicy Bypass -File "%PS_SCRIPT%"
+set ZIP_RESULT=!errorlevel!
+
+REM Clean up
+del /f /q "%PS_SCRIPT%" 2>nul
+rd /s /q "%TEMP_DIR%"
+
+if !ZIP_RESULT! neq 0 (
     echo ERROR: Failed to create ZIP archive
-    rd /s /q "%TEMP_DIR%"
     exit /b 1
 )
-
-REM Clean up temp directory
-rd /s /q "%TEMP_DIR%"
 
 REM Verify ZIP was created
 if exist "%OUTPUT_ZIP%" (

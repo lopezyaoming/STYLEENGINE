@@ -125,9 +125,9 @@ class StyleEnginePreferences(AddonPreferences):
     
     runcomfy_poll_interval: IntProperty(
         name="Poll Interval (seconds)",
-        description="How often to check status",
-        default=5,
-        min=2,
+        description="How often to check status (generation takes ~26s, so 10s = 2-3 checks per gen)",
+        default=10,
+        min=5,
         max=30
     )
     
@@ -177,6 +177,12 @@ class StyleEnginePreferences(AddonPreferences):
     )
     
     # Feature toggles for compatibility
+    enable_heavypoly_compatibility: BoolProperty(
+        name="Enable HEAVYPOLY Compatibility",
+        description="Integrate with HEAVYPOLY workflow and hotkeys. Enhances Style Engine to work seamlessly with HEAVYPOLY's pie menus and shortcuts",
+        default=False
+    )
+    
     enable_camera_switching: BoolProperty(
         name="Allow Camera Switching",
         description="Allow addon to temporarily change active camera during rendering (safe - restores immediately). Disable if using HEAVYPOLY or custom camera systems and experiencing issues",
@@ -396,6 +402,15 @@ class StyleEnginePreferences(AddonPreferences):
             # Feature toggles
             col = advanced_box.column(align=True)
             col.label(text="Feature Toggles:", icon='PREFERENCES')
+            
+            # HEAVYPOLY Integration
+            row = col.row(align=True)
+            row.prop(self, "enable_heavypoly_compatibility")
+            if self.enable_heavypoly_compatibility:
+                row.label(text="", icon='CHECKMARK')
+            
+            col.separator()
+            
             col.prop(self, "enable_camera_switching")
             col.prop(self, "enable_workspace_creation")
             col.prop(self, "enable_viewport_split")

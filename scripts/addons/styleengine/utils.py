@@ -13,6 +13,20 @@ def get_preferences():
     return bpy.context.preferences.addons['styleengine'].preferences
 
 
+def is_heavypoly_compatible():
+    """
+    Check if HEAVYPOLY compatibility mode is enabled.
+    
+    Returns:
+        bool: True if HEAVYPOLY integration is enabled
+    """
+    try:
+        prefs = get_preferences()
+        return prefs.enable_heavypoly_compatibility
+    except:
+        return False
+
+
 def get_runcomfy_api_token():
     """
     Get the RunComfy API token.

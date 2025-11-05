@@ -141,27 +141,16 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
 
     # Workspace settings
     def update_refresh_viewport(self, context):
-        """Start or stop the refresh and render timers based on checkbox state."""
+        """
+        Refresh viewport setting (now deprecated - always on-demand).
+        Image refresh happens automatically when generation completes.
+        This property is kept for compatibility but does nothing.
+        """
+        # No timer registration needed - refresh is on-demand via on_generation_complete
         if self.refresh_viewport:
-            # Start image refresh timer if not already running
-            if not bpy.app.timers.is_registered(workspace_setup.refresh_ai_image):
-                bpy.app.timers.register(workspace_setup.refresh_ai_image, first_interval=1.0, persistent=True)
-                print("[Style Engine] Auto-refresh enabled")
-            
-            # Start auto-render timer if not already running
-            if not bpy.app.timers.is_registered(workspace_setup.auto_render_passes):
-                bpy.app.timers.register(workspace_setup.auto_render_passes, first_interval=workspace_setup.RENDER_INTERVAL, persistent=True)
-                print(f"[Style Engine] Auto-render enabled (every {workspace_setup.RENDER_INTERVAL}s)")
+            print("[Style Engine] Image refresh: on-demand (refreshes when generation completes)")
         else:
-            # Stop refresh timer if running
-            if bpy.app.timers.is_registered(workspace_setup.refresh_ai_image):
-                bpy.app.timers.unregister(workspace_setup.refresh_ai_image)
-                print("[Style Engine] Auto-refresh disabled")
-            
-            # Stop render timer if running
-            if bpy.app.timers.is_registered(workspace_setup.auto_render_passes):
-                bpy.app.timers.unregister(workspace_setup.auto_render_passes)
-                print("[Style Engine] Auto-render disabled")
+            print("[Style Engine] Note: Image refresh is always on-demand, no timer to disable")
     
     refresh_viewport: bpy.props.BoolProperty(
         name="Refresh Viewport",
@@ -215,7 +204,7 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
     background_opacity: bpy.props.FloatProperty(
         name="Background Opacity",
         description="Transparency of the AI background image (0=invisible, 1=opaque)",
-        default=1.0,
+        default=0.7,
         min=0.0,
         max=1.0,
         update=update_background_opacity
@@ -417,6 +406,80 @@ class WM_OT_AlignAICameraToView(bpy.types.Operator):
         return {'CANCELLED'}
 
 
+class WM_OT_BringBackgroundForward(bpy.types.Operator):
+    """Bring AI background image in front of objects"""
+    bl_idname = "style_engine.bring_background_forward"
+    bl_label = "Bring Forward"
+    bl_description = "Display AI background image in front of 3D objects"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    def execute(self, context):
+        prefs = context.preferences.addons['styleengine'].preferences
+        camera_name = prefs.camera_name_override
+        
+        if camera_name not in bpy.data.objects:
+            self.report({'WARNING'}, f"Camera '{camera_name}' not found")
+            return {'CANCELLED'}
+        
+        ai_camera = bpy.data.objects[camera_name]
+        if ai_camera.type != 'CAMERA':
+            self.report({'WARNING'}, f"'{camera_name}' is not a camera")
+            return {'CANCELLED'}
+        
+        cam_data = ai_camera.data
+        if len(cam_data.background_images) > 0:
+            cam_data.background_images[0].display_depth = 'FRONT'
+            self.report({'INFO'}, "Background image brought forward")
+            print("[Style Engine] ✓ Background display_depth: FRONT (in front of objects)")
+            
+            # Redraw viewports
+            for area in context.screen.areas:
+                if area.type == 'VIEW_3D':
+                    area.tag_redraw()
+            
+            return {'FINISHED'}
+        else:
+            self.report({'WARNING'}, "No background image found on camera")
+            return {'CANCELLED'}
+
+
+class WM_OT_SendBackgroundBack(bpy.types.Operator):
+    """Send AI background image behind objects"""
+    bl_idname = "style_engine.send_background_back"
+    bl_label = "Send to Back"
+    bl_description = "Display AI background image behind 3D objects"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    def execute(self, context):
+        prefs = context.preferences.addons['styleengine'].preferences
+        camera_name = prefs.camera_name_override
+        
+        if camera_name not in bpy.data.objects:
+            self.report({'WARNING'}, f"Camera '{camera_name}' not found")
+            return {'CANCELLED'}
+        
+        ai_camera = bpy.data.objects[camera_name]
+        if ai_camera.type != 'CAMERA':
+            self.report({'WARNING'}, f"'{camera_name}' is not a camera")
+            return {'CANCELLED'}
+        
+        cam_data = ai_camera.data
+        if len(cam_data.background_images) > 0:
+            cam_data.background_images[0].display_depth = 'BACK'
+            self.report({'INFO'}, "Background image sent to back")
+            print("[Style Engine] ✓ Background display_depth: BACK (behind objects)")
+            
+            # Redraw viewports
+            for area in context.screen.areas:
+                if area.type == 'VIEW_3D':
+                    area.tag_redraw()
+            
+            return {'FINISHED'}
+        else:
+            self.report({'WARNING'}, "No background image found on camera")
+            return {'CANCELLED'}
+
+
 # Prompt editor operators removed - text editor now auto-created in workspace layout
 # and auto-syncs on generation (no manual buttons needed)
 
@@ -551,17 +614,15 @@ class WM_OT_ProjectTexture(bpy.types.Operator):
         
         ai_camera = bpy.data.objects["ai_camera"]
         
-        # Get path to current_ai.png
-        import os
-        from pathlib import Path
-        # Go up from: scripts/addons/styleengine/ui_panel.py -> root
-        addon_root = Path(__file__).parent.parent.parent.parent
-        img_path = addon_root / "data" / "temp" / "ai_vision" / "current_ai.png"
+        # Get path to current_ai.png using the correct temp directory
+        from . import workspace_setup
+        temp_dir = workspace_setup.get_temp_directory(context)
+        img_path = temp_dir / "current_ai.png"
         
-        print(f"[Style Engine] Looking for image at: {img_path}")
+        print(f"[Style Engine] Looking for AI image at: {img_path}")
         
         if not img_path.exists():
-            self.report({'ERROR'}, f"AI image not found at {img_path}")
+            self.report({'ERROR'}, f"AI image not found at {img_path}. Generate an image first.")
             return {'CANCELLED'}
         
         print(f"[Style Engine] Found image, loading for projection...")
@@ -984,6 +1045,14 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
             setup_box.label(text="Background Opacity:")
             setup_box.prop(style_props, "background_opacity", slider=True, text="")
             
+            # Background depth control buttons
+            prefs = context.preferences.addons['styleengine'].preferences
+            camera_name = prefs.camera_name_override
+            if camera_name in bpy.data.objects:
+                depth_row = setup_box.row(align=True)
+                depth_row.operator("style_engine.bring_background_forward", icon='TRIA_UP')
+                depth_row.operator("style_engine.send_background_back", icon='TRIA_DOWN')
+            
             # Output path
             setup_box.separator()
             setup_box.label(text="Output Path:")
@@ -1152,6 +1221,8 @@ classes = (
     ObjectGroup,
     StyleEngineProperties,
     WM_OT_AlignAICameraToView,
+    WM_OT_BringBackgroundForward,
+    WM_OT_SendBackgroundBack,
     # Prompt editor operators removed - now automatic
     WM_OT_AddGroup,
     WM_OT_AssignGroup,

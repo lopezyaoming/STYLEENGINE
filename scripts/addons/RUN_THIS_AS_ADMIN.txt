@@ -1,0 +1,21 @@
+============================================================
+  COPY AND PASTE THESE COMMANDS INTO ADMIN POWERSHELL
+============================================================
+
+1. First, allow script execution:
+   
+   Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
+
+2. Then run the fix script:
+   
+   cd "C:\Coding\STYLEENGINE\scripts\addons"
+   .\fix_blender_portable_mode.ps1
+
+============================================================
+Or run this single command:
+============================================================
+
+powershell -ExecutionPolicy Bypass -File "C:\Coding\STYLEENGINE\scripts\addons\fix_blender_portable_mode.ps1"
+
+============================================================
+

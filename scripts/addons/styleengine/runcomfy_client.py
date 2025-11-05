@@ -313,21 +313,30 @@ class RunComfyClient:
 
 def encode_image_to_base64(image_path):
     """
-    Encode PNG to base64 data URI.
+    Encode image to base64 data URI.
     
     Args:
-        image_path: Path to PNG file
+        image_path: Path to image file (PNG or JPEG)
     
     Returns:
-        str: Base64 data URI (data:image/png;base64,...)
+        str: Base64 data URI (data:image/png;base64,... or data:image/jpeg;base64,...)
     
     Raises:
         RunComfyError: If encoding fails
     """
     try:
+        # Detect image type from extension
+        image_path_str = str(image_path).lower()
+        if image_path_str.endswith('.jpg') or image_path_str.endswith('.jpeg'):
+            mime_type = 'image/jpeg'
+        elif image_path_str.endswith('.png'):
+            mime_type = 'image/png'
+        else:
+            mime_type = 'image/png'  # Default to PNG
+        
         with open(image_path, 'rb') as f:
             img_data = base64.b64encode(f.read()).decode('utf-8')
-        return f"data:image/png;base64,{img_data}"
+        return f"data:{mime_type};base64,{img_data}"
     except Exception as e:
         raise RunComfyError(f"Failed to encode image: {e}")
 
