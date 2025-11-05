@@ -183,7 +183,7 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
             print("[Style Engine] Auto-generate disabled. Stopping cyclical generation.")
     
     auto_generate: bpy.props.BoolProperty(
-        name="Generate Images",
+        name="Autogenerate",
         description="Toggle continuous AI generation ON/OFF (when enabled, continuously renders and generates images)",
         default=False,
         update=update_auto_generate
@@ -1148,12 +1148,18 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
             gen_box.separator()
             gen_box.operator("style_engine.project_texture", icon='UV')
             
-            # Generate Images - BIG TOGGLE SWITCH (ON = continuous generation, OFF = stopped)
+            # Generate Image - ONE-SHOT BUTTON (large, on top)
             gen_box.separator()
             gen_box.separator()
             gen_row = gen_box.row()
             gen_row.scale_y = 2.5  # Make it BIG
-            gen_row.prop(style_props, "auto_generate", text="Generate Images", icon='PLAY', toggle=True)
+            gen_row.operator("style_engine.generate_ai_quick", text="Generate Image", icon='IMAGE_DATA')
+            
+            # Autogenerate - CONTINUOUS TOGGLE (smaller, below)
+            gen_box.separator()
+            gen_row = gen_box.row()
+            gen_row.scale_y = 1.5  # Smaller than main button
+            gen_row.prop(style_props, "auto_generate", text="Autogenerate", icon='FILE_REFRESH', toggle=True)
             
             # # Groups section - COMMENTED OUT FOR NOW
             # gen_box.separator()
