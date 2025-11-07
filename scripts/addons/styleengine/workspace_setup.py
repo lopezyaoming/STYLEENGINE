@@ -17,39 +17,70 @@ ADDON_DIR = Path(__file__).parent
 def get_temp_directory(context=None):
     """
     Get the temp directory for storing AI vision data.
+    Once determined, the path is locked for the entire session to prevent
+    filepath issues when .blend file is saved mid-session.
+    
     Priority:
     1. Use .blend file directory if file is saved (//temp/ai_vision/)
     2. Use output_path from preferences if set
     3. Fall back to system temp directory
     """
-    # Try to use .blend file directory first (relative path)
+    global _session_temp_dir
+    
+    # If already determined, reuse it (prevents save-time path changes)
+    if _session_temp_dir is not None:
+        return _session_temp_dir
+    
+    # Determine temp directory (priority order)
+    temp_dir = None
+    
+    # 1. Try .blend file directory if saved
     if bpy.data.is_saved:
         blend_dir = Path(bpy.path.abspath("//"))
         temp_dir = blend_dir / "temp" / "ai_vision"
-        return temp_dir
     
-    # Try to use user's output_path setting
-    if context:
+    # 2. Try user's output_path setting
+    elif context:
         try:
             props = context.scene.style_engine_props
             if hasattr(props, 'output_path') and props.output_path:
                 output_path = Path(props.output_path)
                 if output_path.exists():
                     temp_dir = output_path / "temp" / "ai_vision"
-                    return temp_dir
         except:
             pass
     
-    # Fall back to system temp directory
-    import tempfile
-    temp_dir = Path(tempfile.gettempdir()) / "blender_styleengine" / "ai_vision"
+    # 3. Fall back to system temp
+    if temp_dir is None:
+        import tempfile
+        temp_dir = Path(tempfile.gettempdir()) / "blender_styleengine" / "ai_vision"
+    
+    # Lock it for this session
+    _session_temp_dir = temp_dir
+    print(f"[Style Engine] 🔒 Temp directory locked: {temp_dir}")
+    
     return temp_dir
+
+
+def reset_temp_directory():
+    """
+    Reset temp directory lock (called when setting up new workspace).
+    Allows the path to be re-determined based on current .blend save state.
+    """
+    global _session_temp_dir
+    old_path = _session_temp_dir
+    _session_temp_dir = None
+    if old_path:
+        print(f"[Style Engine] 🔓 Temp directory unlocked (was: {old_path})")
 
 # Global variable to track last modification time
 _last_image_mtime = 0
 
 # Global variable for render interval
 RENDER_INTERVAL = 5.0  # seconds
+
+# Global variable to lock temp directory for session consistency
+_session_temp_dir = None
 
 
 def write_session_json(context):
@@ -475,7 +506,9 @@ def _hijack_heavypoly_areas_standalone(screen, camera):
     
     Transformations:
     - Image Editor → 3D View (camera locked for AI output)
-    - Text Editor → Load STYLEENGINE_Prompt
+    - Split camera area horizontally (80% camera / 20% prompt) → Add Text Editor below
+    - Use timer delay to ensure Blender processes the split before configuring prompt area
+    - Leave HeavyPoly's original text editor untouched
     
     Args:
         screen: Blender screen with areas to hijack
@@ -487,12 +520,13 @@ def _hijack_heavypoly_areas_standalone(screen, camera):
     
     # Track what we found
     found_image_editor = False
-    found_text_editor = False
+    camera_area = None
     
+    # STEP 1: Find and convert Image Editor to camera view
     for area in screen.areas:
-        # HIJACK 1: Convert Image Editor to camera-locked 3D View
         if area.type == 'IMAGE_EDITOR':
             print(f"[Style Engine]   📷 Found Image Editor at ({area.x}, {area.y})")
+            camera_area = area
             
             # Change to 3D View
             area.type = 'VIEW_3D'
@@ -515,36 +549,106 @@ def _hijack_heavypoly_areas_standalone(screen, camera):
                     # Show camera background image
                     space.overlay.show_extras = True
                     
+                    # Clean UI
+                    space.show_region_toolbar = False
+                    space.show_region_ui = False
+                    space.show_region_header = True
+                    
                     print("[Style Engine]   ✅ Converted to camera-locked 3D View")
                     found_image_editor = True
                     break
-        
-        # HIJACK 2: Load our prompt into Text Editor
-        elif area.type == 'TEXT_EDITOR':
-            print(f"[Style Engine]   📝 Found Text Editor at ({area.x}, {area.y})")
             
-            # Get or create our prompt text block
-            prompt_text = utils.get_or_create_prompt_text()
-            
-            # Set it as the active text in this editor
-            for space in area.spaces:
-                if space.type == 'TEXT_EDITOR':
-                    space.text = prompt_text
-                    space.show_line_numbers = True
-                    space.show_syntax_highlight = True
-                    
-                    print("[Style Engine]   ✅ Loaded Style Engine prompt")
-                    found_text_editor = True
-                    break
+            break  # Only process first Image Editor
     
-    # Summary
-    if found_image_editor and found_text_editor:
-        print("[Style Engine] 🎉 HeavyPoly workspace successfully hijacked!")
-    else:
-        if not found_image_editor:
-            print("[Style Engine] ⚠️  No Image Editor found (will use standard layout)")
-        if not found_text_editor:
-            print("[Style Engine] ℹ️  No Text Editor found (prompt available in Text Editor menu)")
+    if not found_image_editor:
+        print("[Style Engine] ⚠️  No Image Editor found (cannot create prompt area)")
+        for area in screen.areas:
+            area.tag_redraw()
+        return
+    
+    # STEP 2: Split the camera area horizontally to add text editor below
+    print("[Style Engine]   📝 Creating Style Engine prompt area below AI camera...")
+    
+    try:
+        # Need to use temp_override for the split operation
+        context = bpy.context
+        override = {'area': camera_area, 'region': camera_area.regions[-1]}
+        
+        with context.temp_override(**override):
+            # Split horizontally: Top 20% (camera), Bottom 80% (prompt)
+            result = bpy.ops.screen.area_split(direction='HORIZONTAL', factor=0.2)
+        
+        if result == {'FINISHED'}:
+            print("[Style Engine]   ✅ Split camera area (80% camera / 20% prompt)")
+            
+            # Schedule delayed configuration (Blender needs time to process split)
+            camera_x = camera_area.x
+            camera_y = camera_area.y
+            
+            def delayed_prompt_setup():
+                # Debug: Print all VIEW_3D areas
+                print(f"[Style Engine]   🔍 Looking for bottom area (camera was at x={camera_x}, y={camera_y})...")
+                view3d_areas = [a for a in screen.areas if a.type == 'VIEW_3D']
+                print(f"[Style Engine]   Found {len(view3d_areas)} VIEW_3D areas:")
+                for i, area in enumerate(view3d_areas):
+                    print(f"[Style Engine]     Area {i}: x={area.x}, y={area.y}, width={area.width}, height={area.height}")
+                
+                # Find the newly created bottom area
+                # It should be a VIEW_3D area at the same X position but lower Y
+                bottom_area = None
+                
+                # Look for VIEW_3D areas at same X position
+                candidates = [a for a in screen.areas if a.type == 'VIEW_3D' and a.x == camera_x]
+                print(f"[Style Engine]   Candidates at x={camera_x}: {len(candidates)}")
+                
+                # Sort by Y position (lower Y = bottom)
+                if len(candidates) >= 2:
+                    candidates.sort(key=lambda a: a.y)
+                    bottom_area = candidates[0]  # Lowest Y = bottom area
+                    print(f"[Style Engine]   Selected bottom area: x={bottom_area.x}, y={bottom_area.y}")
+                
+                if bottom_area:
+                    # Convert bottom area to Text Editor
+                    bottom_area.type = 'TEXT_EDITOR'
+                    
+                    # Load our prompt
+                    prompt_text = utils.get_or_create_prompt_text()
+                    
+                    for space in bottom_area.spaces:
+                        if space.type == 'TEXT_EDITOR':
+                            space.text = prompt_text
+                            space.show_line_numbers = False  # Line numbers OFF
+                            space.show_syntax_highlight = False  # Syntax highlight OFF
+                            space.show_line_highlight = False  # Highlight line OFF
+                            space.show_word_wrap = True  # Word wrap ON
+                            space.show_region_header = True
+                            
+                            print("[Style Engine]   ✅ Style Engine prompt loaded below AI camera")
+                            break
+                    
+                    print("[Style Engine] 🎉 HeavyPoly workspace hijacked! (Camera + Prompt added, HeavyPoly text untouched)")
+                else:
+                    print("[Style Engine] ⚠️  Could not find bottom area after split")
+                    print("[Style Engine] ℹ️  Prompt available in Text Editor menu → STYLEENGINE_Prompt")
+                
+                # Force redraw
+                for area in screen.areas:
+                    area.tag_redraw()
+                
+                return None  # Don't repeat
+            
+            # Wait 0.3 seconds for Blender to process the split (increased from 0.1)
+            bpy.app.timers.register(delayed_prompt_setup, first_interval=0.3)
+            
+        else:
+            print(f"[Style Engine] ⚠️  Split failed: {result}")
+            print("[Style Engine] ℹ️  Prompt available in Text Editor menu")
+    
+    except Exception as e:
+        print(f"[Style Engine] ⚠️  Could not split area: {e}")
+        import traceback
+        traceback.print_exc()
+        print("[Style Engine] ℹ️  Prompt available in Text Editor menu")
     
     # Force redraw all areas
     for area in screen.areas:
@@ -558,6 +662,9 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
     bl_description = "Create AI Vision workspace with split view and AI camera"
     
     def execute(self, context):
+        # Reset temp directory lock (allows re-determination if .blend was saved)
+        reset_temp_directory()
+        
         # Create temp directory for AI images
         self.ensure_temp_directory(context)
         
@@ -1454,32 +1561,93 @@ def generate_ai_image_cloud(context):
         workflow_type=workflow_type
     )
     
-    # 8. Submit inference
+    # 8. Submit inference (Serverless or Server mode)
     try:
-        client = runcomfy_deployment.get_runcomfy_client()
+        import time
         
-        # Time the upload operation
-        submit_start = time.time()
-        response = client.submit_inference(deployment_id, overrides)
-        submit_duration = time.time() - submit_start
+        if runcomfy_deployment.is_server_mode():
+            # ================================================================
+            # SERVER API MODE - Direct ComfyUI Backend submission
+            # ================================================================
+            from . import runcomfy_server_client
+            
+            print(f"[Style Engine] =========================================")
+            print(f"[Style Engine] SERVER API MODE - Starting Generation")
+            print(f"[Style Engine] =========================================")
+            
+            server_client = runcomfy_deployment.get_server_client()
+            
+            # Quick connection check before proceeding
+            print(f"[Style Engine] Verifying server connection...")
+            connected, conn_status = server_client.check_connection()
+            if not connected:
+                error = conn_status.get('error', 'Unknown error')
+                print(f"[Style Engine] ❌ Server connection check failed: {error}")
+                print(f"[Style Engine] Please use 'Test Server Connection' in preferences to diagnose.")
+                return
+            print(f"[Style Engine] ✓ Server connection verified")
+            print(f"[Style Engine]")
+            
+            # Load workflow JSON file
+            workflow_json = load_workflow_json_for_server(workflow_type)
+            if not workflow_json:
+                print("[Style Engine] Failed to load workflow JSON")
+                return
+            
+            # Apply overrides to workflow
+            runcomfy_server_client.apply_overrides_to_workflow(workflow_json, overrides)
+            
+            # Time the upload operation
+            submit_start = time.time()
+            
+            # Queue prompt
+            queue_response = server_client.queue_prompt(workflow_json)
+            prompt_id = queue_response.get('prompt_id')
+            
+            submit_duration = time.time() - submit_start
+            
+            print(f"[Server API] ⏱️ Upload took {submit_duration:.3f}s")
+            
+            # Start polling
+            runcomfy_polling.RunComfyPoller.start_polling(
+                deployment_id='server',  # Special marker for server mode
+                request_id=prompt_id,
+                callback=lambda success, result=None, error=None, workflow_type=None: 
+                    on_generation_complete_server(context, success, result, error, workflow_type or 'sdxl', server_client),
+                workflow_type=workflow_type
+            )
+            
+            print(f"[Server API] 🖥️ Server generation started (prompt_id: {prompt_id[:8]}...)")
+            
+        else:
+            # ================================================================
+            # SERVERLESS API MODE - RunComfy deployment submission
+            # ================================================================
+            client = runcomfy_deployment.get_runcomfy_client()
+            
+            # Time the upload operation
+            submit_start = time.time()
+            response = client.submit_inference(deployment_id, overrides)
+            submit_duration = time.time() - submit_start
+            
+            request_id = response.get('request_id')
+            
+            print(f"[Serverless API] ⏱️ Upload took {submit_duration:.3f}s")
+            
+            # Start polling
+            runcomfy_polling.RunComfyPoller.start_polling(
+                deployment_id=deployment_id,
+                request_id=request_id,
+                callback=lambda success, result=None, error=None, workflow_type=None: 
+                    on_generation_complete(context, success, result, error, workflow_type or 'sdxl'),
+                workflow_type=workflow_type
+            )
+            
+            print(f"[Serverless API] ☁️ Cloud generation started (request_id: {request_id[:8]}...)")
         
-        request_id = response.get('request_id')
-        
-        print(f"[Style Engine] ⏱️ Upload took {submit_duration:.3f}s")
-        
-        # 9. Start polling
-        runcomfy_polling.RunComfyPoller.start_polling(
-            deployment_id=deployment_id,
-            request_id=request_id,
-            callback=lambda success, result=None, error=None, workflow_type=None: 
-                on_generation_complete(context, success, result, error, workflow_type or 'sdxl'),
-            workflow_type=workflow_type
-        )
-        
-        print(f"[Style Engine] ☁️ Cloud generation started (request_id: {request_id[:8]}...)")
-        
-    except runcomfy_client.RunComfyError as e:
-        print(f"[Style Engine] Failed to submit inference: {e}")
+    except (runcomfy_client.RunComfyError, runcomfy_server_client.ServerAPIError) as e:
+        mode_name = "Server API" if runcomfy_deployment.is_server_mode() else "Serverless API"
+        print(f"[{mode_name}] Failed to submit inference: {e}")
 
 
 def build_runcomfy_overrides(session_data, combined_b64, workflow_type):
@@ -1540,6 +1708,108 @@ def build_runcomfy_overrides(session_data, combined_b64, workflow_type):
             # Note: Node 49 (IPAdapterEmbeds) weight_type cannot be overridden due to upstream connections
             # It uses the hardcoded value from the deployed workflow: "style transfer"
         }
+
+
+# ================================================================
+# SERVER API HELPERS
+# ================================================================
+
+def load_workflow_json_for_server(workflow_type):
+    """
+    Load workflow JSON file for Server API mode.
+    
+    Args:
+        workflow_type: 'sdxl' or 'ipadapter'
+    
+    Returns:
+        dict: Workflow JSON or None if failed
+    """
+    import json
+    from pathlib import Path
+    
+    # Determine workflow file path
+    addon_dir = Path(__file__).parent.parent.parent.parent  # Go up to STYLEENGINE root
+    workflows_dir = addon_dir / "ComfyUI" / "runcomfyWorkflows"
+    
+    if workflow_type == 'sdxl':
+        workflow_file = workflows_dir / "SESDXL.json"
+    else:  # ipadapter
+        workflow_file = workflows_dir / "SEIP.json"
+    
+    try:
+        with open(workflow_file, 'r') as f:
+            workflow_json = json.load(f)
+        print(f"[Server API] Loaded workflow: {workflow_file.name}")
+        return workflow_json
+    except Exception as e:
+        print(f"[Server API] Failed to load workflow {workflow_file}: {e}")
+        return None
+
+
+def on_generation_complete_server(context, success, result, error, workflow_type, server_client):
+    """
+    Callback for Server API generation completion.
+    Downloads images from server and updates UI.
+    
+    Args:
+        context: Blender context
+        success: True if generation succeeded
+        result: Server API result (prompt_data from history)
+        error: Error message if failed
+        workflow_type: 'sdxl' or 'ipadapter'
+        server_client: ComfyUIServerClient instance
+    """
+    from . import runcomfy_server_client
+    from pathlib import Path
+    
+    if not success:
+        print(f"[Server API] ❌ Generation failed: {error}")
+        return
+    
+    try:
+        # Extract output images from result
+        images = runcomfy_server_client.extract_output_images(result)
+        
+        if not images:
+            print("[Server API] No output images found in result")
+            return
+        
+        # Download first image
+        first_image = images[0]
+        filename = first_image['filename']
+        subfolder = first_image.get('subfolder', '')
+        image_type = first_image.get('type', 'output')
+        
+        print(f"[Server API] Downloading image: {filename}")
+        
+        # Get temp directory
+        temp_dir = get_temp_directory(context)
+        ai_vision_dir = temp_dir / "ai_vision"
+        ai_vision_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Save path
+        save_path = ai_vision_dir / "current_ai.png"
+        
+        # Download image from server
+        if server_client.download_image(filename, str(save_path), subfolder, image_type):
+            print(f"[Server API] ✅ Image downloaded: {save_path}")
+            
+            # Update camera background image (same as serverless)
+            update_camera_background_image(context, save_path)
+            
+            # Save to data/generated with increment
+            save_generated_image_with_increment(context, save_path)
+            
+            # Trigger next generation cycle if auto-generate is enabled
+            if context.scene.style_engine.auto_generate:
+                trigger_next_generation_cycle(context)
+        else:
+            print("[Server API] Failed to download image")
+    
+    except Exception as e:
+        print(f"[Server API] Error in completion callback: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 def on_generation_complete(context, success, result, error, workflow_type='sdxl'):
