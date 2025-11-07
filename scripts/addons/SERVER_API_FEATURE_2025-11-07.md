@@ -1,6 +1,7 @@
 # Server API Feature Implementation
 **Date:** November 7, 2025  
-**Feature:** Direct ComfyUI Backend API support for Style Engine
+**Feature:** Direct ComfyUI Backend API support for Style Engine  
+**Auto-Launch:** ✅ Implemented - See `AUTO_LAUNCH_SERVER_FEATURE.md`
 
 ## Overview
 
@@ -8,6 +9,16 @@ Style Engine now supports two modes of operation:
 
 1. **Serverless API (Default)** - Uses RunComfy's managed serverless deployment with automatic scaling
 2. **Server API** - Direct communication with a persistent ComfyUI backend instance for faster generation
+
+### 🎉 NEW: Auto-Launch Feature
+
+The addon can now **automatically launch and manage ComfyUI servers** for you! No need to manually create servers through the RunComfy dashboard. 
+
+See `AUTO_LAUNCH_SERVER_FEATURE.md` for complete details on:
+- Automatic server launching on first generation
+- Manual server control buttons (Start/Stop/Test)
+- Server status monitoring
+- Cost considerations
 
 ## Why Server API?
 
@@ -76,42 +87,53 @@ These workflows are loaded, overrides applied, then queued directly to the Comfy
 
 ## How to Use
 
-### Step 1: Enable Server API Mode
+### Quick Start: Auto-Launch (Recommended) ✨
+
+**Easiest method - no manual setup!**
 
 1. Open Blender Preferences → Add-ons → Style Engine
-2. Scroll to "Server API Mode" section
-3. Check "Use Server API (instead of Serverless)"
+2. Enable "Use Server API (instead of Serverless)"
+3. Click "Push to Generate" in your workspace
+4. Wait 2-5 minutes for server to auto-launch
+5. Server URL is auto-populated automatically
+6. Image generation proceeds
 
-### Step 2: Configure Server URL
+**OR** click "Start Server" button to launch manually before generating.
 
-Enter your ComfyUI backend URL in the format:
-```
-https://06ac297b-eab1-4e72-a327-db7dc5197cee-comfyui.runcomfy.com
-```
+See `AUTO_LAUNCH_SERVER_FEATURE.md` for complete auto-launch details.
 
-Or if self-hosting:
-```
-http://localhost:8188
-https://your-server.com:8188
-```
+### Alternative: Manual Server Setup
 
-**Note:** The server URL is pre-configured with the default RunComfy server instance.
+**If you have an existing server or prefer manual control:**
 
-### Step 3: Test Connection
+1. Open Blender Preferences → Add-ons → Style Engine
+2. Enable "Use Server API (instead of Serverless)"
+3. Enter your ComfyUI backend URL:
+   ```
+   https://2b3d922d-f9b1-4353-b189-bc62b0338189-comfyui.runcomfy.com
+   ```
+   
+   Or if self-hosting:
+   ```
+   http://localhost:8188
+   https://your-server.com:8188
+   ```
+
+4. Click "Test Connection" to verify
 
 The UI will show:
-- ✓ URL format looks valid (if URL is properly formatted)
-- ⚠ Server URL not set (if empty)
+- ✓ URL format looks valid (if properly formatted)
+- Running ✓ (after successful connection test)
 
-### Step 4: Generate!
+### How Generation Works
 
-Use "Generate Image" button as normal. The addon will:
-1. Validate server connection
-2. Load workflow JSON
-3. Apply overrides (prompt, resolution, influences)
-4. Queue prompt to server
-5. Poll for completion
-6. Download result
+When you click "Push to Generate":
+1. Validates server connection (auto-launches if needed)
+2. Loads workflow JSON from local files
+3. Applies overrides (prompt, resolution, influences)
+4. Queues prompt to server
+5. Polls for completion
+6. Downloads result to Blender
 
 ## Console Output
 

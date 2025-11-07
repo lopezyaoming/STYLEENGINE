@@ -1,7 +1,8 @@
 # ================================================================
 #    RunComfy Deployment Management
 #    Handles deployment creation, validation, and lifecycle
-#    Supports both Serverless and Server API modes
+#    NOTE: Server API mode is currently disabled/latent
+#    Serverless mode only (with min_instances=1 for equivalent performance)
 # ================================================================
 
 import bpy
@@ -65,15 +66,20 @@ def get_server_client():
     return ComfyUIServerClient(server_url, timeout=prefs.runcomfy_request_timeout)
 
 
+# NOTE: Server API mode disabled/latent
+# def is_server_mode():
+#     """
+#     Check if addon is in Server API mode.
+#     
+#     Returns:
+#         bool: True if Server API mode is enabled
+#     """
+#     prefs = get_addon_prefs()
+#     return prefs.use_server_api
+
 def is_server_mode():
-    """
-    Check if addon is in Server API mode.
-    
-    Returns:
-        bool: True if Server API mode is enabled
-    """
-    prefs = get_addon_prefs()
-    return prefs.use_server_api
+    """Server API mode is disabled - always return False"""
+    return False
 
 
 # ----------------------------------------------------------------
@@ -113,6 +119,7 @@ class DeploymentManager:
     def _ensure_server_connection():
         """
         Validate connection to ComfyUI server (Server API mode) with detailed diagnostics.
+        Auto-launches server if not connected and credentials available.
         
         Returns:
             str: 'server' to indicate server mode
@@ -120,9 +127,29 @@ class DeploymentManager:
         Raises:
             ServerAPIError: If server is not reachable or not healthy
         """
+        from .runcomfy_server_manager import RunComfyServerManager, ServerLaunchError, ServerNotReadyError
+        
+        prefs = get_addon_prefs()
+        
         print(f"[Server API] =========================================")
         print(f"[Server API] SERVER CONNECTION VALIDATION")
         print(f"[Server API] =========================================")
+        
+        # Check if server URL is configured
+        if not prefs.comfyui_server_url:
+            print(f"[Server API] No server URL configured")
+            print(f"[Server API] Attempting to auto-launch a new server...")
+            print(f"[Server API]")
+            
+            # Try auto-launch
+            try:
+                DeploymentManager._auto_launch_server()
+                # Server launched, continue with validation
+            except ServerLaunchError as e:
+                raise ServerAPIError(
+                    f"No server configured and auto-launch failed: {e}. "
+                    "Please manually start a server in RunComfy or configure the server URL in preferences."
+                )
         
         try:
             server_client = get_server_client()
@@ -141,18 +168,34 @@ class DeploymentManager:
                 print(f"[Server API] ❌ CONNECTION FAILED")
                 print(f"[Server API] Error: {error_msg}")
                 print(f"[Server API]")
-                print(f"[Server API] Troubleshooting:")
-                print(f"[Server API]   1. Verify server URL is correct: {server_url}")
-                print(f"[Server API]   2. Check if server is running (visit URL in browser)")
-                print(f"[Server API]   3. Verify network connectivity")
-                print(f"[Server API]   4. Check if server requires authentication")
-                print(f"[Server API]")
                 
-                raise ServerAPIError(
-                    f"Cannot connect to ComfyUI server at {server_url}. "
-                    f"Error: {error_msg}. "
-                    "Please ensure the server is running and the URL is correct."
-                )
+                # Try auto-launch if not already tried
+                if prefs.runcomfy_server_id:
+                    print(f"[Server API] Server exists but not responding.")
+                    print(f"[Server API] The server may be stopped or still starting.")
+                    print(f"[Server API]")
+                    print(f"[Server API] Troubleshooting:")
+                    print(f"[Server API]   1. Check server status in RunComfy dashboard")
+                    print(f"[Server API]   2. Wait a few minutes if server is starting")
+                    print(f"[Server API]   3. Use 'Test Connection' button in preferences to retry")
+                    print(f"[Server API]")
+                else:
+                    print(f"[Server API] Attempting to auto-launch a new server...")
+                    print(f"[Server API]")
+                    try:
+                        DeploymentManager._auto_launch_server()
+                        # Retry connection after launch
+                        server_client = get_server_client()
+                        connected, conn_status = server_client.check_connection()
+                        if not connected:
+                            raise ServerAPIError("Server launched but still not responding. Please wait and try again.")
+                    except ServerLaunchError as e:
+                        print(f"[Server API] Auto-launch failed: {e}")
+                        print(f"[Server API]")
+                        raise ServerAPIError(
+                            f"Cannot connect to server and auto-launch failed: {error_msg}. "
+                            "Please manually start a server in RunComfy."
+                        )
             
             print(f"[Server API] ✓ Basic connection successful")
             print(f"[Server API]")
@@ -201,6 +244,69 @@ class DeploymentManager:
             import traceback
             traceback.print_exc()
             raise ServerAPIError(f"Unexpected error during server validation: {e}")
+    
+    @staticmethod
+    def _auto_launch_server():
+        """
+        Automatically launch a new ComfyUI server instance.
+        
+        Raises:
+            ServerLaunchError: If launch fails
+        """
+        from .runcomfy_server_manager import RunComfyServerManager, ServerLaunchError, ServerNotReadyError
+        
+        prefs = get_addon_prefs()
+        
+        # Get API credentials
+        if prefs.use_env_vars:
+            import os
+            api_token = os.environ.get('RUNCOMFY_API_TOKEN', prefs.runcomfy_api_token)
+            user_id = os.environ.get('RUNCOMFY_USER_ID', prefs.runcomfy_user_id)
+        else:
+            api_token = prefs.runcomfy_api_token
+            user_id = prefs.runcomfy_user_id
+        
+        if not api_token or not user_id:
+            raise ServerLaunchError(
+                "RunComfy credentials not configured. Cannot auto-launch server. "
+                "Please configure credentials in addon preferences."
+            )
+        
+        print(f"[Server Manager] Auto-launching new ComfyUI server...")
+        
+        # Create server manager
+        manager = RunComfyServerManager(
+            api_token=api_token,
+            user_id=user_id
+        )
+        
+        # Create server
+        hardware = prefs.runcomfy_hardware_tier
+        workflow_id = prefs.runcomfy_workflow_id if prefs.runcomfy_workflow_id else None
+        
+        server_info = manager.create_server(
+            workflow_id=workflow_id,
+            hardware_tier=hardware,
+            name='Style Engine ComfyUI Server (Auto-launched)'
+        )
+        
+        # Save server info to preferences
+        prefs.runcomfy_server_id = server_info['server_id']
+        prefs.comfyui_server_url = server_info['server_url']
+        prefs.runcomfy_server_status = server_info['status']
+        
+        print(f"[Server Manager] ✓ Server created: {server_info['server_url']}")
+        print(f"[Server Manager] Waiting for server to be ready (this may take a few minutes)...")
+        
+        # Wait for server to be ready
+        try:
+            manager.wait_for_server_ready(server_info['server_id'], timeout=300)
+            prefs.runcomfy_server_status = 'running'
+            print(f"[Server Manager] ✓ Server is ready!")
+        except ServerNotReadyError as e:
+            prefs.runcomfy_server_status = 'starting'
+            print(f"[Server Manager] ⚠ Server created but not yet ready: {e}")
+            print(f"[Server Manager] You can wait and try again shortly.")
     
     @staticmethod
     def _ensure_serverless_deployment(workflow_type):

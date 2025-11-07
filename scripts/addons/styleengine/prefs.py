@@ -223,20 +223,36 @@ class StyleEnginePreferences(AddonPreferences):
     )
     
     # ----------------------------------------------------------------
-    # SERVER API MODE SETTINGS
+    # SERVER API MODE SETTINGS (DISABLED/LATENT)
     # ----------------------------------------------------------------
+    # NOTE: Server API mode is currently disabled/latent
+    # The Machines API requires special access that may not be available to all accounts.
+    # Serverless mode with min_instances=1 provides equivalent performance without maintenance.
+    # Code kept for future use if API access becomes available.
     
-    use_server_api: BoolProperty(
-        name="Use Server API",
-        description="Use a dedicated ComfyUI server instead of serverless deployment. Provides faster generation but requires maintaining a running server instance",
-        default=False
-    )
+    # use_server_api: BoolProperty(
+    #     name="Use Server API",
+    #     description="Use a dedicated ComfyUI server instead of serverless deployment. Provides faster generation but requires maintaining a running server instance",
+    #     default=False
+    # )
     
-    comfyui_server_url: StringProperty(
-        name="ComfyUI Server URL",
-        description="URL of your ComfyUI backend server (e.g., https://06ac297b-eab1-4e72-a327-db7dc5197cee-comfyui.runcomfy.com)",
-        default="https://06ac297b-eab1-4e72-a327-db7dc5197cee-comfyui.runcomfy.com"
-    )
+    # comfyui_server_url: StringProperty(
+    #     name="ComfyUI Server URL",
+    #     description="URL of your ComfyUI backend server (e.g., https://06ac297b-eab1-4e72-a327-db7dc5197cee-comfyui.runcomfy.com)",
+    #     default=""
+    # )
+    
+    # runcomfy_server_id: StringProperty(
+    #     name="Server ID",
+    #     description="RunComfy server ID (auto-populated when server is launched)",
+    #     default=""
+    # )
+    
+    # runcomfy_server_status: StringProperty(
+    #     name="Server Status",
+    #     description="Current status of the running server",
+    #     default="Not Running"
+    # )
 
     def draw(self, context):
         layout = self.layout
@@ -483,59 +499,82 @@ class StyleEnginePreferences(AddonPreferences):
         col.label(text="  • Linux: /home/user/ComfyUI or ~/ComfyUI")
         
         # ----------------------------------------------------------------
-        # SERVER API MODE
+        # SERVER API MODE (DISABLED/LATENT)
         # ----------------------------------------------------------------
-        layout.separator()
-        server_box = layout.box()
-        server_box.label(text="Server API Mode", icon='NETWORK_DRIVE')
+        # NOTE: Server API mode commented out - Machines API requires special access.
+        # Serverless mode with min_instances=1 provides equivalent performance.
+        # Uncomment below if API access becomes available.
         
-        # Use Server API toggle
-        row = server_box.row()
-        row.prop(self, "use_server_api", text="Use Server API (instead of Serverless)")
-        
-        if self.use_server_api:
-            # Show warning about server maintenance
-            server_box.separator()
-            warning_col = server_box.column(align=True)
-            warning_col.label(text="⚠ Server API Mode Active", icon='ERROR')
-            warning_col.label(text="You are responsible for maintaining the server instance.")
-            warning_col.label(text="Provides faster generation but requires a running ComfyUI backend.")
-            
-            server_box.separator()
-            
-            # Server URL field
-            col = server_box.column(align=True)
-            col.label(text="ComfyUI Backend Server URL:", icon='URL')
-            col.prop(self, "comfyui_server_url", text="")
-            
-            # Show URL validation
-            if self.comfyui_server_url:
-                if "comfyui.runcomfy.com" in self.comfyui_server_url.lower() or "http" in self.comfyui_server_url.lower():
-                    row = server_box.row()
-                    row.label(text="✓ URL format looks valid", icon='CHECKMARK')
-                else:
-                    row = server_box.row()
-                    row.label(text="⚠ Check URL format", icon='ERROR')
-            else:
-                row = server_box.row()
-                row.label(text="⚠ Server URL not set", icon='ERROR')
-            
-            server_box.separator()
-            col = server_box.column(align=True)
-            col.label(text="Example URL:")
-            col.label(text="  https://06ac297b-eab1-4e72-a327-db7dc5197cee-comfyui.runcomfy.com")
-            
-            # Test server connection button
-            server_box.separator()
-            row = server_box.row()
-            row.operator("style_engine.test_server_connection", icon='PLUGIN', text="Test Server Connection")
-        else:
-            # Show info about serverless mode
-            server_box.separator()
-            info_col = server_box.column(align=True)
-            info_col.label(text="ℹ Serverless Mode Active (default)", icon='INFO')
-            info_col.label(text="Uses RunComfy's managed serverless deployment.")
-            info_col.label(text="No server maintenance required, automatic scaling.")
+        # layout.separator()
+        # server_box = layout.box()
+        # server_box.label(text="Server API Mode", icon='NETWORK_DRIVE')
+        # 
+        # # Use Server API toggle
+        # row = server_box.row()
+        # row.prop(self, "use_server_api", text="Use Server API (instead of Serverless)")
+        # 
+        # if self.use_server_api:
+        #     # Show warning about server maintenance
+        #     server_box.separator()
+        #     warning_col = server_box.column(align=True)
+        #     warning_col.label(text="⚠ Server API Mode Active", icon='ERROR')
+        #     warning_col.label(text="You are responsible for maintaining the server instance.")
+        #     warning_col.label(text="Provides faster generation but requires a running ComfyUI backend.")
+        #     
+        #     server_box.separator()
+        #     
+        #     # Server URL field
+        #     col = server_box.column(align=True)
+        #     col.label(text="ComfyUI Backend Server URL:", icon='URL')
+        #     col.prop(self, "comfyui_server_url", text="")
+        #     
+        #     # Show URL validation
+        #     if self.comfyui_server_url:
+        #         if "comfyui.runcomfy.com" in self.comfyui_server_url.lower() or "http" in self.comfyui_server_url.lower():
+        #             row = server_box.row()
+        #             row.label(text="✓ URL format looks valid", icon='CHECKMARK')
+        #         else:
+        #             row = server_box.row()
+        #             row.label(text="⚠ Check URL format", icon='ERROR')
+        #     else:
+        #         row = server_box.row()
+        #         row.label(text="⚠ Server URL not set", icon='ERROR')
+        #     
+        #     server_box.separator()
+        #     col = server_box.column(align=True)
+        #     col.label(text="Example URL:")
+        #     col.label(text="  https://06ac297b-eab1-4e72-a327-db7dc5197cee-comfyui.runcomfy.com")
+        #     
+        #     # Server management buttons
+        #     server_box.separator()
+        #     
+        #     # Show server status if we have a server_id
+        #     if self.runcomfy_server_id:
+        #         status_col = server_box.column(align=True)
+        #         status_col.label(text=f"Server Status: {self.runcomfy_server_status.title()}", icon='INFO')
+        #         status_col.label(text=f"Server ID: {self.runcomfy_server_id[:20]}...")
+        #         server_box.separator()
+        #     
+        #     # Action buttons in a row
+        #     btn_row = server_box.row(align=True)
+        #     
+        #     # Start Server button (if no server or server stopped)
+        #     if not self.runcomfy_server_id or self.runcomfy_server_status in ('unknown', 'stopped', 'failed'):
+        #         btn_row.operator("style_engine.start_server", icon='PLAY', text="Start New Server")
+        #     
+        #     # Test Connection button
+        #     btn_row.operator("style_engine.test_server_connection", icon='PLUGIN', text="Test Connection")
+        #     
+        #     # Stop Server button (if we have an active server)
+        #     if self.runcomfy_server_id and self.runcomfy_server_status not in ('unknown', 'stopped', 'failed'):
+        #         btn_row.operator("style_engine.stop_server", icon='CANCEL', text="Stop Server")
+        # else:
+        #     # Show info about serverless mode
+        #     server_box.separator()
+        #     info_col = server_box.column(align=True)
+        #     info_col.label(text="ℹ Serverless Mode Active (default)", icon='INFO')
+        #     info_col.label(text="Uses RunComfy's managed serverless deployment.")
+        #     info_col.label(text="No server maintenance required, automatic scaling.")
         
         # Instructions
         layout.separator()
@@ -546,7 +585,7 @@ class StyleEnginePreferences(AddonPreferences):
         col.label(text="• Or manually enter credentials above")
         col.label(text="• Environment variables take priority if 'Prefer Environment Variables' is enabled")
         col.label(text="• Point ComfyUI Path to your ComfyUI installation folder")
-        col.label(text="• Enable 'Use Server API' if you have a dedicated ComfyUI backend server")
+        # col.label(text="• Enable 'Use Server API' if you have a dedicated ComfyUI backend server")  # Disabled - Server API latent
 
 
 class WM_OT_TestConnection(bpy.types.Operator):
@@ -638,73 +677,203 @@ class WM_OT_TestConnection(bpy.types.Operator):
         return prefs.runcomfy_user_id
 
 
-class WM_OT_TestServerConnection(bpy.types.Operator):
-    """Test connection to ComfyUI Server API."""
-    bl_idname = "style_engine.test_server_connection"
-    bl_label = "Test Server Connection"
-    bl_description = "Test connection to ComfyUI backend server with detailed diagnostics"
-
-    def execute(self, context):
-        prefs = context.preferences.addons['styleengine'].preferences
-        
-        # Check if server URL is set
-        server_url = prefs.comfyui_server_url
-        
-        if not server_url:
-            self.report({'ERROR'}, "Server URL is not set!")
-            print("[Server API] ❌ Test failed: Server URL not configured")
-            return {'CANCELLED'}
-        
-        # Test connection
-        try:
-            from . import runcomfy_deployment
-            from . import runcomfy_server_client
-            
-            self.report({'INFO'}, f"Testing connection to: {server_url[:50]}...")
-            print(f"[Server API] =========================================")
-            print(f"[Server API] MANUAL SERVER CONNECTION TEST")
-            print(f"[Server API] =========================================")
-            
-            # Get server client
-            server_client = runcomfy_deployment.get_server_client()
-            
-            # Perform comprehensive health check
-            health = server_client.check_server_health()
-            
-            # Report results
-            if health['healthy']:
-                self.report({'INFO'}, f"✅ Server is healthy and ready!")
-                print(f"[Server API]")
-                print(f"[Server API] ✅ TEST RESULT: SERVER IS HEALTHY")
-                print(f"[Server API] {health['details']}")
-            elif health['connection']['reachable']:
-                self.report({'WARNING'}, f"⚠ Server is reachable but may not be fully ready")
-                print(f"[Server API]")
-                print(f"[Server API] ⚠ TEST RESULT: SERVER REACHABLE BUT WARNING")
-                print(f"[Server API] {health['details']}")
-            else:
-                error = health['connection'].get('error', 'Unknown error')
-                self.report({'ERROR'}, f"❌ Connection failed: {error}")
-                print(f"[Server API]")
-                print(f"[Server API] ❌ TEST RESULT: CONNECTION FAILED")
-                print(f"[Server API] Error: {error}")
-            
-            print(f"[Server API] =========================================")
-            
-            return {'FINISHED'}
-            
-        except runcomfy_server_client.ServerAPIError as e:
-            error_msg = str(e)
-            self.report({'ERROR'}, f"❌ Server API error: {error_msg}")
-            print(f"[Server API] ❌ Test failed: {error_msg}")
-            return {'CANCELLED'}
-            
-        except Exception as e:
-            self.report({'ERROR'}, f"❌ Unexpected error: {e}")
-            print(f"[Server API] ❌ Unexpected error during test: {e}")
-            import traceback
-            traceback.print_exc()
-            return {'CANCELLED'}
+# NOTE: Server API operators commented out - Server API mode is latent
+# Uncomment if Server API access becomes available
+# 
+# class WM_OT_StartServer(bpy.types.Operator):
+#     """Start a new RunComfy server instance."""
+#     bl_idname = "style_engine.start_server"
+#     bl_label = "Start Server"
+#     bl_description = "Launch a new ComfyUI server instance on RunComfy"
+# 
+#     def execute(self, context):
+#         prefs = context.preferences.addons['styleengine'].preferences
+#         
+#         # Get API credentials
+#         if prefs.use_env_vars:
+#             import os
+#             api_token = os.environ.get('RUNCOMFY_API_TOKEN', prefs.runcomfy_api_token)
+#             user_id = os.environ.get('RUNCOMFY_USER_ID', prefs.runcomfy_user_id)
+#         else:
+#             api_token = prefs.runcomfy_api_token
+#             user_id = prefs.runcomfy_user_id
+#         
+#         if not api_token or not user_id:
+#             self.report({'ERROR'}, "RunComfy credentials not configured!")
+#             return {'CANCELLED'}
+#         
+#         # Start server
+#         try:
+#             from . import runcomfy_server_manager
+#             
+#             self.report({'INFO'}, "Starting new ComfyUI server...")
+#             print(f"[Server Manager] =========================================")
+#             print(f"[Server Manager] LAUNCHING NEW COMFYUI SERVER")
+#             print(f"[Server Manager] =========================================")
+#             
+#             # Create server manager
+#             manager = runcomfy_server_manager.RunComfyServerManager(
+#                 api_token=api_token,
+#                 user_id=user_id
+#             )
+#             
+#             # Create server
+#             hardware = prefs.runcomfy_hardware_tier
+#             workflow_id = prefs.runcomfy_workflow_id if prefs.runcomfy_workflow_id else None
+#             
+#             server_info = manager.create_server(
+#                 workflow_id=workflow_id,
+#                 hardware_tier=hardware,
+#                 name='Style Engine ComfyUI Server'
+#             )
+#             
+#             # Save server info to preferences
+#             prefs.runcomfy_server_id = server_info['server_id']
+#             prefs.comfyui_server_url = server_info['server_url']
+#             prefs.runcomfy_server_status = server_info['status']
+#             
+#             self.report({'INFO'}, f"✅ Server created! Waiting for it to be ready...")
+#             
+#             # Wait for server to be ready
+#             try:
+#                 manager.wait_for_server_ready(server_info['server_id'], timeout=300)
+#                 prefs.runcomfy_server_status = 'running'
+#                 self.report({'INFO'}, f"✅ Server is ready! URL: {server_info['server_url']}")
+#             except runcomfy_server_manager.ServerNotReadyError as e:
+#                 prefs.runcomfy_server_status = 'starting'
+#                 self.report({'WARNING'}, f"⚠ Server created but not yet ready: {e}")
+#             
+#             return {'FINISHED'}
+#             
+#         except runcomfy_server_manager.ServerLaunchError as e:
+#             error_msg = str(e)
+#             self.report({'ERROR'}, f"❌ Failed to start server: {error_msg}")
+#             print(f"[Server Manager] ❌ Launch failed: {error_msg}")
+#             return {'CANCELLED'}
+#             
+#         except Exception as e:
+#             self.report({'ERROR'}, f"❌ Unexpected error: {e}")
+#             print(f"[Server Manager] ❌ Unexpected error: {e}")
+#             import traceback
+#             traceback.print_exc()
+#             return {'CANCELLED'}
+# 
+# 
+# # class WM_OT_StopServer(bpy.types.Operator):
+# #     """Stop the RunComfy server instance."""
+# #     bl_idname = "style_engine.stop_server"
+# #     bl_label = "Stop Server"
+# #     bl_description = "Stop the running ComfyUI server instance"
+# #
+# #     def execute(self, context):
+# #         prefs = context.preferences.addons['styleengine'].preferences
+# #         
+# #         if not prefs.runcomfy_server_id:
+# #             self.report({'ERROR'}, "No active server to stop!")
+# #             return {'CANCELLED'}
+# #         
+# #         # Get API credentials
+# #         if prefs.use_env_vars:
+# #             import os
+# #             api_token = os.environ.get('RUNCOMFY_API_TOKEN', prefs.runcomfy_api_token)
+# #             user_id = os.environ.get('RUNCOMFY_USER_ID', prefs.runcomfy_user_id)
+# #         else:
+# #             api_token = prefs.runcomfy_api_token
+# #             user_id = prefs.runcomfy_user_id
+# #         
+# #         try:
+# #             from . import runcomfy_server_manager
+# #             
+# #             manager = runcomfy_server_manager.RunComfyServerManager(
+# #                 api_token=api_token,
+# #                 user_id=user_id
+# #             )
+# #             
+# #             manager.stop_server(prefs.runcomfy_server_id)
+# #             
+# #             prefs.runcomfy_server_status = 'stopped'
+# #             self.report({'INFO'}, "✅ Server stopped")
+# #             
+# #             return {'FINISHED'}
+# #             
+# #         except Exception as e:
+# #             self.report({'ERROR'}, f"❌ Failed to stop server: {e}")
+# #             return {'CANCELLED'}
+# 
+# 
+# # class WM_OT_TestServerConnection(bpy.types.Operator):
+# #     """Test connection to ComfyUI Server API."""
+# #     bl_idname = "style_engine.test_server_connection"
+# #     bl_label = "Test Server Connection"
+# #     bl_description = "Test connection to ComfyUI backend server with detailed diagnostics"
+# #
+# #     def execute(self, context):
+# #         prefs = context.preferences.addons['styleengine'].preferences
+# #         
+# #         # Check if server URL is set
+# #         server_url = prefs.comfyui_server_url
+# #         
+# #         if not server_url:
+# #             self.report({'ERROR'}, "Server URL is not set!")
+# #             print("[Server API] ❌ Test failed: Server URL not configured")
+# #             return {'CANCELLED'}
+# #         
+# #         # Test connection
+# #         try:
+# #             from . import runcomfy_deployment
+# #             from . import runcomfy_server_client
+# #             
+# #             self.report({'INFO'}, f"Testing connection to: {server_url[:50]}...")
+# #             print(f"[Server API] =========================================")
+# #             print(f"[Server API] MANUAL SERVER CONNECTION TEST")
+# #             print(f"[Server API] =========================================")
+# #             
+# #             # Get server client
+# #             server_client = runcomfy_deployment.get_server_client()
+# #             
+# #             # Perform comprehensive health check
+# #             health = server_client.check_server_health()
+# #             
+# #             # Report results
+# #             if health['healthy']:
+# #                 # Update status
+# #                 prefs.runcomfy_server_status = 'running'
+# #                 self.report({'INFO'}, f"✅ Server is healthy and ready!")
+# #                 print(f"[Server API]")
+# #                 print(f"[Server API] ✅ TEST RESULT: SERVER IS HEALTHY")
+# #                 print(f"[Server API] {health['details']}")
+# #             elif health['connection']['reachable']:
+# #                 prefs.runcomfy_server_status = 'starting'
+# #                 self.report({'WARNING'}, f"⚠ Server is reachable but may not be fully ready")
+# #                 print(f"[Server API]")
+# #                 print(f"[Server API] ⚠ TEST RESULT: SERVER REACHABLE BUT WARNING")
+# #                 print(f"[Server API] {health['details']}")
+# #             else:
+# #                 prefs.runcomfy_server_status = 'stopped'
+# #                 error = health['connection'].get('error', 'Unknown error')
+# #                 self.report({'ERROR'}, f"❌ Connection failed: {error}")
+# #                 print(f"[Server API]")
+# #                 print(f"[Server API] ❌ TEST RESULT: CONNECTION FAILED")
+# #                 print(f"[Server API] Error: {error}")
+# #             
+# #             print(f"[Server API] =========================================")
+# #             
+# #             return {'FINISHED'}
+# #             
+# #         except runcomfy_server_client.ServerAPIError as e:
+# #             error_msg = str(e)
+# #             prefs.runcomfy_server_status = 'failed'
+# #             self.report({'ERROR'}, f"❌ Server API error: {error_msg}")
+# #             print(f"[Server API] ❌ Test failed: {error_msg}")
+# #             return {'CANCELLED'}
+# #             
+# #         except Exception as e:
+# #             prefs.runcomfy_server_status = 'failed'
+# #             self.report({'ERROR'}, f"❌ Unexpected error: {e}")
+# #             print(f"[Server API] ❌ Unexpected error during test: {e}")
+# #             import traceback
+# #             traceback.print_exc()
+# #             return {'CANCELLED'}
 
 
 # ----------------------------------------------------------------
@@ -713,7 +882,9 @@ class WM_OT_TestServerConnection(bpy.types.Operator):
 classes = (
     StyleEnginePreferences,
     WM_OT_TestConnection,
-    WM_OT_TestServerConnection,
+    # WM_OT_StartServer,  # Disabled - Server API latent
+    # WM_OT_StopServer,  # Disabled - Server API latent
+    # WM_OT_TestServerConnection,  # Disabled - Server API latent
 )
 
 def register():

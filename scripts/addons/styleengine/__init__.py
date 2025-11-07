@@ -79,6 +79,7 @@ try:
     from . import workspace_setup
     from . import runcomfy_client
     from . import runcomfy_server_client
+    from . import runcomfy_server_manager
     from . import runcomfy_deployment
     from . import runcomfy_polling
     from . import heavypoly_integration
@@ -185,6 +186,7 @@ except (ImportError, ValueError) as e:
     workspace_setup = load_module("workspace_setup")
     runcomfy_client = load_module("runcomfy_client")
     runcomfy_server_client = load_module("runcomfy_server_client")
+    runcomfy_server_manager = load_module("runcomfy_server_manager")
     runcomfy_deployment = load_module("runcomfy_deployment")
     runcomfy_polling = load_module("runcomfy_polling")
     heavypoly_integration = load_module("heavypoly_integration")

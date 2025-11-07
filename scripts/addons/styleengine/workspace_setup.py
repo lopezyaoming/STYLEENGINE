@@ -1565,89 +1565,92 @@ def generate_ai_image_cloud(context):
     try:
         import time
         
-        if runcomfy_deployment.is_server_mode():
-            # ================================================================
-            # SERVER API MODE - Direct ComfyUI Backend submission
-            # ================================================================
-            from . import runcomfy_server_client
-            
-            print(f"[Style Engine] =========================================")
-            print(f"[Style Engine] SERVER API MODE - Starting Generation")
-            print(f"[Style Engine] =========================================")
-            
-            server_client = runcomfy_deployment.get_server_client()
-            
-            # Quick connection check before proceeding
-            print(f"[Style Engine] Verifying server connection...")
-            connected, conn_status = server_client.check_connection()
-            if not connected:
-                error = conn_status.get('error', 'Unknown error')
-                print(f"[Style Engine] ❌ Server connection check failed: {error}")
-                print(f"[Style Engine] Please use 'Test Server Connection' in preferences to diagnose.")
-                return
-            print(f"[Style Engine] ✓ Server connection verified")
-            print(f"[Style Engine]")
-            
-            # Load workflow JSON file
-            workflow_json = load_workflow_json_for_server(workflow_type)
-            if not workflow_json:
-                print("[Style Engine] Failed to load workflow JSON")
-                return
-            
-            # Apply overrides to workflow
-            runcomfy_server_client.apply_overrides_to_workflow(workflow_json, overrides)
-            
-            # Time the upload operation
-            submit_start = time.time()
-            
-            # Queue prompt
-            queue_response = server_client.queue_prompt(workflow_json)
-            prompt_id = queue_response.get('prompt_id')
-            
-            submit_duration = time.time() - submit_start
-            
-            print(f"[Server API] ⏱️ Upload took {submit_duration:.3f}s")
-            
-            # Start polling
-            runcomfy_polling.RunComfyPoller.start_polling(
-                deployment_id='server',  # Special marker for server mode
-                request_id=prompt_id,
-                callback=lambda success, result=None, error=None, workflow_type=None: 
-                    on_generation_complete_server(context, success, result, error, workflow_type or 'sdxl', server_client),
-                workflow_type=workflow_type
-            )
-            
-            print(f"[Server API] 🖥️ Server generation started (prompt_id: {prompt_id[:8]}...)")
-            
-        else:
-            # ================================================================
-            # SERVERLESS API MODE - RunComfy deployment submission
-            # ================================================================
-            client = runcomfy_deployment.get_runcomfy_client()
-            
-            # Time the upload operation
-            submit_start = time.time()
-            response = client.submit_inference(deployment_id, overrides)
-            submit_duration = time.time() - submit_start
-            
-            request_id = response.get('request_id')
-            
-            print(f"[Serverless API] ⏱️ Upload took {submit_duration:.3f}s")
-            
-            # Start polling
-            runcomfy_polling.RunComfyPoller.start_polling(
-                deployment_id=deployment_id,
-                request_id=request_id,
-                callback=lambda success, result=None, error=None, workflow_type=None: 
-                    on_generation_complete(context, success, result, error, workflow_type or 'sdxl'),
-                workflow_type=workflow_type
-            )
-            
-            print(f"[Serverless API] ☁️ Cloud generation started (request_id: {request_id[:8]}...)")
+        # NOTE: Server API mode disabled/latent - always use serverless
+        # if runcomfy_deployment.is_server_mode():
+        #     # ================================================================
+        #     # SERVER API MODE - Direct ComfyUI Backend submission
+        #     # ================================================================
+        #     from . import runcomfy_server_client
+        #     
+        #     print(f"[Style Engine] =========================================")
+        #     print(f"[Style Engine] SERVER API MODE - Starting Generation")
+        #     print(f"[Style Engine] =========================================")
+        #     
+        #     server_client = runcomfy_deployment.get_server_client()
+        #     
+        #     # Quick connection check before proceeding
+        #     print(f"[Style Engine] Verifying server connection...")
+        #     connected, conn_status = server_client.check_connection()
+        #     if not connected:
+        #         error = conn_status.get('error', 'Unknown error')
+        #         print(f"[Style Engine] ❌ Server connection check failed: {error}")
+        #         print(f"[Style Engine] Please use 'Test Server Connection' in preferences to diagnose.")
+        #         return
+        #     print(f"[Style Engine] ✓ Server connection verified")
+        #     print(f"[Style Engine]")
+        #     
+        #     # Load workflow JSON file
+        #     workflow_json = load_workflow_json_for_server(workflow_type)
+        #     if not workflow_json:
+        #         print("[Style Engine] Failed to load workflow JSON")
+        #         return
+        #     
+        #     # Apply overrides to workflow
+        #     runcomfy_server_client.apply_overrides_to_workflow(workflow_json, overrides)
+        #     
+        #     # Time the upload operation
+        #     submit_start = time.time()
+        #     
+        #     # Queue prompt
+        #     queue_response = server_client.queue_prompt(workflow_json)
+        #     prompt_id = queue_response.get('prompt_id')
+        #     
+        #     submit_duration = time.time() - submit_start
+        #     
+        #     print(f"[Server API] ⏱️ Upload took {submit_duration:.3f}s")
+        #     
+        #     # Start polling
+        #     runcomfy_polling.RunComfyPoller.start_polling(
+        #         deployment_id='server',  # Special marker for server mode
+        #         request_id=prompt_id,
+        #         callback=lambda success, result=None, error=None, workflow_type=None: 
+        #             on_generation_complete_server(context, success, result, error, workflow_type or 'sdxl', server_client),
+        #         workflow_type=workflow_type
+        #     )
+        #     
+        #     print(f"[Server API] 🖥️ Server generation started (prompt_id: {prompt_id[:8]}...)")
+        #     
+        # else:
         
-    except (runcomfy_client.RunComfyError, runcomfy_server_client.ServerAPIError) as e:
-        mode_name = "Server API" if runcomfy_deployment.is_server_mode() else "Serverless API"
-        print(f"[{mode_name}] Failed to submit inference: {e}")
+        # Always use serverless mode
+        # ================================================================
+        # SERVERLESS API MODE - RunComfy deployment submission
+        # ================================================================
+        client = runcomfy_deployment.get_runcomfy_client()
+        
+        # Time the upload operation
+        submit_start = time.time()
+        response = client.submit_inference(deployment_id, overrides)
+        submit_duration = time.time() - submit_start
+        
+        request_id = response.get('request_id')
+        
+        print(f"[Serverless API] ⏱️ Upload took {submit_duration:.3f}s")
+        
+        # Start polling
+        runcomfy_polling.RunComfyPoller.start_polling(
+            deployment_id=deployment_id,
+            request_id=request_id,
+            callback=lambda success, result=None, error=None, workflow_type=None: 
+                on_generation_complete(context, success, result, error, workflow_type or 'sdxl'),
+            workflow_type=workflow_type
+        )
+        
+        print(f"[Serverless API] ☁️ Cloud generation started (request_id: {request_id[:8]}...)")
+        
+    except runcomfy_client.RunComfyError as e:
+        # NOTE: Server API mode disabled - only serverless errors possible
+        print(f"[Serverless API] Failed to submit inference: {e}")
 
 
 def build_runcomfy_overrides(session_data, combined_b64, workflow_type):
