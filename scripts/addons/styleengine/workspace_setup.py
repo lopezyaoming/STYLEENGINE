@@ -120,6 +120,7 @@ def write_session_json(context):
             "global_prompt": props.global_prompt,
             "depth_influence": round(props.depth_influence, 3),
             "silhouette_influence": round(props.silhouette_influence, 3),
+            "texture_influence": round(props.texture_influence, 3),
             "steps": props.steps,
             "ipadapter": {
                 "enabled": props.use_ipadapter if hasattr(props, 'use_ipadapter') else False,
@@ -499,160 +500,161 @@ def _delayed_split_setup_standalone(camera):
         area.tag_redraw()
 
 
-def _hijack_heavypoly_areas_standalone(screen, camera):
-    """
-    STANDALONE function to hijack HeavyPoly areas.
-    Must be standalone (not a method) because it's called from a timer after the operator is destroyed.
-    
-    Transformations:
-    - Image Editor → 3D View (camera locked for AI output)
-    - Split camera area horizontally (80% camera / 20% prompt) → Add Text Editor below
-    - Use timer delay to ensure Blender processes the split before configuring prompt area
-    - Leave HeavyPoly's original text editor untouched
-    
-    Args:
-        screen: Blender screen with areas to hijack
-        camera: AI camera to lock view to
-    """
-    from . import utils
-    
-    print("[Style Engine] 🔧 Hijacking HeavyPoly window areas...")
-    
-    # Track what we found
-    found_image_editor = False
-    camera_area = None
-    
-    # STEP 1: Find and convert Image Editor to camera view
-    for area in screen.areas:
-        if area.type == 'IMAGE_EDITOR':
-            print(f"[Style Engine]   📷 Found Image Editor at ({area.x}, {area.y})")
-            camera_area = area
-            
-            # Change to 3D View
-            area.type = 'VIEW_3D'
-            
-            # Configure the 3D View
-            for space in area.spaces:
-                if space.type == 'VIEW_3D':
-                    # Lock to camera
-                    space.region_3d.view_perspective = 'CAMERA'
-                    space.camera = camera
-                    
-                    # 📐 FIT CAMERA FRAME TO VIEWPORT (auto-fit regardless of screen size)
-                    space.region_3d.view_camera_zoom = 0
-                    
-                    # Set shading to solid with textures
-                    space.shading.type = 'SOLID'
-                    space.shading.light = 'FLAT'
-                    space.shading.color_type = 'TEXTURE'
-                    
-                    # Show camera background image
-                    space.overlay.show_extras = True
-                    
-                    # Clean UI
-                    space.show_region_toolbar = False
-                    space.show_region_ui = False
-                    space.show_region_header = True
-                    
-                    print("[Style Engine]   ✅ Converted to camera-locked 3D View")
-                    found_image_editor = True
-                    break
-            
-            break  # Only process first Image Editor
-    
-    if not found_image_editor:
-        print("[Style Engine] ⚠️  No Image Editor found (cannot create prompt area)")
-        for area in screen.areas:
-            area.tag_redraw()
-        return
-    
-    # STEP 2: Split the camera area horizontally to add text editor below
-    print("[Style Engine]   📝 Creating Style Engine prompt area below AI camera...")
-    
-    try:
-        # Need to use temp_override for the split operation
-        context = bpy.context
-        override = {'area': camera_area, 'region': camera_area.regions[-1]}
-        
-        with context.temp_override(**override):
-            # Split horizontally: Top 20% (camera), Bottom 80% (prompt)
-            result = bpy.ops.screen.area_split(direction='HORIZONTAL', factor=0.2)
-        
-        if result == {'FINISHED'}:
-            print("[Style Engine]   ✅ Split camera area (80% camera / 20% prompt)")
-            
-            # Schedule delayed configuration (Blender needs time to process split)
-            camera_x = camera_area.x
-            camera_y = camera_area.y
-            
-            def delayed_prompt_setup():
-                # Debug: Print all VIEW_3D areas
-                print(f"[Style Engine]   🔍 Looking for bottom area (camera was at x={camera_x}, y={camera_y})...")
-                view3d_areas = [a for a in screen.areas if a.type == 'VIEW_3D']
-                print(f"[Style Engine]   Found {len(view3d_areas)} VIEW_3D areas:")
-                for i, area in enumerate(view3d_areas):
-                    print(f"[Style Engine]     Area {i}: x={area.x}, y={area.y}, width={area.width}, height={area.height}")
-                
-                # Find the newly created bottom area
-                # It should be a VIEW_3D area at the same X position but lower Y
-                bottom_area = None
-                
-                # Look for VIEW_3D areas at same X position
-                candidates = [a for a in screen.areas if a.type == 'VIEW_3D' and a.x == camera_x]
-                print(f"[Style Engine]   Candidates at x={camera_x}: {len(candidates)}")
-                
-                # Sort by Y position (lower Y = bottom)
-                if len(candidates) >= 2:
-                    candidates.sort(key=lambda a: a.y)
-                    bottom_area = candidates[0]  # Lowest Y = bottom area
-                    print(f"[Style Engine]   Selected bottom area: x={bottom_area.x}, y={bottom_area.y}")
-                
-                if bottom_area:
-                    # Convert bottom area to Text Editor
-                    bottom_area.type = 'TEXT_EDITOR'
-                    
-                    # Load our prompt
-                    prompt_text = utils.get_or_create_prompt_text()
-                    
-                    for space in bottom_area.spaces:
-                        if space.type == 'TEXT_EDITOR':
-                            space.text = prompt_text
-                            space.show_line_numbers = False  # Line numbers OFF
-                            space.show_syntax_highlight = False  # Syntax highlight OFF
-                            space.show_line_highlight = False  # Highlight line OFF
-                            space.show_word_wrap = True  # Word wrap ON
-                            space.show_region_header = True
-                            
-                            print("[Style Engine]   ✅ Style Engine prompt loaded below AI camera")
-                            break
-                    
-                    print("[Style Engine] 🎉 HeavyPoly workspace hijacked! (Camera + Prompt added, HeavyPoly text untouched)")
-                else:
-                    print("[Style Engine] ⚠️  Could not find bottom area after split")
-                    print("[Style Engine] ℹ️  Prompt available in Text Editor menu → STYLEENGINE_Prompt")
-                
-                # Force redraw
-                for area in screen.areas:
-                    area.tag_redraw()
-                
-                return None  # Don't repeat
-            
-            # Wait 0.3 seconds for Blender to process the split (increased from 0.1)
-            bpy.app.timers.register(delayed_prompt_setup, first_interval=0.3)
-            
-        else:
-            print(f"[Style Engine] ⚠️  Split failed: {result}")
-            print("[Style Engine] ℹ️  Prompt available in Text Editor menu")
-    
-    except Exception as e:
-        print(f"[Style Engine] ⚠️  Could not split area: {e}")
-        import traceback
-        traceback.print_exc()
-        print("[Style Engine] ℹ️  Prompt available in Text Editor menu")
-    
-    # Force redraw all areas
-    for area in screen.areas:
-        area.tag_redraw()
+# NOTE: HeavyPoly hijacking disabled - function kept latent
+# def _hijack_heavypoly_areas_standalone(screen, camera):
+#     """
+#     STANDALONE function to hijack HeavyPoly areas.
+#     Must be standalone (not a method) because it's called from a timer after the operator is destroyed.
+#     
+#     Transformations:
+#     - Image Editor → 3D View (camera locked for AI output)
+#     - Split camera area horizontally (80% camera / 20% prompt) → Add Text Editor below
+#     - Use timer delay to ensure Blender processes the split before configuring prompt area
+#     - Leave HeavyPoly's original text editor untouched
+#     
+#     Args:
+#         screen: Blender screen with areas to hijack
+#         camera: AI camera to lock view to
+#     """
+#     from . import utils
+#     
+#     print("[Style Engine] 🔧 Hijacking HeavyPoly window areas...")
+#     
+#     # Track what we found
+#     found_image_editor = False
+#     camera_area = None
+#     
+#     # STEP 1: Find and convert Image Editor to camera view
+#     for area in screen.areas:
+#         if area.type == 'IMAGE_EDITOR':
+#             print(f"[Style Engine]   📷 Found Image Editor at ({area.x}, {area.y})")
+#             camera_area = area
+#             
+#             # Change to 3D View
+#             area.type = 'VIEW_3D'
+#             
+#             # Configure the 3D View
+#             for space in area.spaces:
+#                 if space.type == 'VIEW_3D':
+#                     # Lock to camera
+#                     space.region_3d.view_perspective = 'CAMERA'
+#                     space.camera = camera
+#                     
+#                     # 📐 FIT CAMERA FRAME TO VIEWPORT (auto-fit regardless of screen size)
+#                     space.region_3d.view_camera_zoom = 0
+#                     
+#                     # Set shading to solid with textures
+#                     space.shading.type = 'SOLID'
+#                     space.shading.light = 'FLAT'
+#                     space.shading.color_type = 'TEXTURE'
+#                     
+#                     # Show camera background image
+#                     space.overlay.show_extras = True
+#                     
+#                     # Clean UI
+#                     space.show_region_toolbar = False
+#                     space.show_region_ui = False
+#                     space.show_region_header = True
+#                     
+#                     print("[Style Engine]   ✅ Converted to camera-locked 3D View")
+#                     found_image_editor = True
+#                     break
+#             
+#             break  # Only process first Image Editor
+#     
+#     if not found_image_editor:
+#         print("[Style Engine] ⚠️  No Image Editor found (cannot create prompt area)")
+#         for area in screen.areas:
+#             area.tag_redraw()
+#         return
+#     
+#     # STEP 2: Split the camera area horizontally to add text editor below
+#     print("[Style Engine]   📝 Creating Style Engine prompt area below AI camera...")
+#     
+#     try:
+#         # Need to use temp_override for the split operation
+#         context = bpy.context
+#         override = {'area': camera_area, 'region': camera_area.regions[-1]}
+#         
+#         with context.temp_override(**override):
+#             # Split horizontally: Top 20% (camera), Bottom 80% (prompt)
+#             result = bpy.ops.screen.area_split(direction='HORIZONTAL', factor=0.2)
+#         
+#         if result == {'FINISHED'}:
+#             print("[Style Engine]   ✅ Split camera area (80% camera / 20% prompt)")
+#             
+#             # Schedule delayed configuration (Blender needs time to process split)
+#             camera_x = camera_area.x
+#             camera_y = camera_area.y
+#             
+#             def delayed_prompt_setup():
+#                 # Debug: Print all VIEW_3D areas
+#                 print(f"[Style Engine]   🔍 Looking for bottom area (camera was at x={camera_x}, y={camera_y})...")
+#                 view3d_areas = [a for a in screen.areas if a.type == 'VIEW_3D']
+#                 print(f"[Style Engine]   Found {len(view3d_areas)} VIEW_3D areas:")
+#                 for i, area in enumerate(view3d_areas):
+#                     print(f"[Style Engine]     Area {i}: x={area.x}, y={area.y}, width={area.width}, height={area.height}")
+#                 
+#                 # Find the newly created bottom area
+#                 # It should be a VIEW_3D area at the same X position but lower Y
+#                 bottom_area = None
+#                 
+#                 # Look for VIEW_3D areas at same X position
+#                 candidates = [a for a in screen.areas if a.type == 'VIEW_3D' and a.x == camera_x]
+#                 print(f"[Style Engine]   Candidates at x={camera_x}: {len(candidates)}")
+#                 
+#                 # Sort by Y position (lower Y = bottom)
+#                 if len(candidates) >= 2:
+#                     candidates.sort(key=lambda a: a.y)
+#                     bottom_area = candidates[0]  # Lowest Y = bottom area
+#                     print(f"[Style Engine]   Selected bottom area: x={bottom_area.x}, y={bottom_area.y}")
+#                 
+#                 if bottom_area:
+#                     # Convert bottom area to Text Editor
+#                     bottom_area.type = 'TEXT_EDITOR'
+#                     
+#                     # Load our prompt
+#                     prompt_text = utils.get_or_create_prompt_text()
+#                     
+#                     for space in bottom_area.spaces:
+#                         if space.type == 'TEXT_EDITOR':
+#                             space.text = prompt_text
+#                             space.show_line_numbers = False  # Line numbers OFF
+#                             space.show_syntax_highlight = False  # Syntax highlight OFF
+#                             space.show_line_highlight = False  # Highlight line OFF
+#                             space.show_word_wrap = True  # Word wrap ON
+#                             space.show_region_header = True
+#                             
+#                             print("[Style Engine]   ✅ Style Engine prompt loaded below AI camera")
+#                             break
+#                     
+#                     print("[Style Engine] 🎉 HeavyPoly workspace hijacked! (Camera + Prompt added, HeavyPoly text untouched)")
+#                 else:
+#                     print("[Style Engine] ⚠️  Could not find bottom area after split")
+#                     print("[Style Engine] ℹ️  Prompt available in Text Editor menu → STYLEENGINE_Prompt")
+#                 
+#                 # Force redraw
+#                 for area in screen.areas:
+#                     area.tag_redraw()
+#                 
+#                 return None  # Don't repeat
+#             
+#             # Wait 0.3 seconds for Blender to process the split (increased from 0.1)
+#             bpy.app.timers.register(delayed_prompt_setup, first_interval=0.3)
+#             
+#         else:
+#             print(f"[Style Engine] ⚠️  Split failed: {result}")
+#             print("[Style Engine] ℹ️  Prompt available in Text Editor menu")
+#     
+#     except Exception as e:
+#         print(f"[Style Engine] ⚠️  Could not split area: {e}")
+#         import traceback
+#         traceback.print_exc()
+#         print("[Style Engine] ℹ️  Prompt available in Text Editor menu")
+#     
+#     # Force redraw all areas
+#     for area in screen.areas:
+#         area.tag_redraw()
 
 
 class WM_OT_SetupWorkspace(bpy.types.Operator):
@@ -677,26 +679,8 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
         # Setup camera background image
         self.setup_camera_background(context, ai_camera)
         
-        # Create the AI workspace (or hijack HeavyPoly's if compatibility enabled)
+        # Create the AI workspace (always from default Layout)
         workspace = self.create_ai_workspace(context)
-        
-        # Track whether we successfully hijacked HeavyPoly
-        hijacked_successfully = False
-        
-        # Check if HeavyPoly mode needs special handling
-        from . import utils
-        if workspace is None and utils.is_heavypoly_compatible():
-            # HEAVYPOLY MODE: Hijack their workspace layout
-            workspace = self.hijack_heavypoly_workspace(context, ai_camera)
-            
-            if workspace is None:
-                # Hijack failed, fall back to standard mode
-                print("[Style Engine] HeavyPoly hijack failed, using standard workspace creation")
-                workspace = self._create_standard_workspace(context)
-                hijacked_successfully = False
-            else:
-                # Hijack succeeded!
-                hijacked_successfully = True
         
         # Configure scene render engine to Workbench for performance
         self.setup_render_engine(context)
@@ -711,18 +695,50 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
         # Write initial session.json
         write_session_json(context)
         
-        # Setup the workspace layout (only for standard mode, not HeavyPoly)
+        # Setup the workspace layout
         if workspace:
-            if not hijacked_successfully:
-                # Standard mode: Setup split layout
+            # ONLY configure layout if template didn't load properly
+            # (Template should already have the perfect layout)
+            if len(workspace.screens[0].areas) <= 2:
+                # Template failed or has minimal areas - needs configuration
+                print("[Style Engine] Template has minimal layout, configuring splits...")
                 self.setup_workspace_layout(workspace, ai_camera)
-            # else: HeavyPoly mode already configured the layout
+            else:
+                # Template loaded successfully with full layout
+                print("[Style Engine] ✓ Using template layout as-is (no splitting needed)")
+                
+                # Create the prompt text block if it doesn't exist
+                if "STYLEENGINE_Prompt" not in bpy.data.texts:
+                    prompt_text = bpy.data.texts.new("STYLEENGINE_Prompt")
+                    prompt_text.write("Enter your AI prompt here...")
+                    print("[Style Engine] Created prompt text block: STYLEENGINE_Prompt")
+                else:
+                    prompt_text = bpy.data.texts["STYLEENGINE_Prompt"]
+                
+                # Configure all text editors in the workspace
+                for area in workspace.screens[0].areas:
+                    if area.type == 'TEXT_EDITOR':
+                        # Set the text to STYLEENGINE_Prompt
+                        for space in area.spaces:
+                            if space.type == 'TEXT_EDITOR':
+                                space.text = prompt_text
+                                space.show_line_numbers = False  # No line numbers
+                                space.show_syntax_highlight = True  # Syntax highlight ON
+                                space.show_word_wrap = True  # Word wrap ON
+                                space.show_line_highlight = False  # No line highlight
+                                space.show_region_header = True  # Keep header
+                                print(f"[Style Engine] ✓ Configured text editor: STYLEENGINE_Prompt (no line numbers, syntax ON, word wrap ON)")
+                                break
             
             # Switch to the workspace
             context.window.workspace = workspace
             
-            mode_str = "HeavyPoly hijacked" if hijacked_successfully else "standard"
-            self.report({'INFO'}, f"AI Vision workspace created successfully ({mode_str} mode)!")
+            # For HeavyPoly mode: Switch main 3D viewport to Edit mode (delayed, after layout setup)
+            from . import utils
+            if utils.is_heavypoly_compatible():
+                bpy.app.timers.register(_switch_to_edit_mode_standalone, first_interval=0.5)  # After layout setup
+            
+            self.report({'INFO'}, "AI Vision workspace created successfully!")
         else:
             self.report({'WARNING'}, "Failed to create AI workspace.")
         
@@ -860,161 +876,166 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
         print(f"[Style Engine] Background image set: {img_path}")
         print(f"[Style Engine] Render resolution set to: {render_width}x{render_height} (from ai_resolution setting)")
     
-    def hijack_heavypoly_workspace(self, context, camera):
-        """
-        HEAVYPOLY HIJACKING MODE:
-        Duplicate HeavyPoly's 'Modelling' workspace and reconfigure its existing windows.
-        This preserves their perfect layout while injecting Style Engine functionality.
-        
-        Only runs when enable_heavypoly_compatibility is ON.
-        
-        Args:
-            context: Blender context
-            camera: AI camera object
-            
-        Returns:
-            bpy.types.Workspace: The hijacked AI workspace, or None if failed
-        """
-        from . import utils
-        
-        # Double-check compatibility mode is enabled
-        if not utils.is_heavypoly_compatible():
-            print("[Style Engine] HeavyPoly compatibility not enabled")
-            return None
-        
-        # Find HeavyPoly's Modeling workspace (check both US and UK spellings)
-        modelling_ws = None
-        for ws in bpy.data.workspaces:
-            if ws.name in ["Modeling", "Modelling"]:
-                modelling_ws = ws
-                break
-        
-        if not modelling_ws:
-            print("[Style Engine] WARNING: HeavyPoly 'Modeling' workspace not found")
-            print("[Style Engine] Falling back to standard workspace creation")
-            return None
-        
-        print(f"[Style Engine] 🎯 HEAVYPOLY MODE: Found '{modelling_ws.name}' workspace")
-        
-        # Check if AI workspace already exists
-        ai_workspace = bpy.data.workspaces.get("AI")
-        if ai_workspace:
-            print("[Style Engine] AI workspace already exists, will reconfigure...")
-            context.window.workspace = ai_workspace
-            
-            # Reconfigure the areas
-            def delayed_reconfig():
-                _hijack_heavypoly_areas_standalone(context.screen, camera)
-                return None
-            bpy.app.timers.register(delayed_reconfig, first_interval=0.1)
-            
-            return ai_workspace
-        
-        # Switch to Modelling workspace (required for duplication)
-        context.window.workspace = modelling_ws
-        
-        # Duplicate it
-        workspaces_before = set(bpy.data.workspaces)
-        bpy.ops.workspace.duplicate()
-        
-        # Find the new workspace
-        workspaces_after = set(bpy.data.workspaces)
-        new_workspaces = workspaces_after - workspaces_before
-        
-        if new_workspaces:
-            ai_workspace = list(new_workspaces)[0]
-            ai_workspace.name = "AI"
-            print(f"[Style Engine] ✅ Duplicated Modelling → AI workspace")
-        else:
-            print("[Style Engine] ERROR: Failed to duplicate workspace")
-            return None
-        
-        # Switch to the new AI workspace
-        context.window.workspace = ai_workspace
-        
-        # Schedule the hijacking of areas
-        def delayed_hijack():
-            _hijack_heavypoly_areas_standalone(context.screen, camera)
-            return None  # Don't repeat
-        
-        bpy.app.timers.register(delayed_hijack, first_interval=0.1)
-        
-        return ai_workspace
+    # NOTE: HeavyPoly hijacking disabled - now using standard Layout workspace
+    # Code kept latent for future reference
+    # 
+    # def hijack_heavypoly_workspace(self, context, camera):
+    #     """
+    #     HEAVYPOLY HIJACKING MODE:
+    #     Duplicate HeavyPoly's 'Modelling' workspace and reconfigure its existing windows.
+    #     This preserves their perfect layout while injecting Style Engine functionality.
+    #     
+    #     Only runs when enable_heavypoly_compatibility is ON.
+    #     
+    #     Args:
+    #         context: Blender context
+    #         camera: AI camera object
+    #         
+    #     Returns:
+    #         bpy.types.Workspace: The hijacked AI workspace, or None if failed
+    #     """
+    #     from . import utils
+    #     
+    #     # Double-check compatibility mode is enabled
+    #     if not utils.is_heavypoly_compatible():
+    #         print("[Style Engine] HeavyPoly compatibility not enabled")
+    #         return None
+    #     
+    #     # Find HeavyPoly's Modeling workspace (check both US and UK spellings)
+    #     modelling_ws = None
+    #     for ws in bpy.data.workspaces:
+    #         if ws.name in ["Modeling", "Modelling"]:
+    #             modelling_ws = ws
+    #             break
+    #     
+    #     if not modelling_ws:
+    #         print("[Style Engine] WARNING: HeavyPoly 'Modeling' workspace not found")
+    #         print("[Style Engine] Falling back to standard workspace creation")
+    #         return None
+    #     
+    #     print(f"[Style Engine] 🎯 HEAVYPOLY MODE: Found '{modelling_ws.name}' workspace")
+    #     
+    #     # Check if AI workspace already exists
+    #     ai_workspace = bpy.data.workspaces.get("AI")
+    #     if ai_workspace:
+    #         print("[Style Engine] AI workspace already exists, will reconfigure...")
+    #         context.window.workspace = ai_workspace
+    #         
+    #         # Reconfigure the areas
+    #         def delayed_reconfig():
+    #             _hijack_heavypoly_areas_standalone(context.screen, camera)
+    #             return None
+    #         bpy.app.timers.register(delayed_reconfig, first_interval=0.1)
+    #         
+    #         return ai_workspace
+    #     
+    #     # Switch to Modelling workspace (required for duplication)
+    #     context.window.workspace = modelling_ws
+    #     
+    #     # Duplicate it
+    #     workspaces_before = set(bpy.data.workspaces)
+    #     bpy.ops.workspace.duplicate()
+    #     
+    #     # Find the new workspace
+    #     workspaces_after = set(bpy.data.workspaces)
+    #     new_workspaces = workspaces_after - workspaces_before
+    #     
+    #     if new_workspaces:
+    #         ai_workspace = list(new_workspaces)[0]
+    #         ai_workspace.name = "AI"
+    #         print(f"[Style Engine] ✅ Duplicated Modelling → AI workspace")
+    #     else:
+    #         print("[Style Engine] ERROR: Failed to duplicate workspace")
+    #         return None
+    #     
+    #     # Switch to the new AI workspace
+    #     context.window.workspace = ai_workspace
+    #     
+    #     # Schedule the hijacking of areas
+    #     def delayed_hijack():
+    #         _hijack_heavypoly_areas_standalone(context.screen, camera)
+    #         return None  # Don't repeat
+    #     
+    #     bpy.app.timers.register(delayed_hijack, first_interval=0.1)
+    #     
+    #     return ai_workspace
     
     def create_ai_workspace(self, context):
         """
-        Create AI workspace - either by hijacking HeavyPoly's layout or creating fresh.
+        Create AI workspace by loading from template.blend.
         
-        Behavior:
-        - If enable_heavypoly_compatibility is ON: Hijack HeavyPoly's 'Modelling' workspace
-        - Otherwise: Create fresh workspace from Layout (standard behavior)
+        Uses pre-designed workspace template for consistent, clean layout.
+        For HeavyPoly mode, the only difference is switching to Edit mode in the 3D viewport.
         """
-        from . import utils
-        
-        # HEAVYPOLY MODE: Try to hijack their workspace layout
-        if utils.is_heavypoly_compatible():
-            print("[Style Engine] HeavyPoly compatibility enabled - attempting hijack...")
-            # Note: ai_camera not created yet, will be passed in execute()
-            # For now, return None to signal we need special handling
-            return None  # Special signal for HeavyPoly mode
-        
-        # STANDARD MODE: Create fresh workspace
-        # Check if workspace already exists
+        # Check if workspace already exists - if so, DELETE it and start fresh
         if "AI" in bpy.data.workspaces:
-            print("[Style Engine] AI workspace already exists, using it")
-            return bpy.data.workspaces["AI"]
+            print("[Style Engine] AI workspace already exists - deleting and recreating...")
+            old_ai = bpy.data.workspaces["AI"]
+            # Switch away from it first
+            for ws in bpy.data.workspaces:
+                if ws.name != "AI":
+                    context.window.workspace = ws
+                    break
+            # Now delete it
+            bpy.data.workspaces.remove(old_ai)
+            print("[Style Engine] ✓ Deleted old AI workspace")
         
-        # Store current workspace to avoid messing it up
-        original_workspace = context.workspace
-        original_name = original_workspace.name
+        # Load workspace from template.blend
+        import os
+        addon_dir = os.path.dirname(__file__)
+        template_path = os.path.join(addon_dir, "template.blend")
         
-        # Switch to the default "Layout" workspace if it exists (guaranteed clean)
-        layout_workspace = bpy.data.workspaces.get("Layout")
+        print(f"[Style Engine] Loading workspace from template: {template_path}")
         
-        if layout_workspace:
-            print("[Style Engine] Using clean 'Layout' workspace as base")
-            context.window.workspace = layout_workspace
-            base_workspace = layout_workspace
-        else:
-            # If no Layout workspace exists, use General (another default)
-            general_workspace = bpy.data.workspaces.get("General")
-            if general_workspace:
-                print("[Style Engine] Using 'General' workspace as base")
-                context.window.workspace = general_workspace
-                base_workspace = general_workspace
+        if not os.path.exists(template_path):
+            print(f"[Style Engine] ⚠ Template file not found: {template_path}")
+            print(f"[Style Engine] ⚠ Falling back to duplicating current workspace")
+            # Fallback: just duplicate current workspace
+            bpy.ops.workspace.duplicate()
+            ai_workspace = context.workspace
+            ai_workspace.name = "AI"
+            return ai_workspace
+        
+        try:
+            # Load the workspace from template
+            with bpy.data.libraries.load(template_path, link=False) as (data_from, data_to):
+                # Find the template workspace
+                template_name = "Style_Engine_Template"
+                if template_name in data_from.workspaces:
+                    data_to.workspaces = [template_name]
+                    print(f"[Style Engine] ✓ Found '{template_name}' in template file")
+                else:
+                    print(f"[Style Engine] ⚠ Available workspaces in template: {data_from.workspaces}")
+                    # Load first workspace if template name not found
+                    if data_from.workspaces:
+                        data_to.workspaces = [data_from.workspaces[0]]
+                        print(f"[Style Engine] ⚠ Using first available: '{data_from.workspaces[0]}'")
+            
+            # Check if workspace was loaded
+            if data_to.workspaces:
+                ai_workspace = data_to.workspaces[0]
+                ai_workspace.name = "AI"
+                context.window.workspace = ai_workspace
+                
+                print(f"[Style Engine] ✓ Loaded workspace template successfully")
+                print(f"[Style Engine] ✓ Workspace has {len(ai_workspace.screens[0].areas)} areas:")
+                for i, area in enumerate(ai_workspace.screens[0].areas):
+                    print(f"[Style Engine]     Area {i}: {area.type} at ({area.x}, {area.y})")
+                
+                return ai_workspace
             else:
-                print("[Style Engine] Using current workspace as base")
-                base_workspace = original_workspace
-        
-        # Store the base workspace name to restore it later
-        base_name = base_workspace.name
-        
-        # Count workspaces before duplication
-        workspaces_before = set(bpy.data.workspaces)
-        
-        # Duplicate to create AI workspace
-        bpy.ops.workspace.duplicate()
-        
-        # Find the NEW workspace (the one that wasn't there before)
-        workspaces_after = set(bpy.data.workspaces)
-        new_workspaces = workspaces_after - workspaces_before
-        
-        if new_workspaces:
-            new_workspace = list(new_workspaces)[0]
-            # Rename it to "AI" immediately
-            new_workspace.name = "AI"
-            
-            # Make sure the base workspace keeps its original name
-            if base_workspace.name != base_name:
-                base_workspace.name = base_name
-            
-            print(f"[Style Engine] Created fresh AI workspace from clean {base_name} layout")
-            return new_workspace
-        else:
-            # Fallback: just rename current workspace
-            context.workspace.name = "AI"
-            print(f"[Style Engine] Created AI workspace (fallback)")
-            return context.workspace
+                raise Exception("No workspace was loaded from template")
+                
+        except Exception as e:
+            print(f"[Style Engine] ❌ Failed to load template: {e}")
+            import traceback
+            traceback.print_exc()
+            print(f"[Style Engine] ⚠ Falling back to duplicating current workspace")
+            # Fallback: just duplicate current workspace
+            bpy.ops.workspace.duplicate()
+            ai_workspace = context.workspace
+            ai_workspace.name = "AI"
+            return ai_workspace
     
     def _create_standard_workspace(self, context):
         """
@@ -1093,68 +1114,6 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
         # Start the optimized auto-refresh timer for the background image
         self.start_image_refresh_timer()
     
-    def delayed_split_setup(self, camera):
-        """Delayed setup of the workspace split (called via timer)."""
-        context = bpy.context
-        
-        # Find the 3D viewport in the current workspace
-        for area in context.screen.areas:
-            if area.type == 'VIEW_3D':
-                # Split the area vertically (left/right)
-                override = {'area': area, 'region': area.regions[-1]}
-                
-                try:
-                    with context.temp_override(**override):
-                        bpy.ops.screen.area_split(direction='VERTICAL', factor=0.5)
-                    
-                    # Configure the viewports
-                    view3d_areas = [a for a in context.screen.areas if a.type == 'VIEW_3D']
-                    
-                    if len(view3d_areas) >= 2:
-                        # Right area (the new one): camera view
-                        right_area = view3d_areas[-1]
-                        
-                        for space in right_area.spaces:
-                            if space.type == 'VIEW_3D':
-                                # Switch to camera view (like pressing Numpad 0)
-                                space.region_3d.view_perspective = 'CAMERA'
-                                space.lock_camera = True
-                                
-                                # 📐 FIT CAMERA FRAME TO VIEWPORT (auto-fit regardless of screen size)
-                                space.region_3d.view_camera_zoom = 0
-                                
-                                # Show background images in viewport
-                                space.shading.type = 'SOLID'
-                                
-                                # Ensure camera is visible in viewport
-                                space.overlay.show_extras = True
-                                
-                                print("[Style Engine] Right viewport configured as locked camera view")
-                        
-                        # Set the active object to the camera
-                        if camera:
-                            context.view_layer.objects.active = camera
-                        
-                        # Force redraw all areas
-                        for area in context.screen.areas:
-                            area.tag_redraw()
-                    
-                    break
-                except Exception as e:
-                    print(f"[Style Engine] Error splitting viewport: {e}")
-                    print("[Style Engine] Please split viewport manually: drag from top-right corner")
-        
-        # Don't repeat this timer
-        return None
-    
-    def clear_groups(self, context):
-        """Clear all groups at session start."""
-        props = context.scene.style_engine_props
-        props.object_groups.clear()
-        props.active_group_index = 0
-        props.group_counter = 1
-        print("[Style Engine] Groups cleared for new session")
-    
     def setup_render_engine(self, context):
         """
         Configure scene render engine to Workbench for fast, optimized rendering.
@@ -1196,6 +1155,14 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
         else:
             print(f"[Style Engine] Scene configured: Workbench render @ {width}x{height}")
     
+    def clear_groups(self, context):
+        """Clear all groups at session start."""
+        props = context.scene.style_engine_props
+        props.object_groups.clear()
+        props.active_group_index = 0
+        props.group_counter = 1
+        print("[Style Engine] Groups cleared for new session")
+    
     def start_image_refresh_timer(self):
         """
         Image refresh is now ON-DEMAND only (no timer).
@@ -1212,89 +1179,80 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
         # - Render after receiving result (for next iteration)
         # No need for continuous 5-second renders!
     
-    def setup_compositor(self, context):
-        """Setup the compositor nodes for render passes output."""
-        scene = context.scene
+
+def _switch_to_edit_mode_standalone():
+    """
+    STANDALONE function to switch main 3D viewport to Edit mode (for HeavyPoly compatibility).
+    
+    Must be standalone because it's called from a timer after the operator is destroyed.
+    
+    This is the only difference between HeavyPoly and standard mode:
+    - Standard: Object mode (default)
+    - HeavyPoly: Edit mode (for modeling workflow)
+    """
+    context = bpy.context
+    print("[Style Engine] HeavyPoly mode: Switching main 3D viewport to Edit mode...")
         
-        # Enable required render passes FIRST
-        view_layer = context.view_layer
-        view_layer.use_pass_mist = True  # Mist pass (instead of Z)
-        view_layer.use_pass_ambient_occlusion = True  # AO
+    # Find the main 3D viewport (left side, not the camera viewport)
+    # The camera viewport is typically the rightmost one
+    view3d_areas = [a for a in context.screen.areas if a.type == 'VIEW_3D']
+    
+    if not view3d_areas:
+        print("[Style Engine] ⚠ No 3D viewport found, cannot switch to Edit mode")
+        return None
+    
+    # Use the first (leftmost) 3D viewport as the main one
+    main_area = view3d_areas[0]
+    
+    # Find a mesh object in the scene
+    mesh_object = None
+    
+    # First, check if active object is a mesh
+    if context.active_object and context.active_object.type == 'MESH':
+        mesh_object = context.active_object
+    else:
+        # Find the first mesh object in the scene
+        for obj in context.scene.objects:
+            if obj.type == 'MESH':
+                mesh_object = obj
+                break
+    
+    if mesh_object is None:
+        print("[Style Engine] ⚠ No mesh objects in scene, skipping Edit mode")
+        print("[Style Engine] ℹ️  Add a mesh object (Shift+A → Mesh) to use Edit mode")
+        return None
+    
+    # Switch to Edit mode
+    try:
+        # Make sure we're in OBJECT mode first
+        if context.mode != 'OBJECT':
+            bpy.ops.object.mode_set(mode='OBJECT')
         
-        # Configure Mist settings for better control
-        scene.world.mist_settings.start = 0.0
-        scene.world.mist_settings.depth = 100.0  # Adjust based on scene scale
-        scene.world.mist_settings.falloff = 'LINEAR'
+        # Select and activate the mesh object
+        bpy.ops.object.select_all(action='DESELECT')
+        mesh_object.select_set(True)
+        context.view_layer.objects.active = mesh_object
         
-        # Enable compositor
-        scene.use_nodes = True
-        scene.render.use_compositing = True
+        # Temporarily override context to use the main area
+        override = context.copy()
+        override['area'] = main_area
+        override['region'] = main_area.regions[0]
         
-        # Clear existing nodes
-        nodes = scene.node_tree.nodes
-        nodes.clear()
-        
-        # Create Render Layers node
-        render_layers = nodes.new(type='CompositorNodeRLayers')
-        render_layers.location = (0, 0)
-        
-        # Create Color Ramp node (inverts mist with tight range)
-        color_ramp = nodes.new(type='CompositorNodeValToRGB')
-        color_ramp.location = (400, -200)
-        
-        # Configure color ramp with inverted colors and tight range
-        # Color stop 0: position 0.000, white (near)
-        color_ramp.color_ramp.elements[0].position = 0.000
-        color_ramp.color_ramp.elements[0].color = (1, 1, 1, 1)  # White
-        
-        # Color stop 1: position 0.010, black (far)
-        color_ramp.color_ramp.elements[1].position = 0.010
-        color_ramp.color_ramp.elements[1].color = (0, 0, 0, 1)  # Black
-        
-        # Create File Output node
-        file_output = nodes.new(type='CompositorNodeOutputFile')
-        file_output.location = (800, 0)
-        
-        # Set base path to ai_vision/ folder
-        temp_dir = get_temp_directory(context)
-        temp_dir.mkdir(parents=True, exist_ok=True)
-        # Use absolute path with forward slashes (Blender compatible)
-        file_output.base_path = str(temp_dir).replace("\\", "/") + "/"
-        
-        # Set format and overwrite settings
-        file_output.format.file_format = 'PNG'
-        file_output.format.color_mode = 'RGB'
-        file_output.format.color_depth = '8'
-        
-        # Enable overwrite
-        scene.render.use_overwrite = True
-        scene.render.use_file_extension = True
-        
-        # Clear default inputs and add custom ones
-        file_output.file_slots.clear()
-        
-        # Add output slots
-        file_output.file_slots.new("combined")
-        file_output.file_slots.new("depth")
-        file_output.file_slots.new("id")
-        file_output.file_slots.new("ao")
-        file_output.file_slots.new("canny")
-        
-        # Create links
-        links = scene.node_tree.links
-        
-        # Connect Render Layers Mist -> Color Ramp -> File Output (depth)
-        links.new(render_layers.outputs['Mist'], color_ramp.inputs['Fac'])
-        links.new(color_ramp.outputs['Image'], file_output.inputs['depth'])
-        
-        # Connect other passes
-        links.new(render_layers.outputs['Image'], file_output.inputs['combined'])
-        links.new(render_layers.outputs['AO'], file_output.inputs['ao'])
-        
-        print(f"[Style Engine] Compositor setup complete")
-        print(f"[Style Engine] Render passes output to: {temp_dir}")
-        print(f"[Style Engine] Enabled passes: Combined, Mist (depth), AO")
-        print(f"[Style Engine] Mist range: 0.0 - 100.0, Color ramp: 0.000 (white) to 0.010 (black)")
+        with context.temp_override(**override):
+            # Switch to Edit mode
+            bpy.ops.object.mode_set(mode='EDIT')
+            print(f"[Style Engine] ✓ Switched to Edit mode in main 3D viewport (object: {mesh_object.name})")
+    except Exception as e:
+        print(f"[Style Engine] ⚠ Failed to switch to Edit mode: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    return None  # Don't repeat timer
+
+
+# Note: The WM_OT_SetupWorkspace class is defined earlier in this file (line 659)
+# All methods (clear_groups, setup_render_engine, etc.) are already defined inside that class
+# The orphaned duplicate code below has been removed
 
 
 class WM_OT_StopAutoRefresh(bpy.types.Operator):

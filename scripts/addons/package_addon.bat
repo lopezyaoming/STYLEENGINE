@@ -38,7 +38,7 @@ mkdir "%TEMP_DIR%"
 mkdir "%TEMP_ADDON%"
 
 REM Define files to include (core addon files)
-set FILES_TO_COPY=__init__.py prefs.py ui_panel.py workspace_setup.py utils.py runcomfy_client.py runcomfy_deployment.py runcomfy_polling.py heavypoly_integration.py README.md
+set FILES_TO_COPY=__init__.py prefs.py ui_panel.py workspace_setup.py utils.py pie_menu.py runcomfy_client.py runcomfy_deployment.py runcomfy_polling.py runcomfy_server_client.py runcomfy_server_manager.py heavypoly_integration.py template.blend README.md
 
 REM Copy files
 echo Including files:

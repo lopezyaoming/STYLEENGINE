@@ -25,9 +25,14 @@ def create_addon_package():
         'ui_panel.py',
         'workspace_setup.py',
         'utils.py',
+        'pie_menu.py',
         'runcomfy_client.py',
         'runcomfy_deployment.py',
         'runcomfy_polling.py',
+        'runcomfy_server_client.py',
+        'runcomfy_server_manager.py',
+        'heavypoly_integration.py',
+        'template.blend',
         'README.md',
     ]
     

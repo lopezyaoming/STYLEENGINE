@@ -130,6 +130,15 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         update=update_session_json
     )
     
+    texture_influence: bpy.props.FloatProperty(
+        name="Texture Influence",
+        description="Controls how much projected textures affect AI generation (0.0 to 1.0) - PLACEHOLDER for future feature",
+        default=0.1,
+        min=0.0,
+        max=1.0,
+        update=update_session_json
+    )
+    
     steps: bpy.props.IntProperty(
         name="Steps",
         description="Number of sampling steps for AI generation (15-30)",

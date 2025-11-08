@@ -221,7 +221,7 @@ class StyleEnginePreferences(AddonPreferences):
         default="",
         subtype='DIR_PATH'
     )
-    
+
     # ----------------------------------------------------------------
     # SERVER API MODE SETTINGS (DISABLED/LATENT)
     # ----------------------------------------------------------------

@@ -83,6 +83,7 @@ try:
     from . import runcomfy_deployment
     from . import runcomfy_polling
     from . import heavypoly_integration
+    from . import pie_menu
 except (ImportError, ValueError) as e:
     # Fallback for strict import systems (macOS during installation)
     print(f"[Style Engine] Using fallback imports (macOS compatibility mode)")
@@ -190,6 +191,7 @@ except (ImportError, ValueError) as e:
     runcomfy_deployment = load_module("runcomfy_deployment")
     runcomfy_polling = load_module("runcomfy_polling")
     heavypoly_integration = load_module("heavypoly_integration")
+    pie_menu = load_module("pie_menu")
     
     print(f"[Style Engine] All modules loaded successfully!")
 
@@ -199,6 +201,7 @@ modules = [
     workspace_setup,
     ui_panel,
     heavypoly_integration,  # HeavyPoly Z pie injection (paratrooper mode!)
+    pie_menu,  # Main Style Engine pie menu (Shift+E)
 ]
 
 def register():
