@@ -93,12 +93,12 @@ class STYLEENGINE_MT_pie_main(Menu):
         
         # Background opacity
         col.label(text="Background Opacity")
-        col.prop(style_props, "ai_opacity", text="", slider=True)
+        col.prop(style_props, "background_opacity", text="", slider=True)
         col.separator()
         
         # Resolution
         col.label(text="Resolution")
-        col.prop(style_props, "resolution_preset", text="")
+        col.prop(style_props, "ai_resolution", text="")
         
         # ═══════════════════════════════════════════════════
         # Position 2: BOTTOM (SOUTH) - Generate Image
@@ -158,24 +158,24 @@ class STYLEENGINE_MT_pie_main(Menu):
         # Enable/disable IPAdapter
         row = col.row()
         row.scale_y = 1.3
-        row.prop(style_props, "ipadapter_enabled", 
+        row.prop(style_props, "use_ipadapter", 
                  text="Use Reference Image", 
                  toggle=True,
-                 icon='CHECKMARK' if style_props.ipadapter_enabled else 'CHECKBOX_DEHLT')
+                 icon='CHECKMARK' if style_props.use_ipadapter else 'CHECKBOX_DEHLT')
         
         col.separator()
         
         # Only show settings if enabled
-        if style_props.ipadapter_enabled:
+        if style_props.use_ipadapter:
             # File picker
             col.label(text="Image File")
-            col.prop(style_props, "ipadapter_image", text="")
+            col.prop(style_props, "ipadapter_reference_image", text="")
             
             col.separator()
             
             # Type dropdown
             col.label(text="Mode")
-            col.prop(style_props, "ipadapter_mode", text="")
+            col.prop(style_props, "ipadapter_weight_type", text="")
             
             col.separator()
             

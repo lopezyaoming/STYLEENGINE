@@ -1,0 +1,25 @@
+# ================================================================
+#    Style Engine - Packaging Configuration
+#    List files to include in the distribution package
+# ================================================================
+
+# Core addon files (required)
+__init__.py
+prefs.py
+ui_panel.py
+workspace_setup.py
+utils.py
+
+# RunComfy integration modules
+runcomfy_client.py
+runcomfy_deployment.py
+runcomfy_polling.py
+
+# Documentation
+README.md
+
+# Future files can be added here:
+# new_feature.py
+# another_module.py
+# assets/icon.png
+
