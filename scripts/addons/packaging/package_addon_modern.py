@@ -257,6 +257,27 @@ def package_addon():
     print(f"Output ZIP: {output_zip}")
     print()
     
+    # CRITICAL SAFETY CHECK: Prevent packaging from wrong location
+    # This prevents accidental deletion if styleengine is in the wrong place
+    if source_dir.parent == script_dir:
+        print("=" * 70)
+        print("  [CRITICAL ERROR] SAFETY CHECK FAILED!")
+        print("=" * 70)
+        print()
+        print("The source directory should NOT be inside the packaging directory!")
+        print()
+        print(f"Expected location: {script_dir.parent / 'styleengine'}")
+        print(f"Found location:    {source_dir}")
+        print()
+        print("This safety check prevents accidental deletion of the addon.")
+        print("If you moved styleengine into packaging/, move it back immediately!")
+        print()
+        print("Correct structure:")
+        print("  scripts/addons/styleengine/     <- Source files (correct)")
+        print("  scripts/addons/packaging/       <- Packaging scripts (you are here)")
+        print()
+        return False
+    
     # Validate source directory
     if not source_dir.exists():
         print(f"[ERROR] Source directory not found: {source_dir}")

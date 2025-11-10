@@ -1,0 +1,11 @@
+# Prevent styleengine directory from being moved into packaging/
+# This is a safety measure - styleengine should always be at scripts/addons/styleengine/
+styleengine/
+
+# Ignore the generated ZIP (it's temporary)
+*.zip
+
+# Ignore log files
+*.log
+package_log.txt
+

@@ -117,23 +117,24 @@ _draw_handlers = []
 
 def register():
     """
-    Register HeavyPoly integration.
-    Only activates if enable_heavypoly_compatibility is ON.
+    Register operators and optionally integrate with HeavyPoly.
+    Operators are ALWAYS registered (needed by pie menu).
+    HeavyPoly pie injection only happens if enable_heavypoly_compatibility is ON.
     """
     from . import utils
     
-    # Check if HeavyPoly compatibility is enabled
-    if not utils.is_heavypoly_compatible():
-        return  # Silently do nothing if compatibility mode is OFF
-    
-    print("[Style Engine] 🪂 HeavyPoly integration mode activated")
-    
-    # Register our quick operators
+    # ALWAYS register our operators (pie_menu.py needs them!)
     for cls in classes:
         try:
             bpy.utils.register_class(cls)
         except:
             pass  # Already registered
+    
+    # Check if HeavyPoly compatibility is enabled for pie injection
+    if not utils.is_heavypoly_compatible():
+        return  # Skip HeavyPoly integration but operators are still registered
+    
+    print("[Style Engine] 🪂 HeavyPoly integration mode activated")
     
     # PARATROOPER DROP: Inject into HeavyPoly's Z pie (Shading)
     try:
@@ -152,35 +153,32 @@ def register():
 
 def unregister():
     """
-    Clean unregister - removes all traces of our injection.
+    Clean unregister - removes HeavyPoly injection and unregisters operators.
     """
     from . import utils
     
-    if not utils.is_heavypoly_compatible():
-        return
+    # Remove HeavyPoly pie injection if it was active
+    if utils.is_heavypoly_compatible():
+        print("[Style Engine] 🪂 Removing HeavyPoly integrations...")
+        
+        # Remove our draw handlers from HeavyPoly's pies
+        for menu_name, handler in _draw_handlers:
+            try:
+                menu_class = getattr(bpy.types, menu_name, None)
+                if menu_class:
+                    menu_class.remove(handler)
+                    print(f"[Style Engine] ✅ Removed from {menu_name}")
+            except Exception as e:
+                print(f"[Style Engine] ⚠️  Could not remove from {menu_name}: {e}")
+        
+        _draw_handlers.clear()
     
-    print("[Style Engine] 🪂 Removing HeavyPoly integrations...")
-    
-    # Remove our draw handlers from HeavyPoly's pies
-    for menu_name, handler in _draw_handlers:
-        try:
-            menu_class = getattr(bpy.types, menu_name, None)
-            if menu_class:
-                menu_class.remove(handler)
-                print(f"[Style Engine] ✅ Removed from {menu_name}")
-        except Exception as e:
-            print(f"[Style Engine] ⚠️  Could not remove from {menu_name}: {e}")
-    
-    _draw_handlers.clear()
-    
-    # Unregister our operators
+    # ALWAYS unregister our operators (they were always registered)
     for cls in reversed(classes):
         try:
             bpy.utils.unregister_class(cls)
         except:
             pass
-    
-    print("[Style Engine] ✅ HeavyPoly integration removed")
 
 
 if __name__ == "__main__":
