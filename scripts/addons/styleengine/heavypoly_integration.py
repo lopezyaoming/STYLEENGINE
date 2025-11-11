@@ -121,18 +121,26 @@ def register():
     Operators are ALWAYS registered (needed by pie menu).
     HeavyPoly pie injection only happens if enable_heavypoly_compatibility is ON.
     """
-    from . import utils
-    
     # ALWAYS register our operators (pie_menu.py needs them!)
+    print("[Style Engine] Registering quick operators...")
+    
     for cls in classes:
         try:
             bpy.utils.register_class(cls)
-        except:
-            pass  # Already registered
+            print(f"[Style Engine]   ✓ {cls.bl_idname}")
+        except Exception as e:
+            print(f"[Style Engine]   ✗ Failed to register {cls.bl_idname}: {e}")
+    
+    print("[Style Engine] Quick operators registered")
     
     # Check if HeavyPoly compatibility is enabled for pie injection
-    if not utils.is_heavypoly_compatible():
-        return  # Skip HeavyPoly integration but operators are still registered
+    try:
+        from . import utils
+        if not utils.is_heavypoly_compatible():
+            return  # Skip HeavyPoly integration but operators are still registered
+    except Exception as e:
+        print(f"[Style Engine] Could not check HeavyPoly compatibility: {e}")
+        return
     
     print("[Style Engine] 🪂 HeavyPoly integration mode activated")
     

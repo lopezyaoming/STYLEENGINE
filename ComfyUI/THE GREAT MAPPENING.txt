@@ -1,0 +1,52 @@
+THE GREAT MAPPENING:
+
+BASE:
+#15: Image from viewport [IMAGE]
+#40: cannyStrength [0.0-1.0]
+#41: depthStrength [0.0-1.0]
+#42: Steps [15-30]
+#25: Prompt [STRING]
+#5: Latent image [Set resolution]
+
+IMAGE REFERENCE
+GENERAL
+#52: StyleTransferStrength [0.0-5.0]
+#90: CompositionStrength [0.0-5.0]
+#91: ForceTransferStrength [0.0-5.0]
+
+StyleTransfer:
+#65: ST1 (Reference Image for StyleTransfer 1) [IMAGE]
+#129: ST1W (Style Transfer 1 Weight) [0.0-1.0]
+#63: ST2 (Reference Image for StyleTransfer 2) [IMAGE]
+#126: ST2W (Style Transfer 2 Weight) [0.0-1.0]
+#64: ST3 (Reference Image for StyleTransfer 3) [IMAGE]
+#125: ST3W (Style Transfer 3 Weight) [0.0-1.0]
+#94: ST4 (Reference Image for StyleTransfer 4) [IMAGE]
+#124: ST4W (Style Transfer 4 Weight) [0.0-1.0]
+#97: ST5 (Reference Image for StyleTransfer 5) [IMAGE]
+#123: ST5W (Style Transfer 4 Weight) [0.0-1.0]
+
+Composition:
+#78: COMP1 (Reference Image for Composition 1) [IMAGE]
+#122: COMP1W (Composition 1 Weight) [0.0-1.0]
+#77: COMP2 (Reference Image for Composition 2) [IMAGE]
+#121: COMP2W (Composition 2 Weight) [0.0-1.0]
+#76: COMP3 (Reference Image for Composition 3) [IMAGE]
+#120: COMP3W (Composition 3 Weight) [0.0-1.0]
+#100: COMP4 (Reference Image for Composition 4) [IMAGE]
+#119: COMP4W (Composition 4 Weight) [0.0-1.0]
+#103: COMP5 (Reference Image for Composition 5) [IMAGE]
+#118: COMP5W (Composition 4 Weight) [0.0-1.0]
+
+StrongStyleTransfer:
+#89: SST1 (Reference Image for StrongStyleTransfer 1) [IMAGE]
+#117: SST1W (StrongStyle Transfer 1 Weight) [0.0-1.0]
+#88: SST2 (Reference Image for StrongStyleTransfer 2) [IMAGE]
+#116: SST2W (StrongStyle Transfer 2 Weight) [0.0-1.0]
+#87: SST3 (Reference Image for StrongStyleTransfer 3) [IMAGE]
+#115: SST3W (StrongStyle Transfer 3 Weight) [0.0-1.0]
+#106: ST4 (Reference Image for StrongStyleTransfer 4) [IMAGE]
+#114: SST4W (StrongStyle Transfer 4 Weight) [0.0-1.0]
+#109: ST5 (Reference Image for StrongStyleTransfer 5) [IMAGE]
+#113: ST5W (StrongStyle Transfer 4 Weight) [0.0-1.0]
+
