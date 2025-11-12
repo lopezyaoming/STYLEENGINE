@@ -1,0 +1,1399 @@
+{
+  "3": {
+    "inputs": {
+      "seed": 978489144455722,
+      "steps": [
+        "42",
+        0
+      ],
+      "cfg": 8,
+      "sampler_name": "dpmpp_2m",
+      "scheduler": "karras",
+      "denoise": 0.9500000000000002,
+      "model": [
+        "86",
+        0
+      ],
+      "positive": [
+        "14",
+        0
+      ],
+      "negative": [
+        "14",
+        1
+      ],
+      "latent_image": [
+        "5",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "4": {
+    "inputs": {
+      "ckpt_name": "sdxl/juggernautXL_version6Rundiffusion.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "Cargar Punto de Control"
+    }
+  },
+  "5": {
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "Imagen Latente Vacía"
+    }
+  },
+  "6": {
+    "inputs": {
+      "text": [
+        "25",
+        0
+      ],
+      "clip": [
+        "34",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "Codificar Texto CLIP (Prompt)"
+    }
+  },
+  "7": {
+    "inputs": {
+      "text": "A tranquil alien landscape bathed in soft pastel hues, featuring a lake wooden cottage and towering, smooth rock formations that rise like giants from a sparkling, turquoise river. Gentle clouds float lazily in the sky, and distant, small boats drift along the calm waters. The atmosphere is peaceful and otherworldly, with rolling hills of vibrant colors in the distance, and hints of unusual flora dotting the landscape. The scene feels vast and serene, with subtle hints of a distant civilization nestled along the shorelines.",
+      "clip": [
+        "34",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "Codificar Texto CLIP (Prompt)"
+    }
+  },
+  "8": {
+    "inputs": {
+      "samples": [
+        "3",
+        0
+      ],
+      "vae": [
+        "4",
+        2
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "Decodificación VAE"
+    }
+  },
+  "13": {
+    "inputs": {
+      "control_net_name": "sdxl/diffusers_xl_depth_mid.safetensors"
+    },
+    "class_type": "ControlNetLoader",
+    "_meta": {
+      "title": "Cargar Modelo ControlNet"
+    }
+  },
+  "14": {
+    "inputs": {
+      "strength": [
+        "41",
+        0
+      ],
+      "start_percent": 0,
+      "end_percent": 1,
+      "positive": [
+        "37",
+        0
+      ],
+      "negative": [
+        "37",
+        1
+      ],
+      "control_net": [
+        "13",
+        0
+      ],
+      "image": [
+        "39",
+        0
+      ],
+      "vae": [
+        "4",
+        2
+      ]
+    },
+    "class_type": "ControlNetApplyAdvanced",
+    "_meta": {
+      "title": "Aplicar ControlNet"
+    }
+  },
+  "15": {
+    "inputs": {
+      "image": "pasted/image (8).png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "AO"
+    }
+  },
+  "25": {
+    "inputs": {
+      "value": "A tranquil alien landscape bathed in soft pastel hues, featuring a lake wooden cottage and towering, smooth rock formations that rise like giants from a sparkling, turquoise river. Gentle clouds float lazily in the sky, and distant, small boats drift along the calm waters. The atmosphere is peaceful and otherworldly, with rolling hills of vibrant colors in the distance, and hints of unusual flora dotting the landscape. The scene feels vast and serene, with subtle hints of a distant civilization nestled along the shorelines."
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "Prompt"
+    }
+  },
+  "34": {
+    "inputs": {
+      "lora_name": "sdxl/xl_more_art-full_v1.safetensors",
+      "strength_model": 1,
+      "strength_clip": 1,
+      "model": [
+        "4",
+        0
+      ],
+      "clip": [
+        "4",
+        1
+      ]
+    },
+    "class_type": "LoraLoader",
+    "_meta": {
+      "title": "Cargar LoRA"
+    }
+  },
+  "36": {
+    "inputs": {
+      "low_threshold": 0.4,
+      "high_threshold": 0.8,
+      "image": [
+        "15",
+        0
+      ]
+    },
+    "class_type": "Canny",
+    "_meta": {
+      "title": "Canny"
+    }
+  },
+  "37": {
+    "inputs": {
+      "strength": [
+        "40",
+        0
+      ],
+      "start_percent": 0,
+      "end_percent": 1,
+      "positive": [
+        "6",
+        0
+      ],
+      "negative": [
+        "7",
+        0
+      ],
+      "control_net": [
+        "38",
+        0
+      ],
+      "image": [
+        "36",
+        0
+      ],
+      "vae": [
+        "4",
+        2
+      ]
+    },
+    "class_type": "ControlNetApplyAdvanced",
+    "_meta": {
+      "title": "Aplicar ControlNet"
+    }
+  },
+  "38": {
+    "inputs": {
+      "control_net_name": "sdxl/diffusers_xl_canny_mid.safetensors"
+    },
+    "class_type": "ControlNetLoader",
+    "_meta": {
+      "title": "Cargar Modelo ControlNet"
+    }
+  },
+  "39": {
+    "inputs": {
+      "ckpt_name": "depth_anything_vitl14.pth",
+      "resolution": 512,
+      "image": [
+        "15",
+        0
+      ]
+    },
+    "class_type": "DepthAnythingPreprocessor",
+    "_meta": {
+      "title": "Depth Anything"
+    }
+  },
+  "40": {
+    "inputs": {
+      "value": 0
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "cannyStrength"
+    }
+  },
+  "41": {
+    "inputs": {
+      "value": 0
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "depthStrength"
+    }
+  },
+  "42": {
+    "inputs": {
+      "value": 15
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Steps"
+    }
+  },
+  "45": {
+    "inputs": {
+      "ipadapter_file": "ip-adapter-plus_sdxl_vit-h.safetensors"
+    },
+    "class_type": "IPAdapterModelLoader",
+    "_meta": {
+      "title": "IPAdapter Model Loader"
+    }
+  },
+  "46": {
+    "inputs": {
+      "clip_name": "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors"
+    },
+    "class_type": "CLIPVisionLoader",
+    "_meta": {
+      "title": "Cargar CLIP Vision"
+    }
+  },
+  "49": {
+    "inputs": {
+      "weight": [
+        "52",
+        0
+      ],
+      "weight_type": "style transfer",
+      "start_at": 0,
+      "end_at": 1,
+      "embeds_scaling": "K+V",
+      "model": [
+        "34",
+        0
+      ],
+      "ipadapter": [
+        "45",
+        0
+      ],
+      "pos_embed": [
+        "54",
+        0
+      ],
+      "clip_vision": [
+        "46",
+        0
+      ]
+    },
+    "class_type": "IPAdapterEmbeds",
+    "_meta": {
+      "title": "stIPAdapter Embeds"
+    }
+  },
+  "50": {
+    "inputs": {
+      "images": [
+        "39",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Vista previa de imagen"
+    }
+  },
+  "51": {
+    "inputs": {
+      "images": [
+        "36",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Vista previa de imagen"
+    }
+  },
+  "52": {
+    "inputs": {
+      "value": 0
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "StyleTransferStrength"
+    }
+  },
+  "53": {
+    "inputs": {
+      "filename_prefix": "StyleEngine",
+      "only_preview": false,
+      "images": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "easy imageSave",
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "54": {
+    "inputs": {
+      "method": "add",
+      "embed1": [
+        "55",
+        0
+      ],
+      "embed2": [
+        "57",
+        0
+      ],
+      "embed3": [
+        "61",
+        0
+      ],
+      "embed4": [
+        "92",
+        0
+      ],
+      "embed5": [
+        "96",
+        0
+      ]
+    },
+    "class_type": "IPAdapterCombineEmbeds",
+    "_meta": {
+      "title": "IPAdapter Combine Embeds"
+    }
+  },
+  "55": {
+    "inputs": {
+      "weight": [
+        "129",
+        0
+      ],
+      "ipadapter": [
+        "45",
+        0
+      ],
+      "image": [
+        "56",
+        0
+      ],
+      "clip_vision": [
+        "46",
+        0
+      ]
+    },
+    "class_type": "IPAdapterEncoder",
+    "_meta": {
+      "title": "IPAdapter Encoder"
+    }
+  },
+  "56": {
+    "inputs": {
+      "interpolation": "LANCZOS",
+      "crop_position": "center",
+      "sharpening": 1,
+      "image": [
+        "65",
+        0
+      ]
+    },
+    "class_type": "PrepImageForClipVision",
+    "_meta": {
+      "title": "Prep Image For ClipVision"
+    }
+  },
+  "57": {
+    "inputs": {
+      "weight": [
+        "126",
+        0
+      ],
+      "ipadapter": [
+        "45",
+        0
+      ],
+      "image": [
+        "58",
+        0
+      ],
+      "clip_vision": [
+        "46",
+        0
+      ]
+    },
+    "class_type": "IPAdapterEncoder",
+    "_meta": {
+      "title": "IPAdapter Encoder"
+    }
+  },
+  "58": {
+    "inputs": {
+      "interpolation": "LANCZOS",
+      "crop_position": "center",
+      "sharpening": 1,
+      "image": [
+        "63",
+        0
+      ]
+    },
+    "class_type": "PrepImageForClipVision",
+    "_meta": {
+      "title": "Prep Image For ClipVision"
+    }
+  },
+  "59": {
+    "inputs": {
+      "interpolation": "LANCZOS",
+      "crop_position": "center",
+      "sharpening": 1,
+      "image": [
+        "64",
+        0
+      ]
+    },
+    "class_type": "PrepImageForClipVision",
+    "_meta": {
+      "title": "Prep Image For ClipVision"
+    }
+  },
+  "61": {
+    "inputs": {
+      "weight": [
+        "125",
+        0
+      ],
+      "ipadapter": [
+        "45",
+        0
+      ],
+      "image": [
+        "59",
+        0
+      ],
+      "clip_vision": [
+        "46",
+        0
+      ]
+    },
+    "class_type": "IPAdapterEncoder",
+    "_meta": {
+      "title": "IPAdapter Encoder"
+    }
+  },
+  "63": {
+    "inputs": {
+      "image": "pasted/image (4).png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "ST2"
+    }
+  },
+  "64": {
+    "inputs": {
+      "image": "pasted/image (5).png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "ST3"
+    }
+  },
+  "65": {
+    "inputs": {
+      "image": "pasted/image (3).png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "ST1"
+    }
+  },
+  "68": {
+    "inputs": {
+      "weight": [
+        "121",
+        0
+      ],
+      "ipadapter": [
+        "45",
+        0
+      ],
+      "image": [
+        "72",
+        0
+      ],
+      "clip_vision": [
+        "46",
+        0
+      ]
+    },
+    "class_type": "IPAdapterEncoder",
+    "_meta": {
+      "title": "IPAdapter Encoder"
+    }
+  },
+  "69": {
+    "inputs": {
+      "weight": [
+        "120",
+        0
+      ],
+      "ipadapter": [
+        "45",
+        0
+      ],
+      "image": [
+        "73",
+        0
+      ],
+      "clip_vision": [
+        "46",
+        0
+      ]
+    },
+    "class_type": "IPAdapterEncoder",
+    "_meta": {
+      "title": "IPAdapter Encoder"
+    }
+  },
+  "70": {
+    "inputs": {
+      "method": "add",
+      "embed1": [
+        "74",
+        0
+      ],
+      "embed2": [
+        "68",
+        0
+      ],
+      "embed3": [
+        "69",
+        0
+      ],
+      "embed4": [
+        "102",
+        0
+      ],
+      "embed5": [
+        "105",
+        0
+      ]
+    },
+    "class_type": "IPAdapterCombineEmbeds",
+    "_meta": {
+      "title": "IPAdapter Combine Embeds"
+    }
+  },
+  "71": {
+    "inputs": {
+      "interpolation": "LANCZOS",
+      "crop_position": "center",
+      "sharpening": 1,
+      "image": [
+        "78",
+        0
+      ]
+    },
+    "class_type": "PrepImageForClipVision",
+    "_meta": {
+      "title": "Prep Image For ClipVision"
+    }
+  },
+  "72": {
+    "inputs": {
+      "interpolation": "LANCZOS",
+      "crop_position": "center",
+      "sharpening": 1,
+      "image": [
+        "77",
+        0
+      ]
+    },
+    "class_type": "PrepImageForClipVision",
+    "_meta": {
+      "title": "Prep Image For ClipVision"
+    }
+  },
+  "73": {
+    "inputs": {
+      "interpolation": "LANCZOS",
+      "crop_position": "center",
+      "sharpening": 1,
+      "image": [
+        "76",
+        0
+      ]
+    },
+    "class_type": "PrepImageForClipVision",
+    "_meta": {
+      "title": "Prep Image For ClipVision"
+    }
+  },
+  "74": {
+    "inputs": {
+      "weight": [
+        "122",
+        0
+      ],
+      "ipadapter": [
+        "45",
+        0
+      ],
+      "image": [
+        "71",
+        0
+      ],
+      "clip_vision": [
+        "46",
+        0
+      ]
+    },
+    "class_type": "IPAdapterEncoder",
+    "_meta": {
+      "title": "IPAdapter Encoder"
+    }
+  },
+  "75": {
+    "inputs": {
+      "weight": [
+        "90",
+        0
+      ],
+      "weight_type": "composition precise",
+      "start_at": 0,
+      "end_at": 1,
+      "embeds_scaling": "K+V",
+      "model": [
+        "49",
+        0
+      ],
+      "ipadapter": [
+        "45",
+        0
+      ],
+      "pos_embed": [
+        "70",
+        0
+      ],
+      "clip_vision": [
+        "46",
+        0
+      ]
+    },
+    "class_type": "IPAdapterEmbeds",
+    "_meta": {
+      "title": "cIPAdapter Embeds"
+    }
+  },
+  "76": {
+    "inputs": {
+      "image": "pasted/image (11).png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "COMP3"
+    }
+  },
+  "77": {
+    "inputs": {
+      "image": "pasted/image (10).png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "COMP2"
+    }
+  },
+  "78": {
+    "inputs": {
+      "image": "pasted/image (9).png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "COMP1"
+    }
+  },
+  "79": {
+    "inputs": {
+      "weight": [
+        "116",
+        0
+      ],
+      "ipadapter": [
+        "45",
+        0
+      ],
+      "image": [
+        "83",
+        0
+      ],
+      "clip_vision": [
+        "46",
+        0
+      ]
+    },
+    "class_type": "IPAdapterEncoder",
+    "_meta": {
+      "title": "IPAdapter Encoder"
+    }
+  },
+  "80": {
+    "inputs": {
+      "weight": [
+        "115",
+        0
+      ],
+      "ipadapter": [
+        "45",
+        0
+      ],
+      "image": [
+        "84",
+        0
+      ],
+      "clip_vision": [
+        "46",
+        0
+      ]
+    },
+    "class_type": "IPAdapterEncoder",
+    "_meta": {
+      "title": "IPAdapter Encoder"
+    }
+  },
+  "81": {
+    "inputs": {
+      "method": "average",
+      "embed1": [
+        "85",
+        0
+      ],
+      "embed2": [
+        "79",
+        0
+      ],
+      "embed3": [
+        "80",
+        0
+      ],
+      "embed4": [
+        "108",
+        0
+      ],
+      "embed5": [
+        "111",
+        0
+      ]
+    },
+    "class_type": "IPAdapterCombineEmbeds",
+    "_meta": {
+      "title": "IPAdapter Combine Embeds"
+    }
+  },
+  "82": {
+    "inputs": {
+      "interpolation": "LANCZOS",
+      "crop_position": "center",
+      "sharpening": 1,
+      "image": [
+        "89",
+        0
+      ]
+    },
+    "class_type": "PrepImageForClipVision",
+    "_meta": {
+      "title": "Prep Image For ClipVision"
+    }
+  },
+  "83": {
+    "inputs": {
+      "interpolation": "LANCZOS",
+      "crop_position": "center",
+      "sharpening": 1,
+      "image": [
+        "88",
+        0
+      ]
+    },
+    "class_type": "PrepImageForClipVision",
+    "_meta": {
+      "title": "Prep Image For ClipVision"
+    }
+  },
+  "84": {
+    "inputs": {
+      "interpolation": "LANCZOS",
+      "crop_position": "center",
+      "sharpening": 1,
+      "image": [
+        "87",
+        0
+      ]
+    },
+    "class_type": "PrepImageForClipVision",
+    "_meta": {
+      "title": "Prep Image For ClipVision"
+    }
+  },
+  "85": {
+    "inputs": {
+      "weight": [
+        "117",
+        0
+      ],
+      "ipadapter": [
+        "45",
+        0
+      ],
+      "image": [
+        "82",
+        0
+      ],
+      "clip_vision": [
+        "46",
+        0
+      ]
+    },
+    "class_type": "IPAdapterEncoder",
+    "_meta": {
+      "title": "IPAdapter Encoder"
+    }
+  },
+  "86": {
+    "inputs": {
+      "weight": [
+        "91",
+        0
+      ],
+      "weight_type": "strong style transfer",
+      "start_at": 0,
+      "end_at": 1,
+      "embeds_scaling": "K+V",
+      "model": [
+        "75",
+        0
+      ],
+      "ipadapter": [
+        "45",
+        0
+      ],
+      "pos_embed": [
+        "81",
+        0
+      ],
+      "clip_vision": [
+        "46",
+        0
+      ]
+    },
+    "class_type": "IPAdapterEmbeds",
+    "_meta": {
+      "title": "sstIPAdapter Embeds"
+    }
+  },
+  "87": {
+    "inputs": {
+      "image": "image 10.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "SST3"
+    }
+  },
+  "88": {
+    "inputs": {
+      "image": "Screenshot 2025-10-27 102902.jpg"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "SST2"
+    }
+  },
+  "89": {
+    "inputs": {
+      "image": "3828b793-2f53-4ad8-82cb-21b2d4d8ff94_rw_3840.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "SST1"
+    }
+  },
+  "90": {
+    "inputs": {
+      "value": 1
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "CompositionStrength"
+    }
+  },
+  "91": {
+    "inputs": {
+      "value": 0
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "ForceTransferStrength"
+    }
+  },
+  "92": {
+    "inputs": {
+      "weight": [
+        "124",
+        0
+      ],
+      "ipadapter": [
+        "45",
+        0
+      ],
+      "image": [
+        "93",
+        0
+      ],
+      "clip_vision": [
+        "46",
+        0
+      ]
+    },
+    "class_type": "IPAdapterEncoder",
+    "_meta": {
+      "title": "IPAdapter Encoder"
+    }
+  },
+  "93": {
+    "inputs": {
+      "interpolation": "LANCZOS",
+      "crop_position": "center",
+      "sharpening": 1,
+      "image": [
+        "94",
+        0
+      ]
+    },
+    "class_type": "PrepImageForClipVision",
+    "_meta": {
+      "title": "Prep Image For ClipVision"
+    }
+  },
+  "94": {
+    "inputs": {
+      "image": "pasted/image (6).png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "ST4"
+    }
+  },
+  "95": {
+    "inputs": {
+      "interpolation": "LANCZOS",
+      "crop_position": "center",
+      "sharpening": 1,
+      "image": [
+        "97",
+        0
+      ]
+    },
+    "class_type": "PrepImageForClipVision",
+    "_meta": {
+      "title": "Prep Image For ClipVision"
+    }
+  },
+  "96": {
+    "inputs": {
+      "weight": [
+        "123",
+        0
+      ],
+      "ipadapter": [
+        "45",
+        0
+      ],
+      "image": [
+        "95",
+        0
+      ],
+      "clip_vision": [
+        "46",
+        0
+      ]
+    },
+    "class_type": "IPAdapterEncoder",
+    "_meta": {
+      "title": "IPAdapter Encoder"
+    }
+  },
+  "97": {
+    "inputs": {
+      "image": "pasted/image (7).png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "ST5"
+    }
+  },
+  "100": {
+    "inputs": {
+      "image": "pasted/image (12).png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "COMP4"
+    }
+  },
+  "101": {
+    "inputs": {
+      "interpolation": "LANCZOS",
+      "crop_position": "center",
+      "sharpening": 1,
+      "image": [
+        "100",
+        0
+      ]
+    },
+    "class_type": "PrepImageForClipVision",
+    "_meta": {
+      "title": "Prep Image For ClipVision"
+    }
+  },
+  "102": {
+    "inputs": {
+      "weight": [
+        "119",
+        0
+      ],
+      "ipadapter": [
+        "45",
+        0
+      ],
+      "image": [
+        "101",
+        0
+      ],
+      "clip_vision": [
+        "46",
+        0
+      ]
+    },
+    "class_type": "IPAdapterEncoder",
+    "_meta": {
+      "title": "IPAdapter Encoder"
+    }
+  },
+  "103": {
+    "inputs": {
+      "image": "pasted/image (13).png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "COMP5"
+    }
+  },
+  "104": {
+    "inputs": {
+      "interpolation": "LANCZOS",
+      "crop_position": "center",
+      "sharpening": 1,
+      "image": [
+        "103",
+        0
+      ]
+    },
+    "class_type": "PrepImageForClipVision",
+    "_meta": {
+      "title": "Prep Image For ClipVision"
+    }
+  },
+  "105": {
+    "inputs": {
+      "weight": [
+        "118",
+        0
+      ],
+      "ipadapter": [
+        "45",
+        0
+      ],
+      "image": [
+        "104",
+        0
+      ],
+      "clip_vision": [
+        "46",
+        0
+      ]
+    },
+    "class_type": "IPAdapterEncoder",
+    "_meta": {
+      "title": "IPAdapter Encoder"
+    }
+  },
+  "106": {
+    "inputs": {
+      "image": "image 10.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "SST4"
+    }
+  },
+  "107": {
+    "inputs": {
+      "interpolation": "LANCZOS",
+      "crop_position": "center",
+      "sharpening": 1,
+      "image": [
+        "106",
+        0
+      ]
+    },
+    "class_type": "PrepImageForClipVision",
+    "_meta": {
+      "title": "Prep Image For ClipVision"
+    }
+  },
+  "108": {
+    "inputs": {
+      "weight": [
+        "114",
+        0
+      ],
+      "ipadapter": [
+        "45",
+        0
+      ],
+      "image": [
+        "107",
+        0
+      ],
+      "clip_vision": [
+        "46",
+        0
+      ]
+    },
+    "class_type": "IPAdapterEncoder",
+    "_meta": {
+      "title": "IPAdapter Encoder"
+    }
+  },
+  "109": {
+    "inputs": {
+      "image": "image 10.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "SST4"
+    }
+  },
+  "110": {
+    "inputs": {
+      "interpolation": "LANCZOS",
+      "crop_position": "center",
+      "sharpening": 1,
+      "image": [
+        "109",
+        0
+      ]
+    },
+    "class_type": "PrepImageForClipVision",
+    "_meta": {
+      "title": "Prep Image For ClipVision"
+    }
+  },
+  "111": {
+    "inputs": {
+      "weight": [
+        "113",
+        0
+      ],
+      "ipadapter": [
+        "45",
+        0
+      ],
+      "image": [
+        "110",
+        0
+      ],
+      "clip_vision": [
+        "46",
+        0
+      ]
+    },
+    "class_type": "IPAdapterEncoder",
+    "_meta": {
+      "title": "IPAdapter Encoder"
+    }
+  },
+  "113": {
+    "inputs": {
+      "value": 1
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "SST5W"
+    }
+  },
+  "114": {
+    "inputs": {
+      "value": 1
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "SST4W"
+    }
+  },
+  "115": {
+    "inputs": {
+      "value": 1
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "SST3W"
+    }
+  },
+  "116": {
+    "inputs": {
+      "value": 1
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "SST2W"
+    }
+  },
+  "117": {
+    "inputs": {
+      "value": 1
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "SST1W"
+    }
+  },
+  "118": {
+    "inputs": {
+      "value": 1
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "COMP5W"
+    }
+  },
+  "119": {
+    "inputs": {
+      "value": 1
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "COMP4W"
+    }
+  },
+  "120": {
+    "inputs": {
+      "value": 1
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "COMP3W"
+    }
+  },
+  "121": {
+    "inputs": {
+      "value": 1
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "COMP2W"
+    }
+  },
+  "122": {
+    "inputs": {
+      "value": 1
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "COMP1W"
+    }
+  },
+  "123": {
+    "inputs": {
+      "value": 0
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "ST5W"
+    }
+  },
+  "124": {
+    "inputs": {
+      "value": 0
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "ST4W"
+    }
+  },
+  "125": {
+    "inputs": {
+      "value": 0
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "ST3W"
+    }
+  },
+  "126": {
+    "inputs": {
+      "value": 1
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "ST2W"
+    }
+  },
+  "129": {
+    "inputs": {
+      "value": 1
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "ST1W"
+    }
+  }
+}
