@@ -10,7 +10,7 @@ curl --request POST 'https://api.runcomfy.net/prod/v1/deployments/1c6fa9a6-f60a-
     },
     "25": {
       "inputs": {
-        "value": "reflective puffer jacket high fashion on neutral grey background"
+        "value": "A tranquil alien landscape bathed in soft pastel hues, featuring a lake wooden cottage and towering, smooth rock formations that rise like giants from a sparkling, turquoise river. Gentle clouds float lazily in the sky, and distant, small boats drift along the calm waters. The atmosphere is peaceful and otherworldly, with rolling hills of vibrant colors in the distance, and hints of unusual flora dotting the landscape. The scene feels vast and serene, with subtle hints of a distant civilization nestled along the shorelines."
       }
     }
   }

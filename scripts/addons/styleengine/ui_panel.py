@@ -1731,7 +1731,6 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                         # This displays the actual image content as an icon
                         preview_box = col.box()
                         preview_col = preview_box.column(align=True)
-                        preview_col.scale_y = 3.0  # Make thumbnail taller
                         
                         # Ensure preview exists (generate if needed)
                         try:
@@ -1743,8 +1742,9 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                                 img.gl_load()
                             
                             # Use the image's preview icon directly
+                            # scale=5.0 gives a good balance between size and UI space
                             if img.preview and img.preview.icon_id > 0:
-                                preview_col.template_icon(icon_value=img.preview.icon_id, scale=8.0)
+                                preview_col.template_icon(icon_value=img.preview.icon_id, scale=5.0)
                             else:
                                 # Fallback to generic image icon if no preview
                                 preview_col.label(text="[No Preview]", icon='IMAGE_DATA')
@@ -1754,7 +1754,7 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                             preview_col.label(text="[Preview Error]", icon='ERROR')
                             print(f"[UI] Error generating preview for {img.name}: {e}")
                         
-                        col.separator(factor=0.3)
+                        col.separator(factor=0.2)
                     
                         # Slot label and image name
                         info_col = col.column(align=True)
@@ -1803,7 +1803,7 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
             ("st4", "st4_image", "st4_weight", "ST4"),
             ("st5", "st5_image", "st5_weight", "ST5"),
         ]
-        draw_reference_section(ref_box, "Style Transfer", 'BRUSH_DATA', 
+        draw_reference_section(ref_box, "Style", 'BRUSH_DATA', 
                              "show_style_transfer", st_slots, "style_transfer_strength")
         
         # Composition section
@@ -1817,7 +1817,7 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
         draw_reference_section(ref_box, "Composition", 'MESH_GRID', 
                              "show_composition", comp_slots, "composition_strength")
         
-        # Force Style Transfer section
+        # Transfer section (Force Style Transfer)
         sst_slots = [
             ("sst1", "sst1_image", "sst1_weight", "SST1"),
             ("sst2", "sst2_image", "sst2_weight", "SST2"),
@@ -1825,7 +1825,7 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
             ("sst4", "sst4_image", "sst4_weight", "SST4"),
             ("sst5", "sst5_image", "sst5_weight", "SST5"),
         ]
-        draw_reference_section(ref_box, "Force Style Transfer", 'FORCE_FORCE', 
+        draw_reference_section(ref_box, "Transfer", 'FORCE_FORCE', 
                              "show_force_transfer", sst_slots, "force_transfer_strength")
         
         # # --- Settings - COLLAPSIBLE --- COMMENTED OUT
