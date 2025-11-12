@@ -1,0 +1,17 @@
+curl --request POST 'https://api.runcomfy.net/prod/v1/deployments/1c6fa9a6-f60a-4e89-863d-40b03ad2564e/inference' \
+  --header 'Authorization: Bearer YOUR_API_TOKEN' \
+  --header 'Content-Type: application/json' \
+  --data '{
+  "overrides": {
+    "15": {
+      "inputs": {
+        "image": "https://example.com/new-image.jpg or data:image/jpeg;base64,/9j/4AAQSkZJRgA..."
+      }
+    },
+    "25": {
+      "inputs": {
+        "value": "reflective puffer jacket high fashion on neutral grey background"
+      }
+    }
+  }
+}'

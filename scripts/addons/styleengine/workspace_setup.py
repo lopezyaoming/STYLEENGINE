@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 import urllib.request
 import urllib.error
+import shutil
 
 # Get the addon directory (works both in dev and when installed from ZIP)
 ADDON_DIR = Path(__file__).parent
@@ -149,6 +150,22 @@ def write_session_json(context):
                 "sst3_weight": round(props.sst3_weight, 3),
                 "sst4_weight": round(props.sst4_weight, 3),
                 "sst5_weight": round(props.sst5_weight, 3),
+                # Image paths (stored as filenames for ComfyUI)
+                "st1_path": os.path.basename(props.st1_image.filepath) if props.st1_image else "",
+                "st2_path": os.path.basename(props.st2_image.filepath) if props.st2_image else "",
+                "st3_path": os.path.basename(props.st3_image.filepath) if props.st3_image else "",
+                "st4_path": os.path.basename(props.st4_image.filepath) if props.st4_image else "",
+                "st5_path": os.path.basename(props.st5_image.filepath) if props.st5_image else "",
+                "comp1_path": os.path.basename(props.comp1_image.filepath) if props.comp1_image else "",
+                "comp2_path": os.path.basename(props.comp2_image.filepath) if props.comp2_image else "",
+                "comp3_path": os.path.basename(props.comp3_image.filepath) if props.comp3_image else "",
+                "comp4_path": os.path.basename(props.comp4_image.filepath) if props.comp4_image else "",
+                "comp5_path": os.path.basename(props.comp5_image.filepath) if props.comp5_image else "",
+                "sst1_path": os.path.basename(props.sst1_image.filepath) if props.sst1_image else "",
+                "sst2_path": os.path.basename(props.sst2_image.filepath) if props.sst2_image else "",
+                "sst3_path": os.path.basename(props.sst3_image.filepath) if props.sst3_image else "",
+                "sst4_path": os.path.basename(props.sst4_image.filepath) if props.sst4_image else "",
+                "sst5_path": os.path.basename(props.sst5_image.filepath) if props.sst5_image else "",
             },
             "objects": [
                 {
@@ -230,6 +247,69 @@ def refresh_ai_image():
     
     except Exception as e:
         print(f"[Style Engine] Error reloading image: {e}")
+
+
+def copy_reference_images_to_comfyui(context):
+    """
+    Copy reference images to ComfyUI's input directory so they can be used in the workflow.
+    Returns True if successful, False otherwise.
+    """
+    try:
+        # Get ComfyUI path from preferences
+        prefs = context.preferences.addons['styleengine'].preferences
+        comfy_path = prefs.comfy_path if hasattr(prefs, 'comfy_path') else ""
+        
+        if not comfy_path or not os.path.exists(comfy_path):
+            print(f"[Style Engine] Warning: ComfyUI path not set or invalid")
+            print(f"[Style Engine] Reference images will not be copied automatically")
+            return False
+        
+        # ComfyUI input directory
+        input_dir = Path(comfy_path) / "input"
+        if not input_dir.exists():
+            print(f"[Style Engine] Warning: ComfyUI input directory not found: {input_dir}")
+            return False
+        
+        props = context.scene.style_engine_props
+        copied_count = 0
+        
+        # List of all reference image properties
+        ref_images = [
+            ('st1_image', 'ST1'), ('st2_image', 'ST2'), ('st3_image', 'ST3'), 
+            ('st4_image', 'ST4'), ('st5_image', 'ST5'),
+            ('comp1_image', 'COMP1'), ('comp2_image', 'COMP2'), ('comp3_image', 'COMP3'),
+            ('comp4_image', 'COMP4'), ('comp5_image', 'COMP5'),
+            ('sst1_image', 'SST1'), ('sst2_image', 'SST2'), ('sst3_image', 'SST3'),
+            ('sst4_image', 'SST4'), ('sst5_image', 'SST5'),
+        ]
+        
+        for prop_name, label in ref_images:
+            img = getattr(props, prop_name)
+            if img and img.filepath:
+                src_path = bpy.path.abspath(img.filepath)
+                if os.path.exists(src_path):
+                    filename = os.path.basename(src_path)
+                    dest_path = input_dir / filename
+                    
+                    # Copy file
+                    shutil.copy2(src_path, dest_path)
+                    copied_count += 1
+                    print(f"[Style Engine] Copied {label}: {filename} → ComfyUI/input/")
+                else:
+                    print(f"[Style Engine] Warning: {label} source file not found: {src_path}")
+        
+        if copied_count > 0:
+            print(f"[Style Engine] ✓ Copied {copied_count} reference images to ComfyUI")
+            return True
+        else:
+            print(f"[Style Engine] No reference images to copy")
+            return False
+            
+    except Exception as e:
+        print(f"[Style Engine] Error copying reference images: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
 
 
 def auto_render_passes():
@@ -1494,6 +1574,11 @@ def generate_ai_image_cloud(context):
         print(f"[Style Engine] Failed to read session.json: {e}")
         return
     
+    # 3.5. Update session_data with the freshly synced prompt from text editor
+    # This ensures the current prompt is used, not the old one from session.json
+    session_data['global_prompt'] = context.scene.style_engine_props.global_prompt
+    print(f"[Style Engine] Using prompt: {session_data['global_prompt'][:50]}...")
+    
     # 4. Encode combined image to base64
     # NOTE: Only combined pass is sent - depth is generated by DepthAnything AI on the server
     # JPEG format for smaller file size (faster upload)
@@ -1520,23 +1605,24 @@ def generate_ai_image_cloud(context):
         print(f"[Style Engine] Failed to encode combined image: {e}")
         return
     
-    # 5. Determine workflow type
-    # Check if reference images are active
+    # 5. ALWAYS use SDXLREF workflow (with weights at 0 when no images)
+    workflow_type = 'sdxlref'
     props = context.scene.style_engine_props
-    has_reference_images = any([
-        props.st1_image, props.st2_image, props.st3_image, props.st4_image, props.st5_image,
-        props.comp1_image, props.comp2_image, props.comp3_image, props.comp4_image, props.comp5_image,
-        props.sst1_image, props.sst2_image, props.sst3_image, props.sst4_image, props.sst5_image
+    
+    # Count active reference images
+    ref_count = sum([
+        1 if img else 0 for img in [
+            props.st1_image, props.st2_image, props.st3_image, props.st4_image, props.st5_image,
+            props.comp1_image, props.comp2_image, props.comp3_image, props.comp4_image, props.comp5_image,
+            props.sst1_image, props.sst2_image, props.sst3_image, props.sst4_image, props.sst5_image
+        ]
     ])
     
-    if has_reference_images:
-        workflow_type = 'sdxlref'
-        print(f"[Style Engine] Using SDXLREF workflow (reference images active)")
+    if ref_count > 0:
+        print(f"[Style Engine] Using SDXLREF workflow ({ref_count} reference images active)")
+        print(f"[Style Engine] Reference images will be encoded to base64 for serverless submission")
     else:
-        use_ipadapter = session_data.get('ipadapter', {}).get('enabled', False)
-        has_reference = session_data.get('ipadapter', {}).get('reference_image', '')
-        workflow_type = 'ipadapter' if (use_ipadapter and has_reference) else 'sdxl'
-        print(f"[Style Engine] Using workflow: {workflow_type}")
+        print(f"[Style Engine] Using SDXLREF workflow (0 reference images - pure SDXL mode)")
     
     # 6. Ensure deployment exists
     try:
@@ -1546,7 +1632,9 @@ def generate_ai_image_cloud(context):
         return
     
     # 7. Build overrides (depth not needed - AI generates it)
+    # Pass context for reference image encoding
     overrides = build_runcomfy_overrides(
+        context=context,
         session_data=session_data,
         combined_b64=combined_b64,
         workflow_type=workflow_type
@@ -1644,14 +1732,91 @@ def generate_ai_image_cloud(context):
         print(f"[Serverless API] Failed to submit inference: {e}")
 
 
-def build_runcomfy_overrides(session_data, combined_b64, workflow_type):
+def encode_blender_image_to_base64(img, max_size=1536):
+    """
+    Encode a Blender Image datablock to base64 using Blender's native API.
+    Resizes if necessary to stay under 10MB RunComfy limit.
+    
+    Args:
+        img: bpy.types.Image datablock
+        max_size: Maximum dimension (width or height) in pixels
+    
+    Returns:
+        str: Base64 data URI (data:image/jpeg;base64,...)
+    """
+    import bpy
+    import base64
+    import tempfile
+    from pathlib import Path
+    
+    # Get original size
+    original_size = (img.size[0], img.size[1])
+    needs_resize = max(original_size) > max_size
+    
+    # Create a temp copy of the image for processing
+    temp_img = img.copy()
+    
+    try:
+        if needs_resize:
+            # Calculate new size maintaining aspect ratio
+            if original_size[0] > original_size[1]:
+                new_width = max_size
+                new_height = int(original_size[1] * (max_size / original_size[0]))
+            else:
+                new_height = max_size
+                new_width = int(original_size[0] * (max_size / original_size[1]))
+            
+            # Resize using Blender's scale
+            temp_img.scale(new_width, new_height)
+            print(f"[Style Engine] Resized: {original_size} → {(new_width, new_height)}")
+        
+        # Save to temporary file as JPEG (compressed)
+        temp_dir = Path(tempfile.gettempdir())
+        temp_path = temp_dir / f"styleengine_ref_{id(img)}.jpg"
+        
+        # Configure file format settings for JPEG
+        scene_settings = bpy.context.scene.render.image_settings
+        old_format = scene_settings.file_format
+        old_quality = scene_settings.quality
+        old_color_mode = scene_settings.color_mode
+        
+        try:
+            scene_settings.file_format = 'JPEG'
+            scene_settings.quality = 90
+            scene_settings.color_mode = 'RGB'
+            
+            # Save the temp image
+            temp_img.save_render(str(temp_path))
+            
+            # Read and encode
+            with open(temp_path, 'rb') as f:
+                img_data = base64.b64encode(f.read()).decode('utf-8')
+            
+            # Clean up temp file
+            temp_path.unlink(missing_ok=True)
+            
+            return f"data:image/jpeg;base64,{img_data}"
+            
+        finally:
+            # Restore original settings
+            scene_settings.file_format = old_format
+            scene_settings.quality = old_quality
+            scene_settings.color_mode = old_color_mode
+            
+    finally:
+        # Clean up temp image
+        bpy.data.images.remove(temp_img)
+
+
+def build_runcomfy_overrides(context, session_data, combined_b64, workflow_type):
     """
     Build overrides dict for RunComfy API submission.
     
     Args:
+        context: Blender context (to access image pointers for encoding)
         session_data: Session JSON data
         combined_b64: Base64 encoded combined pass
-        workflow_type: 'sdxl' or 'ipadapter'
+        workflow_type: Should always be 'sdxlref'
     
     Returns:
         dict: Overrides for workflow nodes
@@ -1659,6 +1824,7 @@ def build_runcomfy_overrides(session_data, combined_b64, workflow_type):
     Note: Depth is NOT sent - the workflow uses DepthAnything AI to generate it from combined pass
     """
     from . import runcomfy_client
+    import bpy
     
     # Extract resolution from session data (CRITICAL for SDXL native resolutions)
     resolution = session_data.get('resolution', {})
@@ -1668,23 +1834,22 @@ def build_runcomfy_overrides(session_data, combined_b64, workflow_type):
     print(f"[Style Engine] 📐 Workflow resolution override: {width}x{height}")
     print(f"[Style Engine] Note: Depth generated by DepthAnything AI (not sent from Blender)")
     
-    if workflow_type == 'sdxl':
-        # Map to SDXLworkflow.json nodes
-        return {
-            "5": {"inputs": {"width": width, "height": height}},  # EmptyLatentImage - CRITICAL!
-            "25": {"inputs": {"value": session_data.get('global_prompt', '')}},  # Prompt
-            "15": {"inputs": {"image": combined_b64}},  # Combined pass
-            "40": {"inputs": {"value": session_data.get('silhouette_influence', 0.75)}},  # Canny
-            "41": {"inputs": {"value": session_data.get('depth_influence', 0.5)}},  # Depth
-            "42": {"inputs": {"value": session_data.get('steps', 15)}},  # Steps
-        }
-    elif workflow_type == 'sdxlref':
+    # ALWAYS use SDXLREF workflow (only one workflow type)
+    if workflow_type == 'sdxlref':
         # Map to SDXLREF.json nodes (with reference images)
         ref_data = session_data.get('reference_images', {})
         
+        # Prompts
+        positive_prompt = session_data.get('global_prompt', '')
+        negative_prompt = "text, watermark, blurry, deformed, ugly, bad anatomy, worst quality, low quality"
+        
+        print(f"[Style Engine] 📝 POSITIVE PROMPT: {positive_prompt}")
+        print(f"[Style Engine] 🚫 NEGATIVE PROMPT: {negative_prompt}")
+        
         overrides = {
             "5": {"inputs": {"width": width, "height": height}},  # EmptyLatentImage
-            "25": {"inputs": {"value": session_data.get('global_prompt', '')}},  # Prompt
+            "25": {"inputs": {"value": positive_prompt}},  # Positive Prompt (Node 25)
+            "7": {"inputs": {"text": negative_prompt}},  # Negative Prompt (Node 7) - CRITICAL!
             "15": {"inputs": {"image": combined_b64}},  # Base image (AO)
             "40": {"inputs": {"value": session_data.get('silhouette_influence', 0.75)}},  # Canny
             "41": {"inputs": {"value": session_data.get('depth_influence', 0.5)}},  # Depth
@@ -1714,36 +1879,136 @@ def build_runcomfy_overrides(session_data, combined_b64, workflow_type):
         for node, key in zip(sst_weight_nodes, sst_keys):
             overrides[node] = {"inputs": {"value": ref_data.get(key, 0.0)}}
         
-        # NOTE: Reference image paths are NOT overridden here
-        # They should be pre-uploaded to the ComfyUI server's input directory
-        # or handled by the workflow deployment
+        # Add reference images (encode to base64 for RunComfy serverless)
+        # Get props to access actual image pointers
+        props = context.scene.style_engine_props
         
-        print(f"[Style Engine] SDXLREF overrides built with {len(overrides)} nodes")
+        # Style Transfer images (ST1-ST5): nodes 65, 63, 64, 94, 97
+        st_image_nodes = ["65", "63", "64", "94", "97"]
+        st_images = [props.st1_image, props.st2_image, props.st3_image, props.st4_image, props.st5_image]
+        st_labels = ['ST1', 'ST2', 'ST3', 'ST4', 'ST5']
+        
+        for node, img, label in zip(st_image_nodes, st_images, st_labels):
+            if img and img.filepath:
+                try:
+                    # Use Blender-native resize and encode
+                    img_b64 = encode_blender_image_to_base64(img, max_size=1536)
+                    overrides[node] = {"inputs": {"image": img_b64}}
+                    size_kb = len(img_b64) / 1024
+                    print(f"[Style Engine] ✓ Encoded {label}: {img.name} ({size_kb:.1f} KB)")
+                except Exception as e:
+                    print(f"[Style Engine] ⚠️ Failed to encode {label}: {e}")
+        
+        # Composition images (COMP1-COMP5): nodes 78, 77, 76, 100, 103
+        comp_image_nodes = ["78", "77", "76", "100", "103"]
+        comp_images = [props.comp1_image, props.comp2_image, props.comp3_image, props.comp4_image, props.comp5_image]
+        comp_labels = ['COMP1', 'COMP2', 'COMP3', 'COMP4', 'COMP5']
+        
+        for node, img, label in zip(comp_image_nodes, comp_images, comp_labels):
+            if img and img.filepath:
+                try:
+                    # Use Blender-native resize and encode
+                    img_b64 = encode_blender_image_to_base64(img, max_size=1536)
+                    overrides[node] = {"inputs": {"image": img_b64}}
+                    size_kb = len(img_b64) / 1024
+                    print(f"[Style Engine] ✓ Encoded {label}: {img.name} ({size_kb:.1f} KB)")
+                except Exception as e:
+                    print(f"[Style Engine] ⚠️ Failed to encode {label}: {e}")
+        
+        # Force Style Transfer images (SST1-SST5): nodes 89, 88, 87, 106, 109
+        sst_image_nodes = ["89", "88", "87", "106", "109"]
+        sst_images = [props.sst1_image, props.sst2_image, props.sst3_image, props.sst4_image, props.sst5_image]
+        sst_labels = ['SST1', 'SST2', 'SST3', 'SST4', 'SST5']
+        
+        for node, img, label in zip(sst_image_nodes, sst_images, sst_labels):
+            if img and img.filepath:
+                try:
+                    # Use Blender-native resize and encode
+                    img_b64 = encode_blender_image_to_base64(img, max_size=1536)
+                    overrides[node] = {"inputs": {"image": img_b64}}
+                    size_kb = len(img_b64) / 1024
+                    print(f"[Style Engine] ✓ Encoded {label}: {img.name} ({size_kb:.1f} KB)")
+                except Exception as e:
+                    print(f"[Style Engine] ⚠️ Failed to encode {label}: {e}")
+        
+        # ========== EXHAUSTIVE DEBUG LOGGING ==========
+        print(f"\n{'='*70}")
+        print(f"[Style Engine] 🔍 EXHAUSTIVE SDXLREF WORKFLOW DEBUG")
+        print(f"{'='*70}")
+        
+        # Basic parameters
+        print(f"\n📐 BASIC PARAMETERS:")
+        print(f"  Resolution: {width}x{height}")
+        print(f"  Steps: {session_data.get('steps', 15)}")
+        print(f"  Canny Influence: {session_data.get('silhouette_influence', 0.75)}")
+        print(f"  Depth Influence: {session_data.get('depth_influence', 0.5)}")
+        
+        # Global strengths
+        print(f"\n🎚️ GLOBAL STRENGTHS:")
+        print(f"  Style Transfer Strength (Node 52): {ref_data.get('style_transfer_strength', 0.0)}")
+        print(f"  Composition Strength (Node 90): {ref_data.get('composition_strength', 1.0)}")
+        print(f"  Force Transfer Strength (Node 91): {ref_data.get('force_transfer_strength', 0.0)}")
+        
+        # Style Transfer weights and images
+        print(f"\n🎨 STYLE TRANSFER (ST1-ST5):")
+        for i, (node, key, img_node, img, label) in enumerate(zip(
+            st_weight_nodes, st_keys, st_image_nodes, st_images, st_labels), 1):
+            weight = ref_data.get(key, 0.0)
+            img_name = img.name if img else ""
+            has_image = bool(img and img.filepath)
+            status = "✓ ACTIVE (encoded)" if (weight > 0 and has_image) else "✗ INACTIVE"
+            print(f"  ST{i}: Weight={weight:.3f} (Node {node}), Image='{img_name}' (Node {img_node}) {status}")
+        
+        # Composition weights and images
+        print(f"\n📐 COMPOSITION (COMP1-COMP5):")
+        for i, (node, key, img_node, img, label) in enumerate(zip(
+            comp_weight_nodes, comp_keys, comp_image_nodes, comp_images, comp_labels), 1):
+            weight = ref_data.get(key, 0.0)
+            img_name = img.name if img else ""
+            has_image = bool(img and img.filepath)
+            status = "✓ ACTIVE (encoded)" if (weight > 0 and has_image) else "✗ INACTIVE"
+            print(f"  COMP{i}: Weight={weight:.3f} (Node {node}), Image='{img_name}' (Node {img_node}) {status}")
+        
+        # Force Style Transfer weights and images
+        print(f"\n💪 FORCE STYLE TRANSFER (SST1-SST5):")
+        for i, (node, key, img_node, img, label) in enumerate(zip(
+            sst_weight_nodes, sst_keys, sst_image_nodes, sst_images, sst_labels), 1):
+            weight = ref_data.get(key, 0.0)
+            img_name = img.name if img else ""
+            has_image = bool(img and img.filepath)
+            status = "✓ ACTIVE (encoded)" if (weight > 0 and has_image) else "✗ INACTIVE"
+            print(f"  SST{i}: Weight={weight:.3f} (Node {node}), Image='{img_name}' (Node {img_node}) {status}")
+        
+        # Summary
+        active_count = sum([
+            1 for key in st_keys + comp_keys + sst_keys 
+            if ref_data.get(key, 0.0) > 0
+        ])
+        
+        # Estimate total payload size
+        import json
+        overrides_json = json.dumps(overrides)
+        payload_size_mb = len(overrides_json) / (1024 * 1024)
+        
+        print(f"\n📊 SUMMARY:")
+        print(f"  Total overrides: {len(overrides)} nodes")
+        print(f"  Active reference images: {active_count}")
+        print(f"  Base image size: {len(combined_b64) / 1024:.1f} KB")
+        print(f"  Estimated payload size: {payload_size_mb:.2f} MB")
+        
+        # Warn if approaching 10MB limit
+        if payload_size_mb > 8:
+            print(f"  ⚠️ WARNING: Payload is large ({payload_size_mb:.2f} MB), close to 10MB limit!")
+        elif payload_size_mb > 9.5:
+            print(f"  ❌ ERROR: Payload too large ({payload_size_mb:.2f} MB), will exceed 10MB limit!")
+        
+        print(f"{'='*70}\n")
+        
         return overrides
-    else:  # ipadapter
-        # Encode reference image
-        ref_image_path = session_data['ipadapter']['reference_image']
-        
-        try:
-            ref_image_b64 = runcomfy_client.encode_image_to_base64(ref_image_path)
-        except Exception as e:
-            print(f"[Style Engine] Failed to encode reference image: {e}")
-            # Fall back to SDXL workflow
-            return build_runcomfy_overrides(session_data, combined_b64, 'sdxl')
-        
-        # Map to IPAdapterworkflow.json nodes
-        return {
-            "5": {"inputs": {"width": width, "height": height}},  # EmptyLatentImage - CRITICAL!
-            "25": {"inputs": {"value": session_data.get('global_prompt', '')}},
-            "15": {"inputs": {"image": combined_b64}},
-            "40": {"inputs": {"value": session_data.get('silhouette_influence', 0.75)}},
-            "41": {"inputs": {"value": session_data.get('depth_influence', 0.5)}},
-            "42": {"inputs": {"value": session_data.get('steps', 15)}},
-            "43": {"inputs": {"image": ref_image_b64}},  # IPAdapter reference
-            "52": {"inputs": {"value": session_data['ipadapter']['strength']}},
-            # Note: Node 49 (IPAdapterEmbeds) weight_type cannot be overridden due to upstream connections
-            # It uses the hardcoded value from the deployed workflow: "style transfer"
-        }
+    else:
+        # Should never reach here - we always use sdxlref
+        print(f"[Style Engine] ❌ ERROR: Invalid workflow_type '{workflow_type}' - should always be 'sdxlref'")
+        return {}
 
 
 # ================================================================
@@ -1753,9 +2018,10 @@ def build_runcomfy_overrides(session_data, combined_b64, workflow_type):
 def load_workflow_json_for_server(workflow_type):
     """
     Load workflow JSON file for Server API mode.
+    ALWAYS loads SDXLREF.json (single unified workflow).
     
     Args:
-        workflow_type: 'sdxl' or 'ipadapter'
+        workflow_type: Should always be 'sdxlref'
     
     Returns:
         dict: Workflow JSON or None if failed
@@ -1767,12 +2033,11 @@ def load_workflow_json_for_server(workflow_type):
     addon_dir = Path(__file__).parent.parent.parent.parent  # Go up to STYLEENGINE root
     workflows_dir = addon_dir / "ComfyUI" / "runcomfyWorkflows"
     
-    if workflow_type == 'sdxl':
-        workflow_file = workflows_dir / "SESDXL.json"
-    elif workflow_type == 'sdxlref':
-        workflow_file = workflows_dir / "SDXLREF.json"
-    else:  # ipadapter
-        workflow_file = workflows_dir / "SEIP.json"
+    # ALWAYS use SDXLREF.json
+    workflow_file = workflows_dir / "SDXLREF.json"
+    
+    if workflow_type != 'sdxlref':
+        print(f"[Server API] ⚠️ WARNING: workflow_type '{workflow_type}' ignored - always using SDXLREF.json")
     
     try:
         with open(workflow_file, 'r') as f:
@@ -1882,21 +2147,12 @@ def on_generation_complete(context, success, result, error, workflow_type='sdxl'
         has_images = 'images' in outputs[node_id] and outputs[node_id]['images']
         print(f"[Style Engine] DEBUG:   Node {node_id}: {'✓ has images' if has_images else '✗ no images'}")
     
-    # Workflow-specific output node priority
-    if workflow_type == 'ipadapter':
-        # IPAdapter: Try Node 9 first (SaveImage - final output)
-        if '9' in outputs and 'images' in outputs['9'] and outputs['9']['images']:
-            image_url = outputs['9']['images'][0].get('url')
-            print("[Style Engine] ✅ Using output from Node 9 (IPAdapter final SaveImage)")
-        else:
-            print("[Style Engine] ⚠️ Node 9 not found in IPAdapter mode, checking fallback...")
+    # ALWAYS use SDXLREF workflow - Try Node 53 first (easy imageSave - final output)
+    if '53' in outputs and 'images' in outputs['53'] and outputs['53']['images']:
+        image_url = outputs['53']['images'][0].get('url')
+        print(f"[Style Engine] ✅ Using output from Node 53 (SDXLREF final SaveImage)")
     else:
-        # SDXL: Try Node 53 first (easy imageSave - final output)
-        if '53' in outputs and 'images' in outputs['53'] and outputs['53']['images']:
-            image_url = outputs['53']['images'][0].get('url')
-            print("[Style Engine] ✅ Using output from Node 53 (SDXL final SaveImage)")
-        else:
-            print("[Style Engine] ⚠️ Node 53 not found in SDXL mode, checking fallback...")
+        print(f"[Style Engine] ⚠️ Node 53 not found, checking fallback...")
     
     # Fallback: find any SaveImage output
     # Priority: 'output' type images > 'temp' type images (last one wins)

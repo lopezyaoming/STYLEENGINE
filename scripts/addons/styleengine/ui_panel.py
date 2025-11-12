@@ -1616,7 +1616,7 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
         ref_box = layout.box()
         header_row = ref_box.row(align=True)
         header_row.label(text="Reference Images", icon='IMAGE_DATA')
-        
+            
         # Helper function to draw a reference image section
         def draw_reference_section(box, title, icon, show_prop, slots, strength_prop):
             """Draw a collapsible reference image section with grid layout"""
@@ -1624,7 +1624,7 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
             header = section_box.row(align=True)
             icon_tri = 'TRIA_DOWN' if getattr(style_props, show_prop) else 'TRIA_RIGHT'
             header.prop(style_props, show_prop, text=title, icon=icon_tri, emboss=False, toggle=True)
-            
+        
             if getattr(style_props, show_prop):
                 # Global strength slider
                 section_box.separator()
@@ -1646,7 +1646,7 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                 # Draw each slot
                 for slot_id, img_prop, weight_prop, label in slots:
                     img = getattr(style_props, img_prop)
-                    
+            
                     # Card for each slot
                     card = grid.box()
                     card.scale_y = 1.0
@@ -1654,7 +1654,7 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                     if img:
                         # Image exists - show preview and controls
                         col = card.column(align=True)
-                        
+            
                         # Image thumbnail using template_ID_preview (shows datablock with preview)
                         preview_box = col.box()
                         preview_col = preview_box.column(align=True)
@@ -1671,7 +1671,7 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                         )
                         
                         col.separator(factor=0.3)
-                        
+                    
                         # Slot label and image name
                         info_col = col.column(align=True)
                         info_col.scale_y = 0.7
@@ -1686,12 +1686,12 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                         name_row.label(text=display_name)
                         
                         col.separator(factor=0.3)
-                        
+                    
                         # Weight slider
                         col.prop(style_props, weight_prop, text="", slider=True)
                         
                         col.separator(factor=0.2)
-                        
+                    
                         # Action buttons (reload and clear)
                         btn_row = col.row(align=True)
                         btn_row.scale_y = 0.7

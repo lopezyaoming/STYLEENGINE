@@ -311,12 +311,14 @@ class RunComfyClient:
 # IMAGE HELPERS
 # ----------------------------------------------------------------
 
-def encode_image_to_base64(image_path):
+def encode_image_to_base64(image_path, max_size=1536):
     """
-    Encode image to base64 data URI.
+    Encode image to base64 data URI with optional resizing.
     
     Args:
         image_path: Path to image file (PNG or JPEG)
+        max_size: Maximum dimension (width or height) in pixels. Images larger than this
+                  will be resized proportionally. Default 1536px for SDXL compatibility.
     
     Returns:
         str: Base64 data URI (data:image/png;base64,... or data:image/jpeg;base64,...)
@@ -325,18 +327,69 @@ def encode_image_to_base64(image_path):
         RunComfyError: If encoding fails
     """
     try:
-        # Detect image type from extension
+        from PIL import Image
+        import io
+        
+        # Open and check image size
+        img = Image.open(image_path)
+        original_size = img.size
+        needs_resize = max(img.size) > max_size
+        
+        if needs_resize:
+            # Calculate new size maintaining aspect ratio
+            if img.width > img.height:
+                new_width = max_size
+                new_height = int(img.height * (max_size / img.width))
+            else:
+                new_height = max_size
+                new_width = int(img.width * (max_size / img.height))
+            
+            # Resize with high-quality resampling
+            img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            print(f"[RunComfy] Resized image: {original_size} → {img.size}")
+        
+        # Convert to RGB if necessary (remove alpha channel for JPEG)
+        if img.mode in ('RGBA', 'LA', 'P'):
+            # Create white background for transparency
+            background = Image.new('RGB', img.size, (255, 255, 255))
+            if img.mode == 'P':
+                img = img.convert('RGBA')
+            background.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
+            img = background
+        elif img.mode != 'RGB':
+            img = img.convert('RGB')
+        
+        # Save to bytes buffer as JPEG (smaller than PNG)
+        buffer = io.BytesIO()
+        img.save(buffer, format='JPEG', quality=90, optimize=True)
+        buffer.seek(0)
+        
+        # Encode to base64
+        img_data = base64.b64encode(buffer.read()).decode('utf-8')
+        data_uri = f"data:image/jpeg;base64,{img_data}"
+        
+        # Check size and warn if still large
+        size_kb = len(data_uri) / 1024
+        if size_kb > 1024:  # > 1MB
+            print(f"[RunComfy] ⚠️ Large encoded image: {size_kb:.1f} KB")
+        
+        return data_uri
+        
+    except ImportError:
+        # Fallback: encode without resizing if PIL not available
+        print("[RunComfy] ⚠️ PIL not available, encoding without resize")
         image_path_str = str(image_path).lower()
         if image_path_str.endswith('.jpg') or image_path_str.endswith('.jpeg'):
             mime_type = 'image/jpeg'
         elif image_path_str.endswith('.png'):
             mime_type = 'image/png'
         else:
-            mime_type = 'image/png'  # Default to PNG
+            mime_type = 'image/png'
         
         with open(image_path, 'rb') as f:
             img_data = base64.b64encode(f.read()).decode('utf-8')
         return f"data:{mime_type};base64,{img_data}"
+        
     except Exception as e:
         raise RunComfyError(f"Failed to encode image: {e}")
 

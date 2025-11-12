@@ -137,17 +137,27 @@ def get_prompt_from_text_editor():
     text = bpy.data.texts.get("STYLEENGINE_Prompt")
     
     if not text:
+        print("[Style Engine] ⚠️ STYLEENGINE_Prompt text block not found!")
         return ""
     
+    # Get raw content
+    raw_content = text.as_string()
+    print(f"[Style Engine] 📖 Raw text editor content ({len(raw_content)} chars):")
+    print(f"[Style Engine]    '{raw_content}'")
+    
     lines = []
-    for line in text.as_string().split('\n'):
+    for line in raw_content.split('\n'):
         stripped = line.strip()
         # Skip comments (lines starting with #) and empty lines
         if stripped and not stripped.startswith('#'):
             lines.append(stripped)
+            print(f"[Style Engine]    ✓ Included line: '{stripped}'")
+        elif stripped:
+            print(f"[Style Engine]    ✗ Skipped comment: '{stripped}'")
     
     # Join with spaces (cross-platform safe)
     prompt = ' '.join(lines)
+    print(f"[Style Engine] 📝 Final prompt after processing: '{prompt}'")
     return prompt
 
 
