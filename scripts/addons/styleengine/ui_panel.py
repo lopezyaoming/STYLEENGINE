@@ -1388,223 +1388,228 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
         layout = self.layout
         style_props = context.scene.style_engine_props
 
-        # --- Server Status Indicator (TOP) ---
-        status_box = layout.box()
-        row = status_box.row()
-        row.label(text="Server:", icon='WORLD')
+        # --- Output Path (VISIBLE) ---
+        output_box = layout.box()
+        output_box.label(text="Output Path:", icon='FILE_FOLDER')
+        output_box.prop(style_props, "output_path", text="")
+
+        # # --- Server Status Indicator (TOP) --- COMMENTED OUT
+        # status_box = layout.box()
+        # row = status_box.row()
+        # row.label(text="Server:", icon='WORLD')
+        # 
+        # # Get server status from poller
+        # try:
+        #     from . import runcomfy_polling
+        #     server_status = runcomfy_polling.RunComfyPoller.get_server_status()
+        #     
+        #     status_icons = {
+        #         'Idle': 'CHECKMARK',
+        #         'Queued': 'TIME',
+        #         'Active': 'CHECKMARK',
+        #         'Generating': 'RENDER_ANIMATION'
+        #     }
+        #     row.label(text=server_status, icon=status_icons.get(server_status, 'QUESTION'))
+        #     
+        #     # Show active requests details if any
+        #     if runcomfy_polling.RunComfyPoller.active_requests:
+        #         for request_id, state in runcomfy_polling.RunComfyPoller.active_requests.items():
+        #             row = status_box.row()
+        #             import time
+        #             elapsed = int(time.time() - state.start_time)
+        #             row.label(text=f"  {state.workflow_type}: {elapsed}s", icon='DOT')
+        #             
+        #             # Cancel button
+        #             cancel_op = row.operator("style_engine.cancel_generation", text="", icon='X')
+        #             cancel_op.request_id = request_id
+        # except Exception as e:
+        #     row.label(text="Error", icon='ERROR')
         
-        # Get server status from poller
-        try:
-            from . import runcomfy_polling
-            server_status = runcomfy_polling.RunComfyPoller.get_server_status()
-            
-            status_icons = {
-                'Idle': 'CHECKMARK',
-                'Queued': 'TIME',
-                'Active': 'CHECKMARK',
-                'Generating': 'RENDER_ANIMATION'
-            }
-            row.label(text=server_status, icon=status_icons.get(server_status, 'QUESTION'))
-            
-            # Show active requests details if any
-            if runcomfy_polling.RunComfyPoller.active_requests:
-                for request_id, state in runcomfy_polling.RunComfyPoller.active_requests.items():
-                    row = status_box.row()
-                    import time
-                    elapsed = int(time.time() - state.start_time)
-                    row.label(text=f"  {state.workflow_type}: {elapsed}s", icon='DOT')
-                    
-                    # Cancel button
-                    cancel_op = row.operator("style_engine.cancel_generation", text="", icon='X')
-                    cancel_op.request_id = request_id
-        except Exception as e:
-            row.label(text="Error", icon='ERROR')
+        # # --- Workspace Setup - COLLAPSIBLE --- COMMENTED OUT
+        # layout.separator()
+        # setup_box = layout.box()
+        # header_row = setup_box.row(align=True)
+        # icon = 'TRIA_DOWN' if style_props.show_workspace_setup else 'TRIA_RIGHT'
+        # header_row.prop(style_props, "show_workspace_setup", text="Workspace Setup", icon=icon, emboss=False, toggle=True)
+        # 
+        # if style_props.show_workspace_setup:
+        #     setup_box.operator("style_engine.setup_workspace", icon='WINDOW')
+        #     
+        #     # Show camera reposition button if AI camera exists
+        #     prefs = context.preferences.addons['styleengine'].preferences
+        #     camera_name = prefs.camera_name_override
+        #     if camera_name in bpy.data.objects:
+        #         setup_box.operator("style_engine.align_camera_to_view", 
+        #                            text="Reposition AI Camera", 
+        #                            icon='VIEW_CAMERA')
+        #     
+        #     # Resolution dropdown (moved up)
+        #     setup_box.separator()
+        #     setup_box.label(text="Set Resolution:")
+        #     setup_box.prop(style_props, "ai_resolution", text="")
+        #     
+        #     # Background opacity slider
+        #     setup_box.separator()
+        #     setup_box.label(text="Background Opacity:")
+        #     setup_box.prop(style_props, "background_opacity", slider=True, text="")
+        #     
+        #     # Background depth control buttons
+        #     prefs = context.preferences.addons['styleengine'].preferences
+        #     camera_name = prefs.camera_name_override
+        #     if camera_name in bpy.data.objects:
+        #         depth_row = setup_box.row(align=True)
+        #         depth_row.operator("style_engine.bring_background_forward", icon='TRIA_UP')
+        #         depth_row.operator("style_engine.send_background_back", icon='TRIA_DOWN')
+        #     
+        #     # Output path
+        #     setup_box.separator()
+        #     setup_box.label(text="Output Path:")
+        #     setup_box.prop(style_props, "output_path", text="")
+        #     
+        #     # Save Iterations checkbox (moved to bottom)
+        #     setup_box.separator()
+        #     setup_box.prop(style_props, "save_iterations", icon='FILE_TICK')
         
-        # --- Workspace Setup - COLLAPSIBLE ---
-        layout.separator()
-        setup_box = layout.box()
-        header_row = setup_box.row(align=True)
-        icon = 'TRIA_DOWN' if style_props.show_workspace_setup else 'TRIA_RIGHT'
-        header_row.prop(style_props, "show_workspace_setup", text="Workspace Setup", icon=icon, emboss=False, toggle=True)
-        
-        if style_props.show_workspace_setup:
-            setup_box.operator("style_engine.setup_workspace", icon='WINDOW')
-            
-            # Show camera reposition button if AI camera exists
-            prefs = context.preferences.addons['styleengine'].preferences
-            camera_name = prefs.camera_name_override
-            if camera_name in bpy.data.objects:
-                setup_box.operator("style_engine.align_camera_to_view", 
-                                   text="Reposition AI Camera", 
-                                   icon='VIEW_CAMERA')
-            
-            # Resolution dropdown (moved up)
-            setup_box.separator()
-            setup_box.label(text="Set Resolution:")
-            setup_box.prop(style_props, "ai_resolution", text="")
-            
-            # Background opacity slider
-            setup_box.separator()
-            setup_box.label(text="Background Opacity:")
-            setup_box.prop(style_props, "background_opacity", slider=True, text="")
-            
-            # Background depth control buttons
-            prefs = context.preferences.addons['styleengine'].preferences
-            camera_name = prefs.camera_name_override
-            if camera_name in bpy.data.objects:
-                depth_row = setup_box.row(align=True)
-                depth_row.operator("style_engine.bring_background_forward", icon='TRIA_UP')
-                depth_row.operator("style_engine.send_background_back", icon='TRIA_DOWN')
-            
-            # Output path
-            setup_box.separator()
-            setup_box.label(text="Output Path:")
-            setup_box.prop(style_props, "output_path", text="")
-            
-            # Save Iterations checkbox (moved to bottom)
-            setup_box.separator()
-            setup_box.prop(style_props, "save_iterations", icon='FILE_TICK')
-        
-        # --- Image Generation - COLLAPSIBLE ---
-        layout.separator()
-        gen_box = layout.box()
-        header_row = gen_box.row(align=True)
-        icon = 'TRIA_DOWN' if style_props.show_image_generation else 'TRIA_RIGHT'
-        header_row.prop(style_props, "show_image_generation", text="Image Generation", icon=icon, emboss=False, toggle=True)
-        
-        if style_props.show_image_generation:
-            # # Lookup - COMMENTED OUT
-            # gen_box.separator()
-            # col = gen_box.column(align=True)
-            # col.label(text="Lookup:")
-            # col.prop(style_props, "lookup", text="")
-            
-            # # Global Prompt - COMMENTED OUT (now using text editor)
-            # gen_box.separator()
-            # col = gen_box.column(align=True)
-            # 
-            # # Info: Text editor is in workspace layout (bottom-right)
-            # info_row = col.row(align=True)
-            # info_row.label(text="Prompt (auto-syncs from text editor below camera)", icon='INFO')
-            # 
-            # col.separator()
-            # 
-            # # Quick view/edit (read-only preview of what will be used)
-            # col.label(text="Current Prompt:", icon='TEXT')
-            # col.prop(style_props, "global_prompt", text="")
-            
-            # Steps
-            gen_box.separator()
-            col = gen_box.column(align=True)
-            col.label(text="Steps:")
-            col.prop(style_props, "steps", slider=True, text="")
-            
-            # Influence section
-            gen_box.separator()
-            influence_box = gen_box.box()
-            influence_box.label(text="Influence", icon='SHADERFX')
-            influence_box.prop(style_props, "depth_influence", slider=True)
-            influence_box.prop(style_props, "silhouette_influence", slider=True)
-            
-            # Image Reference section - COLLAPSIBLE
-            gen_box.separator()
-            ipadapter_box = gen_box.box()
-            header_row = ipadapter_box.row(align=True)
-            icon = 'TRIA_DOWN' if style_props.show_ipadapter else 'TRIA_RIGHT'
-            header_row.prop(style_props, "show_ipadapter", text="Image Reference", icon=icon, emboss=False, toggle=True)
-            
-            if style_props.show_ipadapter:
-                # Enable checkbox
-                ipadapter_box.prop(style_props, "use_ipadapter", icon='IMAGE_DATA')
-                
-                # Only show controls if enabled
-                if style_props.use_ipadapter:
-                    ipadapter_box.separator()
-                    
-                    # Reference image file picker
-                    col = ipadapter_box.column(align=True)
-                    col.label(text="Reference Image:")
-                    col.prop(style_props, "ipadapter_reference_image", text="")
-                    
-                    # Show filename if set
-                    if style_props.ipadapter_reference_image:
-                        import os
-                        filename = os.path.basename(style_props.ipadapter_reference_image)
-                        col.label(text=f"📷 {filename}", icon='NONE')
-                    
-                    ipadapter_box.separator()
-                    
-                    # Weight type dropdown
-                    ipadapter_box.label(text="Mode:")
-                    ipadapter_box.prop(style_props, "ipadapter_weight_type", text="")
-                    
-                    ipadapter_box.separator()
-                    
-                    # Strength slider
-                    ipadapter_box.label(text="Strength:")
-                    ipadapter_box.prop(style_props, "ipadapter_strength", slider=True, text="")
-                    col = ipadapter_box.column(align=True)
-                    col.scale_y = 0.7
-                    col.label(text="(0.0 = Off, 5.0 = Max)")
-            
-            # Project Texture button
-            gen_box.separator()
-            gen_box.operator("style_engine.project_texture", icon='UV')
-            
-            # Generate Image - ONE-SHOT BUTTON (large, on top)
-            gen_box.separator()
-            gen_box.separator()
-            gen_row = gen_box.row()
-            gen_row.scale_y = 2.5  # Make it BIG
-            gen_row.operator("style_engine.generate_ai_quick", text="Generate Image", icon='IMAGE_DATA')
-            
-            # Autogenerate - CONTINUOUS TOGGLE (smaller, below)
-            gen_box.separator()
-            gen_row = gen_box.row()
-            gen_row.scale_y = 1.5  # Smaller than main button
-            gen_row.prop(style_props, "auto_generate", text="Autogenerate", icon='FILE_REFRESH', toggle=True)
-            
-            # # Groups section - COMMENTED OUT FOR NOW
-            # gen_box.separator()
-            # groups_box = gen_box.box()
-            # row = groups_box.row(align=True)
-            #
-            # icon = 'TRIA_DOWN' if style_props.show_groups else 'TRIA_RIGHT'
-            # row.prop(style_props, "show_groups", text="Groups", icon=icon, emboss=False)
-            #
-            # if style_props.show_groups:
-            #     # Group controls
-            #     control_row = groups_box.row(align=True)
-            #     control_row.operator("style_engine.add_group", icon='ADD', text="Add")
-            #     control_row.operator("style_engine.assign_group", icon='LINK_BLEND', text="Assign")
-            #     control_row.operator("style_engine.rename_group", icon='GREASEPENCIL', text="Rename")
-            #     control_row.operator("style_engine.delete_group", icon='TRASH', text="Delete")
-            #     
-            #     groups_box.separator()
-            #     
-            #     # Show message if no groups
-            #     if len(style_props.object_groups) == 0:
-            #         groups_box.label(text="No groups. Click 'Add' to create one.", icon='INFO')
-            #     else:
-            #         # Dynamic groups display
-            #         header = groups_box.row()
-            #         header.label(text="")  # Selection column
-            #         header.label(text="Group Name")
-            #         header.label(text="Keywords")
-            #         
-            #         # Display all groups dynamically
-            #         for idx, group in enumerate(style_props.object_groups):
-            #             row = groups_box.row(align=True)
-            #             
-            #             # Selection radio button
-            #             selected = style_props.active_group_index == idx
-            #             row.operator("style_engine.select_group", text="", icon='RADIOBUT_ON' if selected else 'RADIOBUT_OFF', emboss=False).group_index = idx
-            #             
-            #             # Group name
-            #             row.label(text=group.name.upper())
-            #             
-            #             # Keywords input
-            #             row.prop(group, "keywords", text="")
+        # # --- Image Generation - COLLAPSIBLE --- COMMENTED OUT
+        # layout.separator()
+        # gen_box = layout.box()
+        # header_row = gen_box.row(align=True)
+        # icon = 'TRIA_DOWN' if style_props.show_image_generation else 'TRIA_RIGHT'
+        # header_row.prop(style_props, "show_image_generation", text="Image Generation", icon=icon, emboss=False, toggle=True)
+        # 
+        # if style_props.show_image_generation:
+        #     # # Lookup - COMMENTED OUT
+        #     # gen_box.separator()
+        #     # col = gen_box.column(align=True)
+        #     # col.label(text="Lookup:")
+        #     # col.prop(style_props, "lookup", text="")
+        #     
+        #     # # Global Prompt - COMMENTED OUT (now using text editor)
+        #     # gen_box.separator()
+        #     # col = gen_box.column(align=True)
+        #     # 
+        #     # # Info: Text editor is in workspace layout (bottom-right)
+        #     # info_row = col.row(align=True)
+        #     # info_row.label(text="Prompt (auto-syncs from text editor below camera)", icon='INFO')
+        #     # 
+        #     # col.separator()
+        #     # 
+        #     # # Quick view/edit (read-only preview of what will be used)
+        #     # col.label(text="Current Prompt:", icon='TEXT')
+        #     # col.prop(style_props, "global_prompt", text="")
+        #     
+        #     # Steps
+        #     gen_box.separator()
+        #     col = gen_box.column(align=True)
+        #     col.label(text="Steps:")
+        #     col.prop(style_props, "steps", slider=True, text="")
+        #     
+        #     # Influence section
+        #     gen_box.separator()
+        #     influence_box = gen_box.box()
+        #     influence_box.label(text="Influence", icon='SHADERFX')
+        #     influence_box.prop(style_props, "depth_influence", slider=True)
+        #     influence_box.prop(style_props, "silhouette_influence", slider=True)
+        #     
+        #     # Image Reference section - COLLAPSIBLE
+        #     gen_box.separator()
+        #     ipadapter_box = gen_box.box()
+        #     header_row = ipadapter_box.row(align=True)
+        #     icon = 'TRIA_DOWN' if style_props.show_ipadapter else 'TRIA_RIGHT'
+        #     header_row.prop(style_props, "show_ipadapter", text="Image Reference", icon=icon, emboss=False, toggle=True)
+        #     
+        #     if style_props.show_ipadapter:
+        #         # Enable checkbox
+        #         ipadapter_box.prop(style_props, "use_ipadapter", icon='IMAGE_DATA')
+        #         
+        #         # Only show controls if enabled
+        #         if style_props.use_ipadapter:
+        #             ipadapter_box.separator()
+        #             
+        #             # Reference image file picker
+        #             col = ipadapter_box.column(align=True)
+        #             col.label(text="Reference Image:")
+        #             col.prop(style_props, "ipadapter_reference_image", text="")
+        #             
+        #             # Show filename if set
+        #             if style_props.ipadapter_reference_image:
+        #                 import os
+        #                 filename = os.path.basename(style_props.ipadapter_reference_image)
+        #                 col.label(text=f"📷 {filename}", icon='NONE')
+        #             
+        #             ipadapter_box.separator()
+        #             
+        #             # Weight type dropdown
+        #             ipadapter_box.label(text="Mode:")
+        #             ipadapter_box.prop(style_props, "ipadapter_weight_type", text="")
+        #             
+        #             ipadapter_box.separator()
+        #             
+        #             # Strength slider
+        #             ipadapter_box.label(text="Strength:")
+        #             ipadapter_box.prop(style_props, "ipadapter_strength", slider=True, text="")
+        #             col = ipadapter_box.column(align=True)
+        #             col.scale_y = 0.7
+        #             col.label(text="(0.0 = Off, 5.0 = Max)")
+        #     
+        #     # Project Texture button
+        #     gen_box.separator()
+        #     gen_box.operator("style_engine.project_texture", icon='UV')
+        #     
+        #     # Generate Image - ONE-SHOT BUTTON (large, on top)
+        #     gen_box.separator()
+        #     gen_box.separator()
+        #     gen_row = gen_box.row()
+        #     gen_row.scale_y = 2.5  # Make it BIG
+        #     gen_row.operator("style_engine.generate_ai_quick", text="Generate Image", icon='IMAGE_DATA')
+        #     
+        #     # Autogenerate - CONTINUOUS TOGGLE (smaller, below)
+        #     gen_box.separator()
+        #     gen_row = gen_box.row()
+        #     gen_row.scale_y = 1.5  # Smaller than main button
+        #     gen_row.prop(style_props, "auto_generate", text="Autogenerate", icon='FILE_REFRESH', toggle=True)
+        #     
+        #     # # Groups section - COMMENTED OUT FOR NOW
+        #     # gen_box.separator()
+        #     # groups_box = gen_box.box()
+        #     # row = groups_box.row(align=True)
+        #     #
+        #     # icon = 'TRIA_DOWN' if style_props.show_groups else 'TRIA_RIGHT'
+        #     # row.prop(style_props, "show_groups", text="Groups", icon=icon, emboss=False)
+        #     #
+        #     # if style_props.show_groups:
+        #     #     # Group controls
+        #     #     control_row = groups_box.row(align=True)
+        #     #     control_row.operator("style_engine.add_group", icon='ADD', text="Add")
+        #     #     control_row.operator("style_engine.assign_group", icon='LINK_BLEND', text="Assign")
+        #     #     control_row.operator("style_engine.rename_group", icon='GREASEPENCIL', text="Rename")
+        #     #     control_row.operator("style_engine.delete_group", icon='TRASH', text="Delete")
+        #     #     
+        #     #     groups_box.separator()
+        #     #     
+        #     #     # Show message if no groups
+        #     #     if len(style_props.object_groups) == 0:
+        #     #         groups_box.label(text="No groups. Click 'Add' to create one.", icon='INFO')
+        #     #     else:
+        #     #         # Dynamic groups display
+        #     #         header = groups_box.row()
+        #     #         header.label(text="")  # Selection column
+        #     #         header.label(text="Group Name")
+        #     #         header.label(text="Keywords")
+        #     #         
+        #     #         # Display all groups dynamically
+        #     #         for idx, group in enumerate(style_props.object_groups):
+        #     #             row = groups_box.row(align=True)
+        #     #             
+        #     #             # Selection radio button
+        #     #             selected = style_props.active_group_index == idx
+        #     #             row.operator("style_engine.select_group", text="", icon='RADIOBUT_ON' if selected else 'RADIOBUT_OFF', emboss=False).group_index = idx
+        #     #             
+        #     #             # Group name
+        #     #             row.label(text=group.name.upper())
+        #     #             
+        #     #             # Keywords input
+        #     #             row.prop(group, "keywords", text="")
         
         # --- Reference Images - COLLAPSIBLE ---
         layout.separator()
@@ -1739,19 +1744,19 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
         draw_reference_section(ref_box, "Force Style Transfer", 'FORCE_FORCE', 
                              "show_force_transfer", sst_slots, "force_transfer_strength")
         
-        # --- Settings - COLLAPSIBLE ---
-        layout.separator()
-        settings_box = layout.box()
-        header_row = settings_box.row(align=True)
-        icon = 'TRIA_DOWN' if style_props.show_settings else 'TRIA_RIGHT'
-        header_row.prop(style_props, "show_settings", text="Settings", icon=icon, emboss=False, toggle=True)
-        
-        if style_props.show_settings:
-            # Test Workflow button (formerly Generate Cloud, moved from Image Generation)
-            settings_box.operator("style_engine.test_cloud_generation", text="Test Workflow", icon='EXPERIMENTAL')
-            
-            settings_box.separator()
-            settings_box.label(text="(Advanced settings in addon preferences)", icon='INFO')
+        # # --- Settings - COLLAPSIBLE --- COMMENTED OUT
+        # layout.separator()
+        # settings_box = layout.box()
+        # header_row = settings_box.row(align=True)
+        # icon = 'TRIA_DOWN' if style_props.show_settings else 'TRIA_RIGHT'
+        # header_row.prop(style_props, "show_settings", text="Settings", icon=icon, emboss=False, toggle=True)
+        # 
+        # if style_props.show_settings:
+        #     # Test Workflow button (formerly Generate Cloud, moved from Image Generation)
+        #     settings_box.operator("style_engine.test_cloud_generation", text="Test Workflow", icon='EXPERIMENTAL')
+        #     
+        #     settings_box.separator()
+        #     settings_box.label(text="(Advanced settings in addon preferences)", icon='INFO')
 
         # Legacy action buttons removed (Visualize, Create 3D, Render)
 
