@@ -351,7 +351,7 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
     composition_strength: bpy.props.FloatProperty(
         name="Composition Strength",
         description="Global strength for all Composition images (0.0 to 5.0)",
-        default=1.0,
+        default=0.0,
         min=0.0,
         max=5.0,
         update=update_session_json
@@ -1225,23 +1225,78 @@ class WM_OT_LoadReferenceImage(bpy.types.Operator):
             return {'CANCELLED'}
         
         try:
+            print(f"\n{'='*60}")
+            print(f"[Reference Image Load] Starting load for slot: {self.slot}")
+            print(f"[Reference Image Load] File path: {self.filepath}")
+            
             # Load image into Blender's image library
             img = bpy.data.images.load(self.filepath, check_existing=True)
+            print(f"[Reference Image Load] Image loaded: {img.name}")
+            print(f"[Reference Image Load]   Size: {img.size[0]}x{img.size[1]}")
+            print(f"[Reference Image Load]   Type: {img.type}")
+            print(f"[Reference Image Load]   Source: {img.source}")
+            print(f"[Reference Image Load]   Has data: {img.has_data}")
+            print(f"[Reference Image Load]   Is dirty: {img.is_dirty}")
+            
+            # Pack the image to force Blender to load it and generate preview
+            # This is needed for template_ID_preview() to show thumbnails
+            if not img.packed_file:
+                print(f"[Reference Image Load] Packing image...")
+                img.pack()
+                print(f"[Reference Image Load]   Packed file size: {img.packed_file.size if img.packed_file else 'None'}")
+            else:
+                print(f"[Reference Image Load] Image already packed")
+            
+            # Force pixels to load FIRST (needed before GL load)
+            print(f"[Reference Image Load] Loading pixel data...")
+            img.reload()
+            pixels_len = len(img.pixels)
+            print(f"[Reference Image Load]   Pixels loaded: {pixels_len} values")
+            
+            # Force GL texture load (requires pixels to be loaded)
+            print(f"[Reference Image Load] Forcing GL texture load...")
+            img.gl_load()
+            print(f"[Reference Image Load]   GL loaded: {img.bindcode}")
+            
+            # CRITICAL: Generate preview icon for UI display
+            print(f"[Reference Image Load] Generating preview icon...")
+            img.preview_ensure()
+            if img.preview:
+                print(f"[Reference Image Load]   Preview icon ID: {img.preview.icon_id}")
+                print(f"[Reference Image Load]   Preview size: {img.preview.image_size}")
+            else:
+                print(f"[Reference Image Load]   ⚠️ Preview is None!")
+            
+            # Force update
+            img.update()
+            print(f"[Reference Image Load] Image updated")
             
             # Assign to the specified slot
             props = context.scene.style_engine_props
             img_prop = f"{self.slot}_image"
             weight_prop = f"{self.slot}_weight"
             
+            print(f"[Reference Image Load] Assigning to property: {img_prop}")
             setattr(props, img_prop, img)
             
             # Auto-enable by setting weight to 1.0 (user can adjust)
             current_weight = getattr(props, weight_prop)
             if current_weight == 0.0:
                 setattr(props, weight_prop, 1.0)
+                print(f"[Reference Image Load] Weight set to 1.0")
+            else:
+                print(f"[Reference Image Load] Weight already at {current_weight}")
+            
+            # Force UI redraw for thumbnail to appear
+            print(f"[Reference Image Load] Forcing UI redraw...")
+            for area in context.screen.areas:
+                area.tag_redraw()
+            
+            print(f"[Reference Image Load] ✅ Complete!")
+            print(f"{'='*60}\n")
             
             self.report({'INFO'}, f"Loaded {img.name} into {self.slot.upper()}")
-            print(f"[Style Engine] ✓ Loaded reference image: {img.name} → {self.slot.upper()}")
+            print(f"[Style Engine] ✓ Loaded reference image: {img.name} → {self.slot.upper()} (packed)")
             
             return {'FINISHED'}
             
@@ -1322,6 +1377,23 @@ class WM_OT_ReloadReferenceImage(bpy.types.Operator):
             
             # Reload the image from disk
             img.reload()
+            
+            # Pack if not already packed (for preview generation)
+            if not img.packed_file:
+                img.pack()
+            
+            # Force GL load
+            img.gl_load()
+            
+            # CRITICAL: Regenerate preview icon
+            img.preview_ensure()
+            
+            # Force update
+            img.update()
+            
+            # Force UI redraw for thumbnail to update
+            for area in context.screen.areas:
+                area.tag_redraw()
             
             self.report({'INFO'}, f"Reloaded {img.name}")
             print(f"[Style Engine] ✓ Reloaded reference image: {img.name}")
@@ -1655,20 +1727,32 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                         # Image exists - show preview and controls
                         col = card.column(align=True)
             
-                        # Image thumbnail using template_ID_preview (shows datablock with preview)
+                        # Image thumbnail using template_icon
+                        # This displays the actual image content as an icon
                         preview_box = col.box()
                         preview_col = preview_box.column(align=True)
+                        preview_col.scale_y = 3.0  # Make thumbnail taller
                         
-                        # Use template_ID_preview to display the image with a large thumbnail
-                        # This shows a preview of the Image datablock
-                        preview_col.template_ID_preview(
-                            style_props, img_prop, 
-                            new="image.new", 
-                            open="image.open",
-                            rows=3, 
-                            cols=3,
-                            hide_buttons=True
-                        )
+                        # Ensure preview exists (generate if needed)
+                        try:
+                            if not img.preview:
+                                img.preview_ensure()
+                            
+                            # Force GL load if needed
+                            if img.bindcode == 0:
+                                img.gl_load()
+                            
+                            # Use the image's preview icon directly
+                            if img.preview and img.preview.icon_id > 0:
+                                preview_col.template_icon(icon_value=img.preview.icon_id, scale=8.0)
+                            else:
+                                # Fallback to generic image icon if no preview
+                                preview_col.label(text="[No Preview]", icon='IMAGE_DATA')
+                                print(f"[UI] Warning: No preview for {img.name}, icon_id={img.preview.icon_id if img.preview else 'None'}")
+                        except Exception as e:
+                            # Error generating preview
+                            preview_col.label(text="[Preview Error]", icon='ERROR')
+                            print(f"[UI] Error generating preview for {img.name}: {e}")
                         
                         col.separator(factor=0.3)
                     
