@@ -315,6 +315,255 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         default=True
     )
     
+    # ================================================================
+    # REFERENCE IMAGE SYSTEM (15 slots: 5 per mode)
+    # ================================================================
+    
+    # Collapsible sections for reference modes
+    show_style_transfer: bpy.props.BoolProperty(
+        name="Show Style Transfer",
+        description="Expand or collapse the Style Transfer section",
+        default=False
+    )
+    
+    show_composition: bpy.props.BoolProperty(
+        name="Show Composition",
+        description="Expand or collapse the Composition section",
+        default=False
+    )
+    
+    show_force_transfer: bpy.props.BoolProperty(
+        name="Show Force Style Transfer",
+        description="Expand or collapse the Force Style Transfer section",
+        default=False
+    )
+    
+    # Global strength sliders
+    style_transfer_strength: bpy.props.FloatProperty(
+        name="Style Transfer Strength",
+        description="Global strength for all Style Transfer images (0.0 to 5.0)",
+        default=0.0,
+        min=0.0,
+        max=5.0,
+        update=update_session_json
+    )
+    
+    composition_strength: bpy.props.FloatProperty(
+        name="Composition Strength",
+        description="Global strength for all Composition images (0.0 to 5.0)",
+        default=1.0,
+        min=0.0,
+        max=5.0,
+        update=update_session_json
+    )
+    
+    force_transfer_strength: bpy.props.FloatProperty(
+        name="Force Style Transfer Strength",
+        description="Global strength for all Force Style Transfer images (0.0 to 5.0)",
+        default=0.0,
+        min=0.0,
+        max=5.0,
+        update=update_session_json
+    )
+    
+    # Style Transfer images (ST1-ST5)
+    st1_image: bpy.props.PointerProperty(
+        type=bpy.types.Image,
+        name="Style Transfer 1"
+    )
+    st1_weight: bpy.props.FloatProperty(
+        name="ST1 Weight",
+        description="Individual weight for Style Transfer image 1 (0.0 to 1.0)",
+        default=0.0,
+        min=0.0,
+        max=1.0,
+        update=update_session_json
+    )
+    
+    st2_image: bpy.props.PointerProperty(
+        type=bpy.types.Image,
+        name="Style Transfer 2"
+    )
+    st2_weight: bpy.props.FloatProperty(
+        name="ST2 Weight",
+        description="Individual weight for Style Transfer image 2 (0.0 to 1.0)",
+        default=0.0,
+        min=0.0,
+        max=1.0,
+        update=update_session_json
+    )
+    
+    st3_image: bpy.props.PointerProperty(
+        type=bpy.types.Image,
+        name="Style Transfer 3"
+    )
+    st3_weight: bpy.props.FloatProperty(
+        name="ST3 Weight",
+        description="Individual weight for Style Transfer image 3 (0.0 to 1.0)",
+        default=0.0,
+        min=0.0,
+        max=1.0,
+        update=update_session_json
+    )
+    
+    st4_image: bpy.props.PointerProperty(
+        type=bpy.types.Image,
+        name="Style Transfer 4"
+    )
+    st4_weight: bpy.props.FloatProperty(
+        name="ST4 Weight",
+        description="Individual weight for Style Transfer image 4 (0.0 to 1.0)",
+        default=0.0,
+        min=0.0,
+        max=1.0,
+        update=update_session_json
+    )
+    
+    st5_image: bpy.props.PointerProperty(
+        type=bpy.types.Image,
+        name="Style Transfer 5"
+    )
+    st5_weight: bpy.props.FloatProperty(
+        name="ST5 Weight",
+        description="Individual weight for Style Transfer image 5 (0.0 to 1.0)",
+        default=0.0,
+        min=0.0,
+        max=1.0,
+        update=update_session_json
+    )
+    
+    # Composition images (COMP1-COMP5)
+    comp1_image: bpy.props.PointerProperty(
+        type=bpy.types.Image,
+        name="Composition 1"
+    )
+    comp1_weight: bpy.props.FloatProperty(
+        name="COMP1 Weight",
+        description="Individual weight for Composition image 1 (0.0 to 1.0)",
+        default=0.0,
+        min=0.0,
+        max=1.0,
+        update=update_session_json
+    )
+    
+    comp2_image: bpy.props.PointerProperty(
+        type=bpy.types.Image,
+        name="Composition 2"
+    )
+    comp2_weight: bpy.props.FloatProperty(
+        name="COMP2 Weight",
+        description="Individual weight for Composition image 2 (0.0 to 1.0)",
+        default=0.0,
+        min=0.0,
+        max=1.0,
+        update=update_session_json
+    )
+    
+    comp3_image: bpy.props.PointerProperty(
+        type=bpy.types.Image,
+        name="Composition 3"
+    )
+    comp3_weight: bpy.props.FloatProperty(
+        name="COMP3 Weight",
+        description="Individual weight for Composition image 3 (0.0 to 1.0)",
+        default=0.0,
+        min=0.0,
+        max=1.0,
+        update=update_session_json
+    )
+    
+    comp4_image: bpy.props.PointerProperty(
+        type=bpy.types.Image,
+        name="Composition 4"
+    )
+    comp4_weight: bpy.props.FloatProperty(
+        name="COMP4 Weight",
+        description="Individual weight for Composition image 4 (0.0 to 1.0)",
+        default=0.0,
+        min=0.0,
+        max=1.0,
+        update=update_session_json
+    )
+    
+    comp5_image: bpy.props.PointerProperty(
+        type=bpy.types.Image,
+        name="Composition 5"
+    )
+    comp5_weight: bpy.props.FloatProperty(
+        name="COMP5 Weight",
+        description="Individual weight for Composition image 5 (0.0 to 1.0)",
+        default=0.0,
+        min=0.0,
+        max=1.0,
+        update=update_session_json
+    )
+    
+    # Force Style Transfer images (SST1-SST5)
+    sst1_image: bpy.props.PointerProperty(
+        type=bpy.types.Image,
+        name="Force Style Transfer 1"
+    )
+    sst1_weight: bpy.props.FloatProperty(
+        name="SST1 Weight",
+        description="Individual weight for Force Style Transfer image 1 (0.0 to 1.0)",
+        default=0.0,
+        min=0.0,
+        max=1.0,
+        update=update_session_json
+    )
+    
+    sst2_image: bpy.props.PointerProperty(
+        type=bpy.types.Image,
+        name="Force Style Transfer 2"
+    )
+    sst2_weight: bpy.props.FloatProperty(
+        name="SST2 Weight",
+        description="Individual weight for Force Style Transfer image 2 (0.0 to 1.0)",
+        default=0.0,
+        min=0.0,
+        max=1.0,
+        update=update_session_json
+    )
+    
+    sst3_image: bpy.props.PointerProperty(
+        type=bpy.types.Image,
+        name="Force Style Transfer 3"
+    )
+    sst3_weight: bpy.props.FloatProperty(
+        name="SST3 Weight",
+        description="Individual weight for Force Style Transfer image 3 (0.0 to 1.0)",
+        default=0.0,
+        min=0.0,
+        max=1.0,
+        update=update_session_json
+    )
+    
+    sst4_image: bpy.props.PointerProperty(
+        type=bpy.types.Image,
+        name="Force Style Transfer 4"
+    )
+    sst4_weight: bpy.props.FloatProperty(
+        name="SST4 Weight",
+        description="Individual weight for Force Style Transfer image 4 (0.0 to 1.0)",
+        default=0.0,
+        min=0.0,
+        max=1.0,
+        update=update_session_json
+    )
+    
+    sst5_image: bpy.props.PointerProperty(
+        type=bpy.types.Image,
+        name="Force Style Transfer 5"
+    )
+    sst5_weight: bpy.props.FloatProperty(
+        name="SST5 Weight",
+        description="Individual weight for Force Style Transfer image 5 (0.0 to 1.0)",
+        default=0.0,
+        min=0.0,
+        max=1.0,
+        update=update_session_json
+    )
+    
     # IPAdapter properties
     show_ipadapter: bpy.props.BoolProperty(
         name="Show IPAdapter",
@@ -940,6 +1189,151 @@ class WM_OT_ProjectTexture(bpy.types.Operator):
             print(f"[Style Engine] ❌ Error saving iteration image/material: {e}")
 
 
+# ================================================================
+# REFERENCE IMAGE OPERATORS
+# ================================================================
+
+class WM_OT_LoadReferenceImage(bpy.types.Operator):
+    """Load a reference image into a slot"""
+    bl_idname = "style_engine.load_reference"
+    bl_label = "Load Reference Image"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    filepath: bpy.props.StringProperty(
+        subtype='FILE_PATH',
+        options={'HIDDEN', 'SKIP_SAVE'}
+    )
+    
+    filter_image: bpy.props.BoolProperty(
+        default=True,
+        options={'HIDDEN', 'SKIP_SAVE'}
+    )
+    
+    slot: bpy.props.StringProperty(
+        name="Slot",
+        description="Which slot to load the image into (st1, comp2, sst3, etc.)",
+        default=""
+    )
+    
+    def execute(self, context):
+        if not self.filepath:
+            self.report({'ERROR'}, "No file selected")
+            return {'CANCELLED'}
+        
+        if not self.slot:
+            self.report({'ERROR'}, "No slot specified")
+            return {'CANCELLED'}
+        
+        try:
+            # Load image into Blender's image library
+            img = bpy.data.images.load(self.filepath, check_existing=True)
+            
+            # Assign to the specified slot
+            props = context.scene.style_engine_props
+            img_prop = f"{self.slot}_image"
+            weight_prop = f"{self.slot}_weight"
+            
+            setattr(props, img_prop, img)
+            
+            # Auto-enable by setting weight to 1.0 (user can adjust)
+            current_weight = getattr(props, weight_prop)
+            if current_weight == 0.0:
+                setattr(props, weight_prop, 1.0)
+            
+            self.report({'INFO'}, f"Loaded {img.name} into {self.slot.upper()}")
+            print(f"[Style Engine] ✓ Loaded reference image: {img.name} → {self.slot.upper()}")
+            
+            return {'FINISHED'}
+            
+        except Exception as e:
+            self.report({'ERROR'}, f"Failed to load image: {e}")
+            print(f"[Style Engine] ❌ Error loading reference image: {e}")
+            return {'CANCELLED'}
+    
+    def invoke(self, context, event):
+        context.window_manager.fileselect_add(self)
+        return {'RUNNING_MODAL'}
+
+
+class WM_OT_ClearReferenceImage(bpy.types.Operator):
+    """Clear a reference image slot"""
+    bl_idname = "style_engine.clear_reference"
+    bl_label = "Clear Reference Image"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    slot: bpy.props.StringProperty(
+        name="Slot",
+        description="Which slot to clear (st1, comp2, sst3, etc.)",
+        default=""
+    )
+    
+    def execute(self, context):
+        if not self.slot:
+            self.report({'ERROR'}, "No slot specified")
+            return {'CANCELLED'}
+        
+        try:
+            props = context.scene.style_engine_props
+            img_prop = f"{self.slot}_image"
+            weight_prop = f"{self.slot}_weight"
+            
+            # Clear the image
+            setattr(props, img_prop, None)
+            
+            # Reset weight to 0
+            setattr(props, weight_prop, 0.0)
+            
+            self.report({'INFO'}, f"Cleared {self.slot.upper()}")
+            print(f"[Style Engine] ✓ Cleared reference image: {self.slot.upper()}")
+            
+            return {'FINISHED'}
+            
+        except Exception as e:
+            self.report({'ERROR'}, f"Failed to clear slot: {e}")
+            print(f"[Style Engine] ❌ Error clearing reference slot: {e}")
+            return {'CANCELLED'}
+
+
+class WM_OT_ReloadReferenceImage(bpy.types.Operator):
+    """Reload a reference image from disk"""
+    bl_idname = "style_engine.reload_reference"
+    bl_label = "Reload Reference Image"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    slot: bpy.props.StringProperty(
+        name="Slot",
+        description="Which slot to reload (st1, comp2, sst3, etc.)",
+        default=""
+    )
+    
+    def execute(self, context):
+        if not self.slot:
+            self.report({'ERROR'}, "No slot specified")
+            return {'CANCELLED'}
+        
+        try:
+            props = context.scene.style_engine_props
+            img_prop = f"{self.slot}_image"
+            img = getattr(props, img_prop)
+            
+            if not img:
+                self.report({'WARNING'}, f"No image in {self.slot.upper()}")
+                return {'CANCELLED'}
+            
+            # Reload the image from disk
+            img.reload()
+            
+            self.report({'INFO'}, f"Reloaded {img.name}")
+            print(f"[Style Engine] ✓ Reloaded reference image: {img.name}")
+            
+            return {'FINISHED'}
+            
+        except Exception as e:
+            self.report({'ERROR'}, f"Failed to reload image: {e}")
+            print(f"[Style Engine] ❌ Error reloading reference image: {e}")
+            return {'CANCELLED'}
+
+
 class WM_OT_CancelGeneration(bpy.types.Operator):
     """Cancel active RunComfy generation"""
     bl_idname = "style_engine.cancel_generation"
@@ -1212,6 +1606,139 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
             #             # Keywords input
             #             row.prop(group, "keywords", text="")
         
+        # --- Reference Images - COLLAPSIBLE ---
+        layout.separator()
+        ref_box = layout.box()
+        header_row = ref_box.row(align=True)
+        header_row.label(text="Reference Images", icon='IMAGE_DATA')
+        
+        # Helper function to draw a reference image section
+        def draw_reference_section(box, title, icon, show_prop, slots, strength_prop):
+            """Draw a collapsible reference image section with grid layout"""
+            section_box = box.box()
+            header = section_box.row(align=True)
+            icon_tri = 'TRIA_DOWN' if getattr(style_props, show_prop) else 'TRIA_RIGHT'
+            header.prop(style_props, show_prop, text=title, icon=icon_tri, emboss=False, toggle=True)
+            
+            if getattr(style_props, show_prop):
+                # Global strength slider
+                section_box.separator()
+                strength_row = section_box.row()
+                strength_row.scale_y = 1.5
+                strength_row.prop(style_props, strength_prop, text="Global Strength", slider=True)
+                
+                section_box.separator()
+                
+                # Grid layout for images (3 columns)
+                grid = section_box.grid_flow(
+                    row_major=True,
+                    columns=3,
+                    even_columns=True,
+                    even_rows=True,
+                    align=True
+                )
+                
+                # Draw each slot
+                for slot_id, img_prop, weight_prop, label in slots:
+                    img = getattr(style_props, img_prop)
+                    
+                    # Card for each slot
+                    card = grid.box()
+                    card.scale_y = 1.0
+                    
+                    if img:
+                        # Image exists - show preview and controls
+                        col = card.column(align=True)
+                        
+                        # Image thumbnail using template_ID_preview (shows datablock with preview)
+                        preview_box = col.box()
+                        preview_col = preview_box.column(align=True)
+                        
+                        # Use template_ID_preview to display the image with a large thumbnail
+                        # This shows a preview of the Image datablock
+                        preview_col.template_ID_preview(
+                            style_props, img_prop, 
+                            new="image.new", 
+                            open="image.open",
+                            rows=3, 
+                            cols=3,
+                            hide_buttons=True
+                        )
+                        
+                        col.separator(factor=0.3)
+                        
+                        # Slot label and image name
+                        info_col = col.column(align=True)
+                        info_col.scale_y = 0.7
+                        
+                        label_row = info_col.row()
+                        label_row.alignment = 'CENTER'
+                        label_row.label(text=label, icon='IMAGE_DATA')
+                        
+                        name_row = info_col.row()
+                        name_row.alignment = 'CENTER'
+                        display_name = img.name[:10] + "..." if len(img.name) > 13 else img.name
+                        name_row.label(text=display_name)
+                        
+                        col.separator(factor=0.3)
+                        
+                        # Weight slider
+                        col.prop(style_props, weight_prop, text="", slider=True)
+                        
+                        col.separator(factor=0.2)
+                        
+                        # Action buttons (reload and clear)
+                        btn_row = col.row(align=True)
+                        btn_row.scale_y = 0.7
+                        reload_op = btn_row.operator("style_engine.reload_reference", text="", icon='FILE_REFRESH')
+                        reload_op.slot = slot_id
+                        clear_op = btn_row.operator("style_engine.clear_reference", text="", icon='X')
+                        clear_op.slot = slot_id
+                    else:
+                        # Empty slot - show add button
+                        col = card.column(align=True)
+                        col.scale_y = 2.5
+                        col.separator()
+                        load_op = col.operator("style_engine.load_reference", 
+                                             text=f"{label}\n+", 
+                                             icon='ADD',
+                                             emboss=True)
+                        load_op.slot = slot_id
+                        col.separator()
+        
+        # Style Transfer section
+        st_slots = [
+            ("st1", "st1_image", "st1_weight", "ST1"),
+            ("st2", "st2_image", "st2_weight", "ST2"),
+            ("st3", "st3_image", "st3_weight", "ST3"),
+            ("st4", "st4_image", "st4_weight", "ST4"),
+            ("st5", "st5_image", "st5_weight", "ST5"),
+        ]
+        draw_reference_section(ref_box, "Style Transfer", 'BRUSH_DATA', 
+                             "show_style_transfer", st_slots, "style_transfer_strength")
+        
+        # Composition section
+        comp_slots = [
+            ("comp1", "comp1_image", "comp1_weight", "COMP1"),
+            ("comp2", "comp2_image", "comp2_weight", "COMP2"),
+            ("comp3", "comp3_image", "comp3_weight", "COMP3"),
+            ("comp4", "comp4_image", "comp4_weight", "COMP4"),
+            ("comp5", "comp5_image", "comp5_weight", "COMP5"),
+        ]
+        draw_reference_section(ref_box, "Composition", 'MESH_GRID', 
+                             "show_composition", comp_slots, "composition_strength")
+        
+        # Force Style Transfer section
+        sst_slots = [
+            ("sst1", "sst1_image", "sst1_weight", "SST1"),
+            ("sst2", "sst2_image", "sst2_weight", "SST2"),
+            ("sst3", "sst3_image", "sst3_weight", "SST3"),
+            ("sst4", "sst4_image", "sst4_weight", "SST4"),
+            ("sst5", "sst5_image", "sst5_weight", "SST5"),
+        ]
+        draw_reference_section(ref_box, "Force Style Transfer", 'FORCE_FORCE', 
+                             "show_force_transfer", sst_slots, "force_transfer_strength")
+        
         # --- Settings - COLLAPSIBLE ---
         layout.separator()
         settings_box = layout.box()
@@ -1245,6 +1772,9 @@ classes = (
     WM_OT_SelectGroup,
     WM_OT_DeleteGroup,
     WM_OT_ProjectTexture,
+    WM_OT_LoadReferenceImage,
+    WM_OT_ClearReferenceImage,
+    WM_OT_ReloadReferenceImage,
     WM_OT_CancelGeneration,
     WM_OT_TestCloudGeneration,
     VIEW3D_PT_StyleEngine,

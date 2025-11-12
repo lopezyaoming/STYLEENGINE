@@ -128,6 +128,28 @@ def write_session_json(context):
                 "weight_type": props.ipadapter_weight_type if hasattr(props, 'ipadapter_weight_type') else "style transfer",
                 "strength": round(props.ipadapter_strength, 2) if hasattr(props, 'ipadapter_strength') else 0.75
             },
+            "reference_images": {
+                # Global strengths
+                "style_transfer_strength": round(props.style_transfer_strength, 3),
+                "composition_strength": round(props.composition_strength, 3),
+                "force_transfer_strength": round(props.force_transfer_strength, 3),
+                # Individual weights
+                "st1_weight": round(props.st1_weight, 3),
+                "st2_weight": round(props.st2_weight, 3),
+                "st3_weight": round(props.st3_weight, 3),
+                "st4_weight": round(props.st4_weight, 3),
+                "st5_weight": round(props.st5_weight, 3),
+                "comp1_weight": round(props.comp1_weight, 3),
+                "comp2_weight": round(props.comp2_weight, 3),
+                "comp3_weight": round(props.comp3_weight, 3),
+                "comp4_weight": round(props.comp4_weight, 3),
+                "comp5_weight": round(props.comp5_weight, 3),
+                "sst1_weight": round(props.sst1_weight, 3),
+                "sst2_weight": round(props.sst2_weight, 3),
+                "sst3_weight": round(props.sst3_weight, 3),
+                "sst4_weight": round(props.sst4_weight, 3),
+                "sst5_weight": round(props.sst5_weight, 3),
+            },
             "objects": [
                 {
                     "group_id": f"grp-{group.name.lower().replace(' ', '-')}-{str(idx+1).zfill(3)}",
@@ -1499,11 +1521,22 @@ def generate_ai_image_cloud(context):
         return
     
     # 5. Determine workflow type
-    use_ipadapter = session_data.get('ipadapter', {}).get('enabled', False)
-    has_reference = session_data.get('ipadapter', {}).get('reference_image', '')
-    workflow_type = 'ipadapter' if (use_ipadapter and has_reference) else 'sdxl'
+    # Check if reference images are active
+    props = context.scene.style_engine_props
+    has_reference_images = any([
+        props.st1_image, props.st2_image, props.st3_image, props.st4_image, props.st5_image,
+        props.comp1_image, props.comp2_image, props.comp3_image, props.comp4_image, props.comp5_image,
+        props.sst1_image, props.sst2_image, props.sst3_image, props.sst4_image, props.sst5_image
+    ])
     
-    print(f"[Style Engine] Using workflow: {workflow_type}")
+    if has_reference_images:
+        workflow_type = 'sdxlref'
+        print(f"[Style Engine] Using SDXLREF workflow (reference images active)")
+    else:
+        use_ipadapter = session_data.get('ipadapter', {}).get('enabled', False)
+        has_reference = session_data.get('ipadapter', {}).get('reference_image', '')
+        workflow_type = 'ipadapter' if (use_ipadapter and has_reference) else 'sdxl'
+        print(f"[Style Engine] Using workflow: {workflow_type}")
     
     # 6. Ensure deployment exists
     try:
@@ -1645,6 +1678,48 @@ def build_runcomfy_overrides(session_data, combined_b64, workflow_type):
             "41": {"inputs": {"value": session_data.get('depth_influence', 0.5)}},  # Depth
             "42": {"inputs": {"value": session_data.get('steps', 15)}},  # Steps
         }
+    elif workflow_type == 'sdxlref':
+        # Map to SDXLREF.json nodes (with reference images)
+        ref_data = session_data.get('reference_images', {})
+        
+        overrides = {
+            "5": {"inputs": {"width": width, "height": height}},  # EmptyLatentImage
+            "25": {"inputs": {"value": session_data.get('global_prompt', '')}},  # Prompt
+            "15": {"inputs": {"image": combined_b64}},  # Base image (AO)
+            "40": {"inputs": {"value": session_data.get('silhouette_influence', 0.75)}},  # Canny
+            "41": {"inputs": {"value": session_data.get('depth_influence', 0.5)}},  # Depth
+            "42": {"inputs": {"value": session_data.get('steps', 15)}},  # Steps
+            # Global strengths
+            "52": {"inputs": {"value": ref_data.get('style_transfer_strength', 0.0)}},
+            "90": {"inputs": {"value": ref_data.get('composition_strength', 1.0)}},
+            "91": {"inputs": {"value": ref_data.get('force_transfer_strength', 0.0)}},
+        }
+        
+        # Add reference image overrides (weights)
+        # Style Transfer weights (ST1-ST5)
+        st_weight_nodes = ["129", "126", "125", "124", "123"]
+        st_keys = ['st1_weight', 'st2_weight', 'st3_weight', 'st4_weight', 'st5_weight']
+        for node, key in zip(st_weight_nodes, st_keys):
+            overrides[node] = {"inputs": {"value": ref_data.get(key, 0.0)}}
+        
+        # Composition weights (COMP1-COMP5)
+        comp_weight_nodes = ["122", "121", "120", "119", "118"]
+        comp_keys = ['comp1_weight', 'comp2_weight', 'comp3_weight', 'comp4_weight', 'comp5_weight']
+        for node, key in zip(comp_weight_nodes, comp_keys):
+            overrides[node] = {"inputs": {"value": ref_data.get(key, 0.0)}}
+        
+        # Force Style Transfer weights (SST1-SST5)
+        sst_weight_nodes = ["117", "116", "115", "114", "113"]
+        sst_keys = ['sst1_weight', 'sst2_weight', 'sst3_weight', 'sst4_weight', 'sst5_weight']
+        for node, key in zip(sst_weight_nodes, sst_keys):
+            overrides[node] = {"inputs": {"value": ref_data.get(key, 0.0)}}
+        
+        # NOTE: Reference image paths are NOT overridden here
+        # They should be pre-uploaded to the ComfyUI server's input directory
+        # or handled by the workflow deployment
+        
+        print(f"[Style Engine] SDXLREF overrides built with {len(overrides)} nodes")
+        return overrides
     else:  # ipadapter
         # Encode reference image
         ref_image_path = session_data['ipadapter']['reference_image']
@@ -1694,6 +1769,8 @@ def load_workflow_json_for_server(workflow_type):
     
     if workflow_type == 'sdxl':
         workflow_file = workflows_dir / "SESDXL.json"
+    elif workflow_type == 'sdxlref':
+        workflow_file = workflows_dir / "SDXLREF.json"
     else:  # ipadapter
         workflow_file = workflows_dir / "SEIP.json"
     
