@@ -1220,12 +1220,48 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
         """
         Configure scene render engine to Workbench for fast, optimized rendering.
         Sets this as the SCENE DEFAULT so all renders use these settings.
+        Enhanced with cavity, specular, and form-describing capabilities.
         """
         scene = context.scene
         prefs = context.preferences.addons['styleengine'].preferences
         
         # Set Workbench as default render engine
         scene.render.engine = 'BLENDER_WORKBENCH'
+        
+        # === WORKBENCH SHADING SETTINGS FOR FORM DESCRIPTION ===
+        shading = scene.display.shading
+        
+        # Lighting: Studio lighting for consistent form description
+        shading.light = 'STUDIO'  # Options: 'STUDIO', 'MATCAP', 'FLAT'
+        
+        # Color: Material colors for realistic appearance
+        shading.color_type = 'MATERIAL'  # Options: 'MATERIAL', 'OBJECT', 'VERTEX', 'TEXTURE', 'RANDOM'
+        
+        # Enable Specular Lighting for better form description
+        shading.show_specular_highlight = True
+        
+        # Enable Cavity for enhanced depth perception (ridge + valley)
+        shading.show_cavity = True
+        if hasattr(shading, 'cavity_type'):
+            shading.cavity_type = 'BOTH'  # Options: 'WORLD', 'SCREEN', 'BOTH'
+        
+        # Cavity strength settings
+        if hasattr(shading, 'cavity_ridge_factor'):
+            shading.cavity_ridge_factor = 1.0  # Ridge detection (raised edges)
+        if hasattr(shading, 'cavity_valley_factor'):
+            shading.cavity_valley_factor = 1.0  # Valley detection (recessed areas)
+        
+        # Shadow for better depth
+        shading.show_shadows = True
+        if hasattr(shading, 'shadow_intensity'):
+            shading.shadow_intensity = 0.5  # Moderate shadows
+        
+        print(f"[Style Engine] 🎨 Workbench shading configured:")
+        print(f"  - Lighting: {shading.light}")
+        print(f"  - Color: {shading.color_type}")
+        print(f"  - Specular: {shading.show_specular_highlight}")
+        print(f"  - Cavity: {shading.show_cavity} (ridge={shading.cavity_ridge_factor if hasattr(shading, 'cavity_ridge_factor') else 'N/A'}, valley={shading.cavity_valley_factor if hasattr(shading, 'cavity_valley_factor') else 'N/A'})")
+        print(f"  - Shadows: {shading.show_shadows}")
         
         # Disable anti-aliasing for Workbench (faster rendering)
         # In Blender 4.x, Workbench AA is controlled via display settings
@@ -1455,6 +1491,22 @@ def render_passes(context):
         scene.render.image_settings.quality = 85  # High quality, good compression
         scene.render.use_compositing = False  # Disable compositor for speed!
         # Resolution percentage kept at 100% to match SDXL native resolution exactly
+        
+        # === WORKBENCH SHADING FOR FORM DESCRIPTION ===
+        shading = scene.display.shading
+        shading.light = 'STUDIO'  # Studio lighting
+        shading.color_type = 'MATERIAL'  # Material colors
+        shading.show_specular_highlight = True  # Specular for form
+        shading.show_cavity = True  # Cavity for depth
+        if hasattr(shading, 'cavity_type'):
+            shading.cavity_type = 'BOTH'  # Ridge + valley
+        if hasattr(shading, 'cavity_ridge_factor'):
+            shading.cavity_ridge_factor = 1.0  # Full ridge
+        if hasattr(shading, 'cavity_valley_factor'):
+            shading.cavity_valley_factor = 1.0  # Full valley
+        shading.show_shadows = True  # Shadows for depth
+        if hasattr(shading, 'shadow_intensity'):
+            shading.shadow_intensity = 0.5  # Moderate shadows
         
         # Set output filepath BEFORE rendering
         temp_dir = get_temp_directory(context)

@@ -1209,6 +1209,11 @@ class WM_OT_LoadReferenceImage(bpy.types.Operator):
         options={'HIDDEN', 'SKIP_SAVE'}
     )
     
+    filter_folder: bpy.props.BoolProperty(
+        default=True,
+        options={'HIDDEN', 'SKIP_SAVE'}
+    )
+    
     slot: bpy.props.StringProperty(
         name="Slot",
         description="Which slot to load the image into (st1, comp2, sst3, etc.)",
