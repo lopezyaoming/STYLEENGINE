@@ -1,0 +1,23 @@
+# Subject:
+humanoid combat robot
+
+# Style:
+photorealistic 3D render, octane render, 8K
+
+# Details:
+battle-worn armor, glowing energy core, holding plasma rifle
+
+# Environment:
+desolate alien planet, red desert
+
+# Mood:
+intense, gritty, war-torn
+
+# Camera:
+low-angle hero shot, slight dutch tilt
+
+# Lighting:
+harsh alien sun, dramatic shadows
+
+# Negative Prompt:
+cartoon, toy-like, clean armor

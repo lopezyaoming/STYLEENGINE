@@ -1,6 +1,6 @@
 # ================================================================
 #    Style Engine - Main Pie Menu
-#    Shift+E hotkey for quick access to all Style Engine features
+#    Alt+Shift+E hotkey for quick access to all Style Engine features
 # ================================================================
 
 import bpy
@@ -42,7 +42,7 @@ class WM_OT_ProjectTextureScene(Operator):
 # ----------------------------------------------------------------
 
 class STYLEENGINE_MT_pie_main(Menu):
-    """Style Engine Main Pie Menu - Shift+E"""
+    """Style Engine Main Pie Menu - Alt+Shift+E"""
     bl_label = "Style Engine"
     bl_idname = "STYLEENGINE_MT_pie_main"
 
@@ -201,7 +201,7 @@ addon_keymaps = []
 
 
 def register():
-    """Register pie menu and Shift+E hotkey"""
+    """Register pie menu and Alt+Shift+E hotkey"""
     
     # Register classes
     for cls in classes:
@@ -216,26 +216,26 @@ def register():
     if kc:
         # Register for 3D View (works in Object Mode, Sculpt, etc.)
         km = kc.keymaps.new(name='3D View', space_type='VIEW_3D')
-        kmi = km.keymap_items.new('wm.call_menu_pie', 'E', 'PRESS', shift=True)
+        kmi = km.keymap_items.new('wm.call_menu_pie', 'E', 'PRESS', alt=True, shift=True)
         kmi.properties.name = "STYLEENGINE_MT_pie_main"
         addon_keymaps.append((km, kmi))
         
-        # ALSO register for Mesh (Edit Mode) to work with HeavyPoly
-        # HeavyPoly binds plain 'E' in Edit Mode, but addon keymaps have priority
-        # so our Shift+E will be checked first
+        # ALSO register for Mesh (Edit Mode) - conflict-free with Blender & HEAVYPOLY
+        # Blender uses Shift+E (Extrude Menu), HEAVYPOLY uses E and Ctrl+Shift+E
+        # Our Alt+Shift+E is completely free
         km_mesh = kc.keymaps.new(name='Mesh', space_type='VIEW_3D')
-        kmi_mesh = km_mesh.keymap_items.new('wm.call_menu_pie', 'E', 'PRESS', shift=True)
+        kmi_mesh = km_mesh.keymap_items.new('wm.call_menu_pie', 'E', 'PRESS', alt=True, shift=True)
         kmi_mesh.properties.name = "STYLEENGINE_MT_pie_main"
         addon_keymaps.append((km_mesh, kmi_mesh))
         
         # Also register for other edit modes (Curve, Armature, etc.)
         for mode_name in ['Curve', 'Armature', 'Pose', 'Sculpt']:
             km_mode = kc.keymaps.new(name=mode_name, space_type='VIEW_3D')
-            kmi_mode = km_mode.keymap_items.new('wm.call_menu_pie', 'E', 'PRESS', shift=True)
+            kmi_mode = km_mode.keymap_items.new('wm.call_menu_pie', 'E', 'PRESS', alt=True, shift=True)
             kmi_mode.properties.name = "STYLEENGINE_MT_pie_main"
             addon_keymaps.append((km_mode, kmi_mode))
         
-        print("[Style Engine] ✅ Pie menu registered (Shift+E) for all modes")
+        print("[Style Engine] ✅ Pie menu registered (Alt+Shift+E) for all modes - macOS/Windows/Linux compatible")
 
 
 def unregister():

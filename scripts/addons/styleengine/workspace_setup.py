@@ -1598,9 +1598,33 @@ def generate_ai_image_cloud(context):
     
     # 0. AUTO-SYNC: Load prompt from text editor (cyclical/automatic)
     prompt_from_editor = utils.get_prompt_from_text_editor()
+    props = context.scene.style_engine_props
+    
     if prompt_from_editor:
-        context.scene.style_engine_props.global_prompt = prompt_from_editor
-        print(f"[Style Engine] ✓ Auto-synced prompt from text editor ({len(prompt_from_editor)} chars)")
+        # Check if Prompt Builder is enabled
+        if props.use_prompt_builder:
+            # Process through prompt builder
+            positive_prompt, negative_prompt = utils.process_prompt_builder(prompt_from_editor)
+            
+            if positive_prompt:
+                props.global_prompt = positive_prompt
+                props.negative_prompt = negative_prompt  # Store negative prompt!
+                print(f"[Style Engine] ✓ Prompt Builder: Built prompt from tags ({len(positive_prompt)} chars)")
+                print(f"[Style Engine]   → Positive: {positive_prompt[:100]}...")
+                if negative_prompt:
+                    print(f"[Style Engine]   → Negative: {negative_prompt[:50]}...")
+                else:
+                    print(f"[Style Engine]   → Negative: (none - will use default)")
+            else:
+                # Fallback to raw text if builder failed
+                props.global_prompt = prompt_from_editor
+                props.negative_prompt = ""  # Clear negative prompt
+                print(f"[Style Engine] ⚠️ Prompt Builder: No tags found, using raw text")
+        else:
+            # Normal mode: use raw text as-is
+            props.global_prompt = prompt_from_editor
+            props.negative_prompt = ""  # Clear negative prompt in normal mode
+            print(f"[Style Engine] ✓ Auto-synced prompt from text editor ({len(prompt_from_editor)} chars)")
     
     # 1. Check if generation already in progress
     if runcomfy_polling.RunComfyPoller.active_requests:
@@ -1659,7 +1683,7 @@ def generate_ai_image_cloud(context):
     
     # 5. ALWAYS use SDXLREF workflow (with weights at 0 when no images)
     workflow_type = 'sdxlref'
-    props = context.scene.style_engine_props
+    # props already defined at top of function
     
     # Count active reference images
     ref_count = sum([
@@ -1893,10 +1917,18 @@ def build_runcomfy_overrides(context, session_data, combined_b64, workflow_type)
         
         # Prompts
         positive_prompt = session_data.get('global_prompt', '')
-        negative_prompt = "text, watermark, blurry, deformed, ugly, bad anatomy, worst quality, low quality"
         
-        print(f"[Style Engine] 📝 POSITIVE PROMPT: {positive_prompt}")
-        print(f"[Style Engine] 🚫 NEGATIVE PROMPT: {negative_prompt}")
+        # Use negative prompt from Prompt Builder if available, otherwise use default
+        custom_negative = session_data.get('negative_prompt', '')
+        if custom_negative:
+            negative_prompt = custom_negative
+            print(f"[Style Engine] 📝 POSITIVE PROMPT: {positive_prompt}")
+            print(f"[Style Engine] 🚫 NEGATIVE PROMPT (custom): {negative_prompt}")
+        else:
+            # Default negative prompt (good general purpose)
+            negative_prompt = "text, watermark, blurry, deformed, ugly, bad anatomy, worst quality, low quality"
+            print(f"[Style Engine] 📝 POSITIVE PROMPT: {positive_prompt}")
+            print(f"[Style Engine] 🚫 NEGATIVE PROMPT (default): {negative_prompt}")
         
         overrides = {
             "5": {"inputs": {"width": width, "height": height}},  # EmptyLatentImage

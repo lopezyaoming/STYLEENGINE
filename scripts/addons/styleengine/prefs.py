@@ -41,6 +41,14 @@ class StyleEnginePreferences(AddonPreferences):
         default=True
     )
     
+    # Credentials file path
+    credentials_file_path: StringProperty(
+        name="Credentials File",
+        description="Path to credentials.txt file",
+        default="",
+        subtype='FILE_PATH'
+    )
+    
     # ----------------------------------------------------------------
     # WORKFLOW CONFIGURATION
     # ----------------------------------------------------------------
@@ -262,6 +270,30 @@ class StyleEnginePreferences(AddonPreferences):
         # ----------------------------------------------------------------
         box = layout.box()
         box.label(text="API Configuration", icon='KEYINGSET')
+        
+        # ═══ QUICK IMPORT BUTTON (prominent at the top) ═══
+        import_box = box.box()
+        import_box.label(text="Quick Setup", icon='IMPORT')
+        
+        # File path selector
+        col = import_box.column(align=True)
+        col.label(text="Credentials File:")
+        col.prop(self, "credentials_file_path", text="")
+        
+        col.separator()
+        
+        # Import button
+        row = col.row()
+        row.scale_y = 1.5
+        row.operator("style_engine.import_credentials", icon='IMPORT')
+        
+        col.separator()
+        
+        # Help text
+        help_row = col.row()
+        help_row.label(text="💡 Browse to your credentials.txt or leave empty to auto-search", icon='INFO')
+        
+        box.separator()
         
         # Environment variable preference
         box.prop(self, "use_env_vars")
@@ -677,6 +709,63 @@ class WM_OT_TestConnection(bpy.types.Operator):
         return prefs.runcomfy_user_id
 
 
+class WM_OT_ImportCredentials(bpy.types.Operator):
+    """Import credentials from credentials.txt file"""
+    bl_idname = "style_engine.import_credentials"
+    bl_label = "Import Credentials"
+    bl_description = "Load API credentials from the selected credentials.txt file (or auto-search if path is empty)"
+    
+    def execute(self, context):
+        prefs = context.preferences.addons['styleengine'].preferences
+        
+        # Import the parsing function from utils
+        from . import utils
+        
+        # Get the file path from preferences
+        file_path = prefs.credentials_file_path if prefs.credentials_file_path else None
+        
+        if file_path:
+            self.report({'INFO'}, f"Loading credentials from: {file_path}")
+            print(f"[Style Engine] Loading credentials from: {file_path}")
+        else:
+            self.report({'INFO'}, "Looking for credentials.txt in default locations...")
+            print("[Style Engine] Searching for credentials.txt in default locations...")
+        
+        # Parse credentials file
+        success, data, message = utils.parse_credentials_file(file_path)
+        
+        if not success:
+            self.report({'ERROR'}, f"❌ {message}")
+            print(f"[Style Engine] ❌ Import failed: {message}")
+            return {'CANCELLED'}
+        
+        # Apply credentials to preferences
+        if data.get('api_token'):
+            prefs.runcomfy_api_token = data['api_token']
+            print(f"  ✓ Imported API Token: {data['api_token'][:8]}...")
+        
+        if data.get('user_id'):
+            prefs.runcomfy_user_id = data['user_id']
+            print(f"  ✓ Imported User ID: {data['user_id'][:8]}...")
+        
+        if data.get('workflow_id'):
+            prefs.runcomfy_workflow_id = data['workflow_id']
+            print(f"  ✓ Imported Workflow ID: {data['workflow_id'][:8]}...")
+        
+        if data.get('deployment_id'):
+            prefs.runcomfy_deployment_id = data['deployment_id']
+            print(f"  ✓ Imported Deployment ID: {data['deployment_id'][:8]}...")
+        
+        # Success message
+        self.report({'INFO'}, f"✅ {message}")
+        print(f"[Style Engine] ✅ Credentials imported successfully!")
+        
+        # Show hint to test connection
+        self.report({'INFO'}, "💡 Tip: Click 'Test Connection' to verify your credentials")
+        
+        return {'FINISHED'}
+
+
 # NOTE: Server API operators commented out - Server API mode is latent
 # Uncomment if Server API access becomes available
 # 
@@ -882,6 +971,7 @@ class WM_OT_TestConnection(bpy.types.Operator):
 classes = (
     StyleEnginePreferences,
     WM_OT_TestConnection,
+    WM_OT_ImportCredentials,
     # WM_OT_StartServer,  # Disabled - Server API latent
     # WM_OT_StopServer,  # Disabled - Server API latent
     # WM_OT_TestServerConnection,  # Disabled - Server API latent

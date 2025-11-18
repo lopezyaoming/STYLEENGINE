@@ -75,6 +75,13 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         update=update_session_json
     )
     
+    negative_prompt: bpy.props.StringProperty(
+        name="Negative Prompt",
+        description="Negative prompt extracted from Prompt Builder",
+        default="",
+        update=update_session_json
+    )
+    
     show_workspace_setup: bpy.props.BoolProperty(
         name="Show Workspace Setup",
         description="Expand or collapse the workspace setup section",
@@ -196,6 +203,28 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         description="Toggle continuous AI generation ON/OFF (when enabled, continuously renders and generates images)",
         default=False,
         update=update_auto_generate
+    )
+    
+    # Prompt Builder - simple template-based prompt system
+    def update_prompt_builder(self, context):
+        """When Prompt Builder is enabled, auto-load templates"""
+        # Update session.json
+        self.update_session_json(context)
+        
+        # Auto-load templates when enabled
+        if self.use_prompt_builder:
+            from . import utils
+            count, message = utils.load_all_templates()
+            print(f"[Style Engine] Prompt Builder enabled: {message}")
+            # Show info to user
+            if context:
+                context.area.tag_redraw() if hasattr(context, 'area') and context.area else None
+    
+    use_prompt_builder: bpy.props.BoolProperty(
+        name="Enable Prompt Builder",
+        description="Use template-based prompt building with structured tags (subject, style, mood, etc.)",
+        default=False,
+        update=update_prompt_builder
     )
     
     def update_background_opacity(self, context):
@@ -1451,6 +1480,85 @@ class WM_OT_TestCloudGeneration(bpy.types.Operator):
 
 
 # ----------------------------------------------------------------
+# PROMPT BUILDER TEMPLATE OPERATORS
+# ----------------------------------------------------------------
+
+class WM_OT_LoadTemplates(bpy.types.Operator):
+    """Load all prompt templates into text editor"""
+    bl_idname = "style_engine.load_templates"
+    bl_label = "Load Templates"
+    bl_description = "Load all prompt templates from templates folder into Blender's text editor"
+    
+    def execute(self, context):
+        from . import utils
+        
+        count, message = utils.load_all_templates()
+        
+        if count > 0:
+            self.report({'INFO'}, message)
+            print(f"[Style Engine] {message}")
+        else:
+            self.report({'WARNING'}, message)
+            print(f"[Style Engine] {message}")
+        
+        return {'FINISHED'}
+
+
+class WM_OT_SavePromptAsTemplate(bpy.types.Operator):
+    """Save currently active text editor content as a template"""
+    bl_idname = "style_engine.save_prompt_as_template"
+    bl_label = "Save as Template"
+    bl_description = "Save the currently open text editor content as a reusable template"
+    
+    template_name: bpy.props.StringProperty(
+        name="Template Name",
+        description="Name for the new template (will be prefixed with STYLEENGINE_)",
+        default="My_Template"
+    )
+    
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self)
+    
+    def draw(self, context):
+        layout = self.layout
+        
+        # Show which text block will be saved
+        active_text_name = None
+        for area in context.screen.areas:
+            if area.type == 'TEXT_EDITOR':
+                for space in area.spaces:
+                    if space.type == 'TEXT_EDITOR' and space.text:
+                        active_text_name = space.text.name
+                        break
+                if active_text_name:
+                    break
+        
+        if not active_text_name:
+            active_text_name = "STYLEENGINE_Prompt (fallback)"
+        
+        info_box = layout.box()
+        info_box.label(text=f"Source: {active_text_name}", icon='TEXT')
+        
+        layout.separator()
+        layout.prop(self, "template_name")
+        layout.label(text="Will be saved as: STYLEENGINE_{name}.txt", icon='DISK_DRIVE')
+    
+    def execute(self, context):
+        from . import utils
+        
+        success, message = utils.save_current_prompt_as_template(self.template_name)
+        
+        if success:
+            self.report({'INFO'}, message)
+            print(f"[Style Engine] {message}")
+        else:
+            self.report({'ERROR'}, message)
+            print(f"[Style Engine] {message}")
+        
+        return {'FINISHED'}
+
+
+# ----------------------------------------------------------------
 # 3. UI PANEL
 # ----------------------------------------------------------------
 class VIEW3D_PT_StyleEngine(bpy.types.Panel):
@@ -1469,6 +1577,38 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
         output_box = layout.box()
         output_box.label(text="Output Path:", icon='FILE_FOLDER')
         output_box.prop(style_props, "output_path", text="")
+
+        # --- Prompt Builder (VISIBLE) ---
+        layout.separator()
+        prompt_box = layout.box()
+        prompt_box.label(text="Prompt Settings:", icon='TEXT')
+        
+        # Prompt Builder checkbox
+        row = prompt_box.row()
+        row.prop(style_props, "use_prompt_builder", icon='SYNTAX_ON' if style_props.use_prompt_builder else 'SYNTAX_OFF')
+        
+        # Show template controls when enabled
+        if style_props.use_prompt_builder:
+            # Template management buttons
+            prompt_box.separator()
+            template_row = prompt_box.row(align=True)
+            template_row.operator("style_engine.load_templates", icon='IMPORT', text="Load Templates")
+            template_row.operator("style_engine.save_prompt_as_template", icon='FILE_TICK', text="Save Template")
+            
+            # # Helper text box - COMMENTED OUT FOR MINIMAL UI
+            # prompt_box.separator()
+            # help_box = prompt_box.box()
+            # help_box.scale_y = 0.8
+            # col = help_box.column(align=True)
+            # col.label(text="Available templates loaded in text editor:", icon='TEXT')
+            # col.label(text="• STYLEENGINE_Cinematic_Scene")
+            # col.label(text="• STYLEENGINE_Fantasy_Dragon")
+            # col.label(text="• STYLEENGINE_Portrait_Photo")
+            # col.label(text="• (+ your custom templates)")
+            # col.separator()
+            # col.label(text="Use tags in STYLEENGINE_Prompt:", icon='INFO')
+            # col.label(text="<subject> <style> <details> <environment>")
+            # col.label(text="<mood> <camera> <lighting> <negative_prompt>")
 
         # # --- Server Status Indicator (TOP) --- COMMENTED OUT
         # status_box = layout.box()
@@ -1871,6 +2011,8 @@ classes = (
     WM_OT_ReloadReferenceImage,
     WM_OT_CancelGeneration,
     WM_OT_TestCloudGeneration,
+    WM_OT_LoadTemplates,
+    WM_OT_SavePromptAsTemplate,
     VIEW3D_PT_StyleEngine,
 )
 

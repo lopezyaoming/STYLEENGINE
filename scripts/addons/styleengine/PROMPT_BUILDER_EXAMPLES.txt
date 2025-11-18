@@ -1,0 +1,311 @@
+# ================================================================
+#  Prompt Builder - Example Templates
+#  Copy these into any text editor and enable "Prompt Builder"
+#  checkbox to see them in action!
+# ================================================================
+
+# ----------------------------------------------------------------
+# Example 1: Futuristic City (Concept Art)
+# ----------------------------------------------------------------
+
+# Subject:
+futuristic city skyline
+
+# Style:
+cinematic illustration, concept art, ArtStation quality
+
+# Details:
+flying cars and holographic billboards
+
+# Environment:
+nighttime metropolis, neon-lit streets
+
+# Mood:
+bright, optimistic future vibe
+
+# Camera:
+wide-angle shot from a rooftop perspective
+
+# Lighting:
+vibrant neon lights and soft moonlight
+
+# Negative Prompt:
+blurry, low-res, watermark, text
+
+# Result: "Cinematic illustration, concept art, ArtStation quality of futuristic city skyline with flying cars and holographic billboards, in nighttime metropolis, neon-lit streets. Bright, optimistic future vibe atmosphere. Wide-angle shot from a rooftop perspective perspective; lit by vibrant neon lights and soft moonlight."
+
+# ----------------------------------------------------------------
+# Example 2: Fantasy Dragon (Digital Art)
+# ----------------------------------------------------------------
+
+# Subject:
+ancient dragon perched on mountaintop
+
+# Style:
+fantasy digital painting, detailed scales
+
+# Details:
+breathing fire, wings spread wide
+
+# Environment:
+stormy sky, lightning in background
+
+# Mood:
+epic, powerful, majestic
+
+# Camera:
+dramatic low-angle view
+
+# Lighting:
+backlit by lightning, rim light on scales
+
+# Negative Prompt:
+cartoon, anime style, chibi
+
+# ----------------------------------------------------------------
+# Example 3: Portrait Photography
+# ----------------------------------------------------------------
+
+# Subject:
+young woman with flowing hair
+
+# Style:
+professional portrait photography, 85mm lens, f/1.8
+
+# Details:
+natural expression, looking at camera
+
+# Environment:
+outdoor garden, blurred background
+
+# Mood:
+serene, peaceful, contemplative
+
+# Camera:
+eye-level close-up, shallow depth of field
+
+# Lighting:
+golden hour sunlight, soft natural light
+
+# Negative Prompt:
+overexposed, harsh shadows, artificial look
+
+# ----------------------------------------------------------------
+# Example 4: Sci-Fi Robot (3D Render)
+# ----------------------------------------------------------------
+
+# Subject:
+humanoid combat robot
+
+# Style:
+photorealistic 3D render, octane render, 8K
+
+# Details:
+battle-worn armor, glowing energy core, holding plasma rifle
+
+# Environment:
+desolate alien planet, red desert
+
+# Mood:
+intense, gritty, war-torn
+
+# Camera:
+low-angle hero shot, slight dutch tilt
+
+# Lighting:
+harsh alien sun, dramatic shadows
+
+# Negative Prompt:
+cartoon, toy-like, clean armor
+
+# ----------------------------------------------------------------
+# Example 5: Fantasy Landscape (Matte Painting)
+# ----------------------------------------------------------------
+
+# Subject:
+magical floating islands
+
+# Style:
+fantasy matte painting, concept art
+
+# Details:
+waterfalls cascading into clouds, ancient ruins
+
+# Environment:
+ethereal sky, volumetric fog
+
+# Mood:
+mystical, dreamlike, otherworldly
+
+# Camera:
+wide establishing shot, high vantage point
+
+# Lighting:
+soft diffused light through clouds, god rays
+
+# Negative Prompt:
+modern elements, realistic physics
+
+# ----------------------------------------------------------------
+# Example 6: Product Shot (Commercial)
+# ----------------------------------------------------------------
+
+# Subject:
+luxury Swiss watch
+
+# Style:
+commercial product photography, ultra high definition
+
+# Details:
+visible mechanical movement, polished metal
+
+# Environment:
+minimal white background, marble surface
+
+# Mood:
+elegant, sophisticated, premium
+
+# Camera:
+macro shot, 100mm lens, perfect focus
+
+# Lighting:
+studio lighting, three-point setup, subtle rim light
+
+# Negative Prompt:
+cluttered background, poor lighting, blurry
+
+# ----------------------------------------------------------------
+# Example 7: Animated Character (Pixar Style)
+# ----------------------------------------------------------------
+
+# Subject:
+adorable robot companion
+
+# Style:
+3D animated, Pixar quality, cartoon style
+
+# Details:
+big expressive eyes, friendly smile, cute proportions
+
+# Environment:
+colorful workshop with gadgets
+
+# Mood:
+cheerful, heartwarming, playful
+
+# Camera:
+slight low angle to show character personality
+
+# Lighting:
+bright studio lighting, soft shadows
+
+# Negative Prompt:
+realistic, dark, scary, photorealistic
+
+# ----------------------------------------------------------------
+# Example 8: Abstract Art
+# ----------------------------------------------------------------
+
+# Subject:
+geometric shapes and flowing forms
+
+# Style:
+abstract digital art, modern art style
+
+# Details:
+gradient colors, smooth curves, dynamic composition
+
+# Environment:
+infinite void, floating in space
+
+# Mood:
+energetic, vibrant, experimental
+
+# Camera:
+abstract perspective, non-representational
+
+# Lighting:
+colorful gradient lighting, neon accents
+
+# Negative Prompt:
+realistic objects, recognizable forms
+
+# ----------------------------------------------------------------
+# Example 9: Medieval Scene (Historical)
+# ----------------------------------------------------------------
+
+# Subject:
+medieval knight in full plate armor
+
+# Style:
+historical painting, oil painting style, classical art
+
+# Details:
+holding longsword and shield, heraldic symbols
+
+# Environment:
+castle courtyard, stone architecture
+
+# Mood:
+noble, heroic, timeless
+
+# Camera:
+traditional portrait angle, three-quarter view
+
+# Lighting:
+natural daylight, soft overhead sun
+
+# Negative Prompt:
+modern elements, sci-fi, fantasy magic
+
+# ----------------------------------------------------------------
+# Example 10: Cyberpunk Street (Blade Runner Style)
+# ----------------------------------------------------------------
+
+# Subject:
+rain-soaked cyberpunk alleyway
+
+# Style:
+neo-noir photography, cinematic, blade runner aesthetic
+
+# Details:
+neon signs reflecting in puddles, steam vents
+
+# Environment:
+dense urban setting, towering buildings
+
+# Mood:
+moody, atmospheric, dystopian
+
+# Camera:
+street-level perspective, cinematic aspect ratio
+
+# Lighting:
+neon lights, dramatic contrast, film noir lighting
+
+# Negative Prompt:
+bright daylight, clean streets, utopian
+
+# ================================================================
+# TIPS FOR CREATING YOUR OWN:
+# ================================================================
+# 
+# 1. START WITH SUBJECT - What's the main focus?
+# 2. DEFINE STYLE - Art medium, technique, quality
+# 3. ADD DETAILS - Specific features, actions, objects
+# 4. SET ENVIRONMENT - Where is this happening?
+# 5. CHOOSE MOOD - What feeling should it evoke?
+# 6. PICK CAMERA - What angle/perspective?
+# 7. DESCRIBE LIGHTING - How is it lit?
+# 8. NEGATIVE PROMPT - What to avoid
+#
+# NOT ALL TAGS REQUIRED! Use only what you need.
+# Minimum: subject + style works great!
+#
+# NOTE: In Blender's text editor, the # headers are syntax
+# highlighted automatically, making it easy to scan!
+#
+# ================================================================
+# SAVE THIS FILE for quick reference!
+# Copy sections into your text editor and modify as needed.
+# ================================================================

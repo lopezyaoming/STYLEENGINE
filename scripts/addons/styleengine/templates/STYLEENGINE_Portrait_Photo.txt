@@ -1,0 +1,23 @@
+# Subject:
+young woman with flowing hair
+
+# Style:
+professional portrait photography, 85mm lens, f/1.8
+
+# Details:
+natural expression, looking at camera
+
+# Environment:
+outdoor garden, blurred background
+
+# Mood:
+serene, peaceful, contemplative
+
+# Camera:
+eye-level close-up, shallow depth of field
+
+# Lighting:
+golden hour sunlight, soft natural light
+
+# Negative Prompt:
+overexposed, harsh shadows, artificial look

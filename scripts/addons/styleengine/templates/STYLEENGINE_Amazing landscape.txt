@@ -1,0 +1,17 @@
+<subject>
+futuristic city skyline, amazing landscape</subject>
+<style>
+cinematic illustration, concept art, ArtStation quality</style>
+<details>
+flying cars and holographic billboards</details>
+<environment>
+nighttime metropolis, neon-lit streets</environment>
+<mood>
+bright, optimistic future vibe</mood>
+<camera>
+wide-angle shot from a rooftop perspective</camera>
+<lighting>
+vibrant neon lights and soft moonlight</lighting>
+<negative_prompt>
+blurry, low-res, watermark, text</negative_prompt>
+
