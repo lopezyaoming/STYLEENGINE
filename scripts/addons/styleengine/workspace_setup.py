@@ -1748,14 +1748,59 @@ def generate_ai_image_cloud(context):
             print(f"[GCS] ✓ Server connection verified")
             print(f"[GCS]")
             
-            # UPLOAD IMAGE TO SERVER (key difference from RunComfy)
-            # GCS needs the actual file, not Base64
+            # UPLOAD IMAGES TO SERVER (key difference from RunComfy)
+            # GCS needs the actual files, not Base64
+            
+            # Upload combined.jpg (main render)
             print(f"[GCS] Uploading combined.jpg to server...")
             upload_start = time.time()
             upload_response = server_client.upload_image(str(combined_path))
             uploaded_filename = upload_response['name']
             upload_duration = time.time() - upload_start
-            print(f"[GCS] ✓ Image uploaded: {uploaded_filename} ({upload_duration:.3f}s)")
+            print(f"[GCS] ✓ Combined image uploaded: {uploaded_filename} ({upload_duration:.3f}s)")
+            
+            # Upload reference images (ST, COMP, SST) if they exist
+            props = context.scene.style_engine_props
+            ref_image_props = [
+                (props.st1_image, 'st1_path', 'ST1'),
+                (props.st2_image, 'st2_path', 'ST2'),
+                (props.st3_image, 'st3_path', 'ST3'),
+                (props.st4_image, 'st4_path', 'ST4'),
+                (props.st5_image, 'st5_path', 'ST5'),
+                (props.comp1_image, 'comp1_path', 'COMP1'),
+                (props.comp2_image, 'comp2_path', 'COMP2'),
+                (props.comp3_image, 'comp3_path', 'COMP3'),
+                (props.comp4_image, 'comp4_path', 'COMP4'),
+                (props.comp5_image, 'comp5_path', 'COMP5'),
+                (props.sst1_image, 'sst1_path', 'SST1'),
+                (props.sst2_image, 'sst2_path', 'SST2'),
+                (props.sst3_image, 'sst3_path', 'SST3'),
+                (props.sst4_image, 'sst4_path', 'SST4'),
+                (props.sst5_image, 'sst5_path', 'SST5'),
+            ]
+            
+            uploaded_ref_images = {}
+            ref_upload_count = 0
+            
+            for img, path_key, label in ref_image_props:
+                if img and img.filepath:
+                    try:
+                        # Get absolute path to the image
+                        img_path = bpy.path.abspath(img.filepath)
+                        if os.path.exists(img_path):
+                            # Upload to server
+                            upload_resp = server_client.upload_image(img_path)
+                            uploaded_name = upload_resp['name']
+                            uploaded_ref_images[path_key] = uploaded_name
+                            ref_upload_count += 1
+                            print(f"[GCS]   ✓ {label}: {uploaded_name}")
+                        else:
+                            print(f"[GCS]   ⚠ {label}: File not found at {img_path}")
+                    except Exception as e:
+                        print(f"[GCS]   ✗ {label}: Upload failed - {e}")
+            
+            if ref_upload_count > 0:
+                print(f"[GCS] ✓ Uploaded {ref_upload_count} reference images")
             print(f"[GCS]")
             
             # Load workflow JSON file (StyleEngine.json from addon's workflows/)
@@ -1833,27 +1878,28 @@ def generate_ai_image_cloud(context):
             
             # ============================================================
             # REFERENCE IMAGE PATHS (LoadImage nodes)
+            # Use uploaded filenames from server, fallback to blank.png
             # ============================================================
             # Style Transfer images
-            workflow_json["65"]["inputs"]["image"] = ref_images.get('st1_path', 'blank.png') or 'blank.png'  # ST1
-            workflow_json["63"]["inputs"]["image"] = ref_images.get('st2_path', 'blank.png') or 'blank.png'  # ST2
-            workflow_json["64"]["inputs"]["image"] = ref_images.get('st3_path', 'blank.png') or 'blank.png'  # ST3
-            workflow_json["94"]["inputs"]["image"] = ref_images.get('st4_path', 'blank.png') or 'blank.png'  # ST4
-            workflow_json["97"]["inputs"]["image"] = ref_images.get('st5_path', 'blank.png') or 'blank.png'  # ST5
+            workflow_json["65"]["inputs"]["image"] = uploaded_ref_images.get('st1_path', 'blank.png')  # ST1
+            workflow_json["63"]["inputs"]["image"] = uploaded_ref_images.get('st2_path', 'blank.png')  # ST2
+            workflow_json["64"]["inputs"]["image"] = uploaded_ref_images.get('st3_path', 'blank.png')  # ST3
+            workflow_json["94"]["inputs"]["image"] = uploaded_ref_images.get('st4_path', 'blank.png')  # ST4
+            workflow_json["97"]["inputs"]["image"] = uploaded_ref_images.get('st5_path', 'blank.png')  # ST5
             
             # Composition images
-            workflow_json["78"]["inputs"]["image"] = ref_images.get('comp1_path', 'blank.png') or 'blank.png'  # COMP1
-            workflow_json["77"]["inputs"]["image"] = ref_images.get('comp2_path', 'blank.png') or 'blank.png'  # COMP2
-            workflow_json["76"]["inputs"]["image"] = ref_images.get('comp3_path', 'blank.png') or 'blank.png'  # COMP3
-            workflow_json["100"]["inputs"]["image"] = ref_images.get('comp4_path', 'blank.png') or 'blank.png'  # COMP4
-            workflow_json["103"]["inputs"]["image"] = ref_images.get('comp5_path', 'blank.png') or 'blank.png'  # COMP5
+            workflow_json["78"]["inputs"]["image"] = uploaded_ref_images.get('comp1_path', 'blank.png')  # COMP1
+            workflow_json["77"]["inputs"]["image"] = uploaded_ref_images.get('comp2_path', 'blank.png')  # COMP2
+            workflow_json["76"]["inputs"]["image"] = uploaded_ref_images.get('comp3_path', 'blank.png')  # COMP3
+            workflow_json["100"]["inputs"]["image"] = uploaded_ref_images.get('comp4_path', 'blank.png')  # COMP4
+            workflow_json["103"]["inputs"]["image"] = uploaded_ref_images.get('comp5_path', 'blank.png')  # COMP5
             
             # Strong Style Transfer images
-            workflow_json["89"]["inputs"]["image"] = ref_images.get('sst1_path', 'blank.png') or 'blank.png'  # SST1
-            workflow_json["88"]["inputs"]["image"] = ref_images.get('sst2_path', 'blank.png') or 'blank.png'  # SST2
-            workflow_json["87"]["inputs"]["image"] = ref_images.get('sst3_path', 'blank.png') or 'blank.png'  # SST3
-            workflow_json["106"]["inputs"]["image"] = ref_images.get('sst4_path', 'blank.png') or 'blank.png'  # SST4
-            workflow_json["109"]["inputs"]["image"] = ref_images.get('sst5_path', 'blank.png') or 'blank.png'  # SST5
+            workflow_json["89"]["inputs"]["image"] = uploaded_ref_images.get('sst1_path', 'blank.png')  # SST1
+            workflow_json["88"]["inputs"]["image"] = uploaded_ref_images.get('sst2_path', 'blank.png')  # SST2
+            workflow_json["87"]["inputs"]["image"] = uploaded_ref_images.get('sst3_path', 'blank.png')  # SST3
+            workflow_json["106"]["inputs"]["image"] = uploaded_ref_images.get('sst4_path', 'blank.png')  # SST4
+            workflow_json["109"]["inputs"]["image"] = uploaded_ref_images.get('sst5_path', 'blank.png')  # SST5
             
             print(f"[GCS] ✓ Workflow patched successfully")
             print(f"[GCS]   - Resolution: {resolution.get('width', 1024)}x{resolution.get('height', 1024)}")
