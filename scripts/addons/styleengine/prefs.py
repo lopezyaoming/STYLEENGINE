@@ -231,6 +231,32 @@ class StyleEnginePreferences(AddonPreferences):
     )
 
     # ----------------------------------------------------------------
+    # API MODE CONFIGURATION
+    # ----------------------------------------------------------------
+    
+    api_backend: EnumProperty(
+        name="Backend",
+        description="Choose which backend service to use for generation",
+        items=[
+            ('RUNCOMFY', "RunComfy Cloud", "Use RunComfy serverless cloud API (Managed, requires API credentials)"),
+            ('GCS', "Self-Hosted ComfyUI", "Connect directly to a self-hosted ComfyUI instance (GCS, AWS, or Localhost)")
+        ],
+        default='RUNCOMFY'
+    )
+    
+    gcs_server_url: StringProperty(
+        name="Server URL",
+        description="URL of your ComfyUI instance (e.g., http://34.19.119.45:8188 or http://127.0.0.1:8188)",
+        default="http://127.0.0.1:8188"
+    )
+    
+    gcs_server_status: StringProperty(
+        name="GCS Server Status",
+        description="Connection status of the GCS server",
+        default="Not Connected"
+    )
+
+    # ----------------------------------------------------------------
     # SERVER API MODE SETTINGS (DISABLED/LATENT)
     # ----------------------------------------------------------------
     # NOTE: Server API mode is currently disabled/latent
@@ -266,158 +292,212 @@ class StyleEnginePreferences(AddonPreferences):
         layout = self.layout
         
         # ----------------------------------------------------------------
-        # API CREDENTIALS
+        # BACKEND MODE SELECTION
         # ----------------------------------------------------------------
-        box = layout.box()
-        box.label(text="API Configuration", icon='KEYINGSET')
+        mode_box = layout.box()
+        mode_box.label(text="Backend Mode", icon='WORLD')
+        mode_box.prop(self, "api_backend", text="")
         
-        # ═══ QUICK IMPORT BUTTON (prominent at the top) ═══
-        import_box = box.box()
-        import_box.label(text="Quick Setup", icon='IMPORT')
-        
-        # File path selector
-        col = import_box.column(align=True)
-        col.label(text="Credentials File:")
-        col.prop(self, "credentials_file_path", text="")
-        
-        col.separator()
-        
-        # Import button
-        row = col.row()
-        row.scale_y = 1.5
-        row.operator("style_engine.import_credentials", icon='IMPORT')
-        
-        col.separator()
-        
-        # Help text
-        help_row = col.row()
-        help_row.label(text="💡 Browse to your credentials.txt or leave empty to auto-search", icon='INFO')
-        
-        box.separator()
-        
-        # Environment variable preference
-        box.prop(self, "use_env_vars")
-        box.separator()
-        
-        # Check for environment variables
-        env_token = os.environ.get('RUNCOMFY_API_TOKEN', '')
-        env_user_id = os.environ.get('RUNCOMFY_USER_ID', '')
-        
-        # RunComfy Settings
-        runcomfy_box = box.box()
-        runcomfy_box.label(text="RunComfy API Settings", icon='NETWORK_DRIVE')
-        
-        # Show environment variable status
-        if env_token:
-            row = runcomfy_box.row()
-            row.label(text="✓ RUNCOMFY_API_TOKEN found in environment", icon='CHECKMARK')
-        else:
-            row = runcomfy_box.row()
-            row.label(text="⚠ RUNCOMFY_API_TOKEN not found in environment", icon='ERROR')
-        
-        if env_user_id:
-            row = runcomfy_box.row()
-            row.label(text="✓ RUNCOMFY_USER_ID found in environment", icon='CHECKMARK')
-        else:
-            row = runcomfy_box.row()
-            row.label(text="⚠ RUNCOMFY_USER_ID not found in environment", icon='ERROR')
-        
-        runcomfy_box.separator()
-        
-        # Toggle to show/hide sensitive data
-        runcomfy_box.prop(self, "show_api_keys", icon='HIDE_OFF' if self.show_api_keys else 'HIDE_ON')
-        
-        # API Token field
-        col = runcomfy_box.column(align=True)
-        if self.show_api_keys:
-            col.prop(self, "runcomfy_api_token", text="API Token")
-        else:
-            # Show masked version
-            row = col.row(align=True)
-            row.label(text="API Token:")
-            if self.runcomfy_api_token or env_token:
-                row.label(text="••••••••••••••••")
-            else:
-                row.label(text="(not set)")
-        
-        # User ID field
-        if self.show_api_keys:
-            col.prop(self, "runcomfy_user_id", text="User ID")
-        else:
-            # Show masked version
-            row = col.row(align=True)
-            row.label(text="User ID:")
-            if self.runcomfy_user_id or env_user_id:
-                row.label(text="••••••••••••••••")
-            else:
-                row.label(text="(not set)")
-        
-        # Test connection button
-        runcomfy_box.separator()
-        row = runcomfy_box.row()
-        row.operator("style_engine.test_connection", icon='PLUGIN')
-        
-        # ----------------------------------------------------------------
-        # WORKFLOW CONFIGURATION
-        # ----------------------------------------------------------------
         layout.separator()
-        workflow_box = layout.box()
-        header_row = workflow_box.row(align=True)
-        icon = 'TRIA_DOWN' if self.show_workflow_config else 'TRIA_RIGHT'
-        header_row.prop(self, "show_workflow_config", text="Workflow Configuration", 
-                       icon=icon, emboss=False, toggle=True)
-        
-        if self.show_workflow_config:
-            # Unified Workflow ID
-            col = workflow_box.column(align=True)
-            col.label(text="Workflow IDs (provided by developer):", icon='FILE_SCRIPT')
-            col.prop(self, "runcomfy_workflow_id", text="Workflow ID")
-            
-            workflow_box.separator()
-            
-            # Unified Deployment ID
-            col = workflow_box.column(align=True)
-            col.label(text="Deployment IDs (optional - auto-created if empty):", icon='NETWORK_DRIVE')
-            col.prop(self, "runcomfy_deployment_id", text="Deployment ID")
-            
-            workflow_box.separator()
-            col = workflow_box.column(align=True)
-            col.label(text="Note: Both SDXL and IPAdapter workflows use the same deployment.", icon='INFO')
         
         # ----------------------------------------------------------------
-        # HARDWARE SETTINGS
+        # API CREDENTIALS (RunComfy only)
         # ----------------------------------------------------------------
-        layout.separator()
-        hardware_box = layout.box()
-        header_row = hardware_box.row(align=True)
-        icon = 'TRIA_DOWN' if self.show_hardware_settings else 'TRIA_RIGHT'
-        header_row.prop(self, "show_hardware_settings", text="Hardware Settings", 
-                       icon=icon, emboss=False, toggle=True)
+        if self.api_backend == 'RUNCOMFY':
+            box = layout.box()
+            box.label(text="API Configuration", icon='KEYINGSET')
+            
+            # ═══ QUICK IMPORT BUTTON (prominent at the top) ═══
+            import_box = box.box()
+            import_box.label(text="Quick Setup", icon='IMPORT')
+            
+            # File path selector
+            col = import_box.column(align=True)
+            col.label(text="Credentials File:")
+            col.prop(self, "credentials_file_path", text="")
+            
+            col.separator()
+            
+            # Import button
+            row = col.row()
+            row.scale_y = 1.5
+            row.operator("style_engine.import_credentials", icon='IMPORT')
+            
+            col.separator()
+            
+            # Help text
+            help_row = col.row()
+            help_row.label(text="💡 Browse to your credentials.txt or leave empty to auto-search", icon='INFO')
+            
+            box.separator()
+            
+            # Environment variable preference
+            box.prop(self, "use_env_vars")
+            box.separator()
+            
+            # Check for environment variables
+            env_token = os.environ.get('RUNCOMFY_API_TOKEN', '')
+            env_user_id = os.environ.get('RUNCOMFY_USER_ID', '')
+            
+            # RunComfy Settings
+            runcomfy_box = box.box()
+            runcomfy_box.label(text="RunComfy API Settings", icon='NETWORK_DRIVE')
+            
+            # Show environment variable status
+            if env_token:
+                row = runcomfy_box.row()
+                row.label(text="✓ RUNCOMFY_API_TOKEN found in environment", icon='CHECKMARK')
+            else:
+                row = runcomfy_box.row()
+                row.label(text="⚠ RUNCOMFY_API_TOKEN not found in environment", icon='ERROR')
+            
+            if env_user_id:
+                row = runcomfy_box.row()
+                row.label(text="✓ RUNCOMFY_USER_ID found in environment", icon='CHECKMARK')
+            else:
+                row = runcomfy_box.row()
+                row.label(text="⚠ RUNCOMFY_USER_ID not found in environment", icon='ERROR')
+            
+            runcomfy_box.separator()
+            
+            # Toggle to show/hide sensitive data
+            runcomfy_box.prop(self, "show_api_keys", icon='HIDE_OFF' if self.show_api_keys else 'HIDE_ON')
+            
+            # API Token field
+            col = runcomfy_box.column(align=True)
+            if self.show_api_keys:
+                col.prop(self, "runcomfy_api_token", text="API Token")
+            else:
+                # Show masked version
+                row = col.row(align=True)
+                row.label(text="API Token:")
+                if self.runcomfy_api_token or env_token:
+                    row.label(text="••••••••••••••••")
+                else:
+                    row.label(text="(not set)")
+            
+            # User ID field
+            if self.show_api_keys:
+                col.prop(self, "runcomfy_user_id", text="User ID")
+            else:
+                # Show masked version
+                row = col.row(align=True)
+                row.label(text="User ID:")
+                if self.runcomfy_user_id or env_user_id:
+                    row.label(text="••••••••••••••••")
+                else:
+                    row.label(text="(not set)")
+            
+            # Test connection button
+            runcomfy_box.separator()
+            row = runcomfy_box.row()
+            row.operator("style_engine.test_connection", icon='PLUGIN')
         
-        if self.show_hardware_settings:
-            # Hardware tier
-            hardware_box.label(text="GPU Tier:", icon='SHADING_RENDERED')
-            hardware_box.prop(self, "runcomfy_hardware_tier", text="")
+        # ----------------------------------------------------------------
+        # GCS SERVER CONFIGURATION
+        # ----------------------------------------------------------------
+        elif self.api_backend == 'GCS':
+            box = layout.box()
+            box.label(text="Self-Hosted ComfyUI Server", icon='NETWORK_DRIVE')
             
-            hardware_box.separator()
+            # Server URL field
+            col = box.column(align=True)
+            col.label(text="Server URL:", icon='URL')
+            col.prop(self, "gcs_server_url", text="")
             
-            # Scaling settings
-            hardware_box.label(text="Scaling Configuration:", icon='MOD_ARRAY')
-            col = hardware_box.column(align=True)
-            col.prop(self, "runcomfy_min_instances")
-            col.prop(self, "runcomfy_max_instances")
-            col.prop(self, "runcomfy_queue_size")
+            # Show URL validation
+            if self.gcs_server_url:
+                if "http" in self.gcs_server_url.lower() and ":" in self.gcs_server_url:
+                    row = box.row()
+                    row.label(text="✓ URL format looks valid", icon='CHECKMARK')
+                else:
+                    row = box.row()
+                    row.label(text="⚠ Check URL format (must include http:// or https:// and port)", icon='ERROR')
+            else:
+                row = box.row()
+                row.label(text="⚠ Server URL not set", icon='ERROR')
             
-            hardware_box.separator()
+            box.separator()
+            col = box.column(align=True)
+            col.label(text="Example URLs:")
+            col.label(text="  • Google Cloud: http://34.19.119.45:8188")
+            col.label(text="  • Localhost: http://127.0.0.1:8188")
+            col.label(text="  • AWS: http://ec2-xx-xx-xx-xx.compute.amazonaws.com:8188")
             
-            # Keep warm
-            hardware_box.label(text="Instance Management:", icon='TIME')
-            hardware_box.prop(self, "runcomfy_keep_warm_seconds")
+            # Server status
+            if self.gcs_server_status:
+                box.separator()
+                status_col = box.column(align=True)
+                status_col.label(text=f"Status: {self.gcs_server_status}", icon='INFO')
             
-            hardware_box.separator()
-            col = hardware_box.column(align=True)
-            col.label(text="Note: Min instances = 0 means scale to zero when idle.", icon='INFO')
-            col.label(text="Higher queue size allows more parallel requests.")
+            # Test connection button
+            box.separator()
+            row = box.row()
+            row.scale_y = 1.5
+            row.operator("style_engine.test_gcs_connection", icon='PLUGIN', text="Test Server Connection")
+        
+        # ----------------------------------------------------------------
+        # WORKFLOW CONFIGURATION (RunComfy only)
+        # ----------------------------------------------------------------
+        if self.api_backend == 'RUNCOMFY':
+            layout.separator()
+            workflow_box = layout.box()
+            header_row = workflow_box.row(align=True)
+            icon = 'TRIA_DOWN' if self.show_workflow_config else 'TRIA_RIGHT'
+            header_row.prop(self, "show_workflow_config", text="Workflow Configuration", 
+                           icon=icon, emboss=False, toggle=True)
+            
+            if self.show_workflow_config:
+                # Unified Workflow ID
+                col = workflow_box.column(align=True)
+                col.label(text="Workflow IDs (provided by developer):", icon='FILE_SCRIPT')
+                col.prop(self, "runcomfy_workflow_id", text="Workflow ID")
+                
+                workflow_box.separator()
+                
+                # Unified Deployment ID
+                col = workflow_box.column(align=True)
+                col.label(text="Deployment IDs (optional - auto-created if empty):", icon='NETWORK_DRIVE')
+                col.prop(self, "runcomfy_deployment_id", text="Deployment ID")
+                
+                workflow_box.separator()
+                col = workflow_box.column(align=True)
+                col.label(text="Note: Both SDXL and IPAdapter workflows use the same deployment.", icon='INFO')
+            
+            # ----------------------------------------------------------------
+            # HARDWARE SETTINGS
+            # ----------------------------------------------------------------
+            layout.separator()
+            hardware_box = layout.box()
+            header_row = hardware_box.row(align=True)
+            icon = 'TRIA_DOWN' if self.show_hardware_settings else 'TRIA_RIGHT'
+            header_row.prop(self, "show_hardware_settings", text="Hardware Settings", 
+                           icon=icon, emboss=False, toggle=True)
+            
+            if self.show_hardware_settings:
+                # Hardware tier
+                hardware_box.label(text="GPU Tier:", icon='SHADING_RENDERED')
+                hardware_box.prop(self, "runcomfy_hardware_tier", text="")
+                
+                hardware_box.separator()
+                
+                # Scaling settings
+                hardware_box.label(text="Scaling Configuration:", icon='MOD_ARRAY')
+                col = hardware_box.column(align=True)
+                col.prop(self, "runcomfy_min_instances")
+                col.prop(self, "runcomfy_max_instances")
+                col.prop(self, "runcomfy_queue_size")
+                
+                hardware_box.separator()
+                
+                # Keep warm
+                hardware_box.label(text="Instance Management:", icon='TIME')
+                hardware_box.prop(self, "runcomfy_keep_warm_seconds")
+                
+                hardware_box.separator()
+                col = hardware_box.column(align=True)
+                col.label(text="Note: Min instances = 0 means scale to zero when idle.", icon='INFO')
+                col.label(text="Higher queue size allows more parallel requests.")
         
         # ----------------------------------------------------------------
         # ADVANCED SETTINGS
@@ -709,6 +789,78 @@ class WM_OT_TestConnection(bpy.types.Operator):
         return prefs.runcomfy_user_id
 
 
+class WM_OT_TestGCSConnection(bpy.types.Operator):
+    """Test connection to GCS ComfyUI Server"""
+    bl_idname = "style_engine.test_gcs_connection"
+    bl_label = "Test Server Connection"
+    bl_description = "Test the connection to your self-hosted ComfyUI server"
+    
+    def execute(self, context):
+        prefs = context.preferences.addons['styleengine'].preferences
+        
+        # Check if server URL is set
+        server_url = prefs.gcs_server_url
+        
+        if not server_url:
+            self.report({'ERROR'}, "Server URL is not set!")
+            print("[GCS] ❌ Test failed: Server URL not configured")
+            prefs.gcs_server_status = "Not Connected"
+            return {'CANCELLED'}
+        
+        # Test connection
+        try:
+            from . import runcomfy_server_client
+            
+            self.report({'INFO'}, f"Testing connection to: {server_url}...")
+            print(f"[GCS] =========================================")
+            print(f"[GCS] CONNECTION TEST")
+            print(f"[GCS] Target: {server_url}")
+            print(f"[GCS] =========================================")
+            
+            # Create server client
+            server_client = runcomfy_server_client.ComfyUIServerClient(server_url, timeout=10)
+            
+            # Perform health check
+            health = server_client.check_server_health()
+            
+            # Report results
+            if health['healthy']:
+                prefs.gcs_server_status = "Connected"
+                self.report({'INFO'}, f"✅ Server is healthy and ready!")
+                print(f"[GCS] ✅ TEST RESULT: SERVER IS HEALTHY")
+                print(f"[GCS] {health['details']}")
+            elif health['connection']['reachable']:
+                prefs.gcs_server_status = "Reachable (Warning)"
+                self.report({'WARNING'}, f"⚠ Server is reachable but may not be fully ready")
+                print(f"[GCS] ⚠ TEST RESULT: SERVER REACHABLE BUT WARNING")
+                print(f"[GCS] {health['details']}")
+            else:
+                prefs.gcs_server_status = "Connection Failed"
+                error = health['connection'].get('error', 'Unknown error')
+                self.report({'ERROR'}, f"❌ Connection failed: {error}")
+                print(f"[GCS] ❌ TEST RESULT: CONNECTION FAILED")
+                print(f"[GCS] Error: {error}")
+            
+            print(f"[GCS] =========================================")
+            
+            return {'FINISHED'}
+            
+        except runcomfy_server_client.ServerAPIError as e:
+            error_msg = str(e)
+            prefs.gcs_server_status = "Connection Failed"
+            self.report({'ERROR'}, f"❌ Server error: {error_msg}")
+            print(f"[GCS] ❌ Test failed: {error_msg}")
+            return {'CANCELLED'}
+            
+        except Exception as e:
+            prefs.gcs_server_status = "Error"
+            self.report({'ERROR'}, f"❌ Unexpected error: {e}")
+            print(f"[GCS] ❌ Unexpected error during test: {e}")
+            import traceback
+            traceback.print_exc()
+            return {'CANCELLED'}
+
+
 class WM_OT_ImportCredentials(bpy.types.Operator):
     """Import credentials from credentials.txt file"""
     bl_idname = "style_engine.import_credentials"
@@ -971,6 +1123,7 @@ class WM_OT_ImportCredentials(bpy.types.Operator):
 classes = (
     StyleEnginePreferences,
     WM_OT_TestConnection,
+    WM_OT_TestGCSConnection,
     WM_OT_ImportCredentials,
     # WM_OT_StartServer,  # Disabled - Server API latent
     # WM_OT_StopServer,  # Disabled - Server API latent

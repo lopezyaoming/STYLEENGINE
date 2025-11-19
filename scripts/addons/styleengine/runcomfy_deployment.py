@@ -48,7 +48,7 @@ def get_runcomfy_client():
 
 def get_server_client():
     """
-    Create ComfyUI Server client from preferences (for Server API mode).
+    Create ComfyUI Server client from preferences (for GCS/Server API mode).
     
     Returns:
         ComfyUIServerClient: Configured server client instance
@@ -58,7 +58,8 @@ def get_server_client():
     """
     prefs = get_addon_prefs()
     
-    server_url = prefs.comfyui_server_url
+    # Use GCS server URL (self-hosted) or fallback to old comfyui_server_url
+    server_url = prefs.gcs_server_url if hasattr(prefs, 'gcs_server_url') and prefs.gcs_server_url else prefs.comfyui_server_url
     
     if not server_url:
         raise ServerAPIError("ComfyUI Server URL not configured. Please set the server URL in addon preferences.")
@@ -66,19 +67,17 @@ def get_server_client():
     return ComfyUIServerClient(server_url, timeout=prefs.runcomfy_request_timeout)
 
 
-# NOTE: Server API mode disabled/latent
-# def is_server_mode():
-#     """
-#     Check if addon is in Server API mode.
-#     
-#     Returns:
-#         bool: True if Server API mode is enabled
-#     """
-#     prefs = get_addon_prefs()
-#     return prefs.use_server_api
-
 def is_server_mode():
-    """Server API mode is disabled - always return False"""
+    """
+    Check if addon is in GCS/Server mode (direct ComfyUI connection).
+    
+    Returns:
+        bool: True if GCS mode is selected
+    """
+    prefs = get_addon_prefs()
+    # Check if api_backend exists (for compatibility with older versions)
+    if hasattr(prefs, 'api_backend'):
+        return prefs.api_backend == 'GCS'
     return False
 
 

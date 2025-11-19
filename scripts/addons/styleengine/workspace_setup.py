@@ -1700,112 +1700,219 @@ def generate_ai_image_cloud(context):
     else:
         print(f"[Style Engine] Using SDXLREF workflow (0 reference images - pure SDXL mode)")
     
-    # 6. Ensure deployment exists
-    try:
-        deployment_id = runcomfy_deployment.DeploymentManager.ensure_deployment(workflow_type)
-    except runcomfy_client.RunComfyError as e:
-        print(f"[Style Engine] Failed to ensure deployment: {e}")
-        return
+    # 6. Ensure deployment exists (ONLY for RunComfy serverless mode)
+    deployment_id = None
+    overrides = None
     
-    # 7. Build overrides (depth not needed - AI generates it)
-    # Pass context for reference image encoding
-    overrides = build_runcomfy_overrides(
-        context=context,
-        session_data=session_data,
-        combined_b64=combined_b64,
-        workflow_type=workflow_type
-    )
+    if not runcomfy_deployment.is_server_mode():
+        # RunComfy serverless mode - ensure deployment and build overrides
+        try:
+            deployment_id = runcomfy_deployment.DeploymentManager.ensure_deployment(workflow_type)
+        except runcomfy_client.RunComfyError as e:
+            print(f"[Serverless API] Failed to ensure deployment: {e}")
+            return
+        
+        # 7. Build overrides (depth not needed - AI generates it)
+        # Pass context for reference image encoding
+        overrides = build_runcomfy_overrides(
+            context=context,
+            session_data=session_data,
+            combined_b64=combined_b64,
+            workflow_type=workflow_type
+        )
     
-    # 8. Submit inference (Serverless or Server mode)
+    # 8. Submit inference (GCS/Server or Serverless mode)
     try:
         import time
         
-        # NOTE: Server API mode disabled/latent - always use serverless
-        # if runcomfy_deployment.is_server_mode():
-        #     # ================================================================
-        #     # SERVER API MODE - Direct ComfyUI Backend submission
-        #     # ================================================================
-        #     from . import runcomfy_server_client
-        #     
-        #     print(f"[Style Engine] =========================================")
-        #     print(f"[Style Engine] SERVER API MODE - Starting Generation")
-        #     print(f"[Style Engine] =========================================")
-        #     
-        #     server_client = runcomfy_deployment.get_server_client()
-        #     
-        #     # Quick connection check before proceeding
-        #     print(f"[Style Engine] Verifying server connection...")
-        #     connected, conn_status = server_client.check_connection()
-        #     if not connected:
-        #         error = conn_status.get('error', 'Unknown error')
-        #         print(f"[Style Engine] ❌ Server connection check failed: {error}")
-        #         print(f"[Style Engine] Please use 'Test Server Connection' in preferences to diagnose.")
-        #         return
-        #     print(f"[Style Engine] ✓ Server connection verified")
-        #     print(f"[Style Engine]")
-        #     
-        #     # Load workflow JSON file
-        #     workflow_json = load_workflow_json_for_server(workflow_type)
-        #     if not workflow_json:
-        #         print("[Style Engine] Failed to load workflow JSON")
-        #         return
-        #     
-        #     # Apply overrides to workflow
-        #     runcomfy_server_client.apply_overrides_to_workflow(workflow_json, overrides)
-        #     
-        #     # Time the upload operation
-        #     submit_start = time.time()
-        #     
-        #     # Queue prompt
-        #     queue_response = server_client.queue_prompt(workflow_json)
-        #     prompt_id = queue_response.get('prompt_id')
-        #     
-        #     submit_duration = time.time() - submit_start
-        #     
-        #     print(f"[Server API] ⏱️ Upload took {submit_duration:.3f}s")
-        #     
-        #     # Start polling
-        #     runcomfy_polling.RunComfyPoller.start_polling(
-        #         deployment_id='server',  # Special marker for server mode
-        #         request_id=prompt_id,
-        #         callback=lambda success, result=None, error=None, workflow_type=None: 
-        #             on_generation_complete_server(context, success, result, error, workflow_type or 'sdxl', server_client),
-        #         workflow_type=workflow_type
-        #     )
-        #     
-        #     print(f"[Server API] 🖥️ Server generation started (prompt_id: {prompt_id[:8]}...)")
-        #     
-        # else:
-        
-        # Always use serverless mode
-        # ================================================================
-        # SERVERLESS API MODE - RunComfy deployment submission
-        # ================================================================
-        client = runcomfy_deployment.get_runcomfy_client()
-        
-        # Time the upload operation
-        submit_start = time.time()
-        response = client.submit_inference(deployment_id, overrides)
-        submit_duration = time.time() - submit_start
-        
-        request_id = response.get('request_id')
-        
-        print(f"[Serverless API] ⏱️ Upload took {submit_duration:.3f}s")
-        
-        # Start polling
-        runcomfy_polling.RunComfyPoller.start_polling(
-            deployment_id=deployment_id,
-            request_id=request_id,
-            callback=lambda success, result=None, error=None, workflow_type=None: 
-                on_generation_complete(context, success, result, error, workflow_type or 'sdxl'),
-            workflow_type=workflow_type
-        )
-        
-        print(f"[Serverless API] ☁️ Cloud generation started (request_id: {request_id[:8]}...)")
+        if runcomfy_deployment.is_server_mode():
+            # ================================================================
+            # GCS/SERVER MODE - Direct ComfyUI Backend submission
+            # ================================================================
+            from . import runcomfy_server_client
+            
+            print(f"[GCS] =========================================")
+            print(f"[GCS] DIRECT COMFYUI CONNECTION MODE")
+            print(f"[GCS] =========================================")
+            
+            server_client = runcomfy_deployment.get_server_client()
+            
+            # Quick connection check before proceeding
+            print(f"[GCS] Verifying server connection...")
+            connected, conn_status = server_client.check_connection()
+            if not connected:
+                error = conn_status.get('error', 'Unknown error')
+                print(f"[GCS] ❌ Server connection check failed: {error}")
+                print(f"[GCS] Please use 'Test Server Connection' in preferences to diagnose.")
+                return
+            print(f"[GCS] ✓ Server connection verified")
+            print(f"[GCS]")
+            
+            # UPLOAD IMAGE TO SERVER (key difference from RunComfy)
+            # GCS needs the actual file, not Base64
+            print(f"[GCS] Uploading combined.jpg to server...")
+            upload_start = time.time()
+            upload_response = server_client.upload_image(str(combined_path))
+            uploaded_filename = upload_response['name']
+            upload_duration = time.time() - upload_start
+            print(f"[GCS] ✓ Image uploaded: {uploaded_filename} ({upload_duration:.3f}s)")
+            print(f"[GCS]")
+            
+            # Load workflow JSON file (StyleEngine.json from addon's workflows/)
+            workflow_json = load_workflow_json_for_gcs()
+            if not workflow_json:
+                print("[GCS] Failed to load workflow JSON")
+                return
+            
+            print(f"[GCS] Patching workflow with session parameters...")
+            
+            # ============================================================
+            # CORE PARAMETERS
+            # ============================================================
+            
+            # Combined pass image (Node 15 - LoadImage "AO")
+            workflow_json["15"]["inputs"]["image"] = uploaded_filename
+            
+            # Prompt (Node 25 - PrimitiveString)
+            workflow_json["25"]["inputs"]["value"] = session_data['global_prompt']
+            
+            # Steps (Node 42 - PrimitiveInt)
+            workflow_json["42"]["inputs"]["value"] = session_data.get('steps', 15)
+            
+            # ControlNet strengths (Nodes 40, 41 - PrimitiveFloat)
+            workflow_json["40"]["inputs"]["value"] = session_data.get('silhouette_influence', 1.0)  # Canny
+            workflow_json["41"]["inputs"]["value"] = session_data.get('depth_influence', 1.0)  # Depth
+            
+            # ============================================================
+            # RESOLUTION (Node 5 - EmptyLatentImage)
+            # ============================================================
+            resolution = session_data.get('resolution', {})
+            workflow_json["5"]["inputs"]["width"] = resolution.get('width', 1024)
+            workflow_json["5"]["inputs"]["height"] = resolution.get('height', 1024)
+            
+            # ============================================================
+            # GLOBAL IPADAPTER STRENGTHS
+            # ============================================================
+            ref_images = session_data.get('reference_images', {})
+            
+            # Style Transfer Strength (Node 52)
+            workflow_json["52"]["inputs"]["value"] = ref_images.get('style_transfer_strength', 0.0)
+            
+            # Composition Strength (Node 90)
+            workflow_json["90"]["inputs"]["value"] = ref_images.get('composition_strength', 1.0)
+            
+            # Force Transfer Strength (Node 91)
+            workflow_json["91"]["inputs"]["value"] = ref_images.get('force_transfer_strength', 0.0)
+            
+            # ============================================================
+            # STYLE TRANSFER (ST) - Individual Weights
+            # ============================================================
+            workflow_json["129"]["inputs"]["value"] = ref_images.get('st1_weight', 1.0)  # ST1W
+            workflow_json["126"]["inputs"]["value"] = ref_images.get('st2_weight', 1.0)  # ST2W
+            workflow_json["125"]["inputs"]["value"] = ref_images.get('st3_weight', 0.0)  # ST3W
+            workflow_json["124"]["inputs"]["value"] = ref_images.get('st4_weight', 0.0)  # ST4W
+            workflow_json["123"]["inputs"]["value"] = ref_images.get('st5_weight', 0.0)  # ST5W
+            
+            # ============================================================
+            # COMPOSITION (COMP) - Individual Weights
+            # ============================================================
+            workflow_json["122"]["inputs"]["value"] = ref_images.get('comp1_weight', 1.0)  # COMP1W
+            workflow_json["121"]["inputs"]["value"] = ref_images.get('comp2_weight', 1.0)  # COMP2W
+            workflow_json["120"]["inputs"]["value"] = ref_images.get('comp3_weight', 1.0)  # COMP3W
+            workflow_json["119"]["inputs"]["value"] = ref_images.get('comp4_weight', 1.0)  # COMP4W
+            workflow_json["118"]["inputs"]["value"] = ref_images.get('comp5_weight', 1.0)  # COMP5W
+            
+            # ============================================================
+            # STRONG STYLE TRANSFER (SST) - Individual Weights
+            # ============================================================
+            workflow_json["117"]["inputs"]["value"] = ref_images.get('sst1_weight', 1.0)  # SST1W
+            workflow_json["116"]["inputs"]["value"] = ref_images.get('sst2_weight', 1.0)  # SST2W
+            workflow_json["115"]["inputs"]["value"] = ref_images.get('sst3_weight', 1.0)  # SST3W
+            workflow_json["114"]["inputs"]["value"] = ref_images.get('sst4_weight', 1.0)  # SST4W
+            workflow_json["113"]["inputs"]["value"] = ref_images.get('sst5_weight', 1.0)  # SST5W
+            
+            # ============================================================
+            # REFERENCE IMAGE PATHS (LoadImage nodes)
+            # ============================================================
+            # Style Transfer images
+            workflow_json["65"]["inputs"]["image"] = ref_images.get('st1_path', 'blank.png') or 'blank.png'  # ST1
+            workflow_json["63"]["inputs"]["image"] = ref_images.get('st2_path', 'blank.png') or 'blank.png'  # ST2
+            workflow_json["64"]["inputs"]["image"] = ref_images.get('st3_path', 'blank.png') or 'blank.png'  # ST3
+            workflow_json["94"]["inputs"]["image"] = ref_images.get('st4_path', 'blank.png') or 'blank.png'  # ST4
+            workflow_json["97"]["inputs"]["image"] = ref_images.get('st5_path', 'blank.png') or 'blank.png'  # ST5
+            
+            # Composition images
+            workflow_json["78"]["inputs"]["image"] = ref_images.get('comp1_path', 'blank.png') or 'blank.png'  # COMP1
+            workflow_json["77"]["inputs"]["image"] = ref_images.get('comp2_path', 'blank.png') or 'blank.png'  # COMP2
+            workflow_json["76"]["inputs"]["image"] = ref_images.get('comp3_path', 'blank.png') or 'blank.png'  # COMP3
+            workflow_json["100"]["inputs"]["image"] = ref_images.get('comp4_path', 'blank.png') or 'blank.png'  # COMP4
+            workflow_json["103"]["inputs"]["image"] = ref_images.get('comp5_path', 'blank.png') or 'blank.png'  # COMP5
+            
+            # Strong Style Transfer images
+            workflow_json["89"]["inputs"]["image"] = ref_images.get('sst1_path', 'blank.png') or 'blank.png'  # SST1
+            workflow_json["88"]["inputs"]["image"] = ref_images.get('sst2_path', 'blank.png') or 'blank.png'  # SST2
+            workflow_json["87"]["inputs"]["image"] = ref_images.get('sst3_path', 'blank.png') or 'blank.png'  # SST3
+            workflow_json["106"]["inputs"]["image"] = ref_images.get('sst4_path', 'blank.png') or 'blank.png'  # SST4
+            workflow_json["109"]["inputs"]["image"] = ref_images.get('sst5_path', 'blank.png') or 'blank.png'  # SST5
+            
+            print(f"[GCS] ✓ Workflow patched successfully")
+            print(f"[GCS]   - Resolution: {resolution.get('width', 1024)}x{resolution.get('height', 1024)}")
+            print(f"[GCS]   - Steps: {session_data.get('steps', 15)}")
+            print(f"[GCS]   - ControlNet: Canny={session_data.get('silhouette_influence', 1.0):.2f}, Depth={session_data.get('depth_influence', 1.0):.2f}")
+            print(f"[GCS]   - Global Strengths: ST={ref_images.get('style_transfer_strength', 0.0):.2f}, Comp={ref_images.get('composition_strength', 1.0):.2f}, Force={ref_images.get('force_transfer_strength', 0.0):.2f}")
+            
+            # Time the submission operation
+            submit_start = time.time()
+            
+            # Queue prompt
+            queue_response = server_client.queue_prompt(workflow_json)
+            prompt_id = queue_response.get('prompt_id')
+            
+            submit_duration = time.time() - submit_start
+            
+            print(f"[GCS] ⏱️ Submission took {submit_duration:.3f}s")
+            
+            # Start polling
+            runcomfy_polling.RunComfyPoller.start_polling(
+                deployment_id='server',  # Special marker for server mode
+                request_id=prompt_id,
+                callback=lambda success, result=None, error=None, workflow_type=None: 
+                    on_generation_complete_server(context, success, result, error, workflow_type or 'sdxl', server_client),
+                workflow_type=workflow_type
+            )
+            
+            print(f"[GCS] 🖥️ GCS generation started (prompt_id: {prompt_id[:8]}...)")
+            
+        else:
+            # ================================================================
+            # SERVERLESS API MODE - RunComfy deployment submission
+            # ================================================================
+            client = runcomfy_deployment.get_runcomfy_client()
+            
+            # Time the upload operation
+            submit_start = time.time()
+            response = client.submit_inference(deployment_id, overrides)
+            submit_duration = time.time() - submit_start
+            
+            request_id = response.get('request_id')
+            
+            print(f"[Serverless API] ⏱️ Upload took {submit_duration:.3f}s")
+            
+            # Start polling
+            runcomfy_polling.RunComfyPoller.start_polling(
+                deployment_id=deployment_id,
+                request_id=request_id,
+                callback=lambda success, result=None, error=None, workflow_type=None: 
+                    on_generation_complete(context, success, result, error, workflow_type or 'sdxl'),
+                workflow_type=workflow_type
+            )
+            
+            print(f"[Serverless API] ☁️ Cloud generation started (request_id: {request_id[:8]}...)")
         
     except runcomfy_client.RunComfyError as e:
-        # NOTE: Server API mode disabled - only serverless errors possible
         print(f"[Serverless API] Failed to submit inference: {e}")
+    except runcomfy_server_client.ServerAPIError as e:
+        print(f"[GCS] Failed to submit to server: {e}")
 
 
 def encode_blender_image_to_base64(img, max_size=1536):
@@ -2133,6 +2240,35 @@ def load_workflow_json_for_server(workflow_type):
         return None
 
 
+def load_workflow_json_for_gcs():
+    """
+    Load workflow JSON file for GCS mode (self-hosted ComfyUI).
+    Uses StyleEngine.json from the addon's workflows/ directory.
+    
+    Returns:
+        dict: Workflow JSON or None if failed
+    """
+    import json
+    from pathlib import Path
+    
+    # Determine workflow file path - workflows folder is inside the addon directory
+    addon_dir = Path(__file__).parent  # This is scripts/addons/styleengine/
+    workflows_dir = addon_dir / "workflows"
+    
+    # Use StyleEngine.json for GCS mode
+    workflow_file = workflows_dir / "StyleEngine.json"
+    
+    try:
+        with open(workflow_file, 'r') as f:
+            workflow_json = json.load(f)
+        print(f"[GCS] ✓ Loaded workflow: {workflow_file.name} from {workflows_dir}")
+        return workflow_json
+    except Exception as e:
+        print(f"[GCS] ❌ Failed to load workflow {workflow_file}: {e}")
+        print(f"[GCS] Make sure StyleEngine.json exists at: {workflow_file}")
+        return None
+
+
 def on_generation_complete_server(context, success, result, error, workflow_type, server_client):
     """
     Callback for Server API generation completion.
@@ -2167,36 +2303,52 @@ def on_generation_complete_server(context, success, result, error, workflow_type
         subfolder = first_image.get('subfolder', '')
         image_type = first_image.get('type', 'output')
         
-        print(f"[Server API] Downloading image: {filename}")
+        print(f"[GCS] Downloading image: {filename}")
         
-        # Get temp directory
+        # Get temp directory (already includes ai_vision)
         temp_dir = get_temp_directory(context)
-        ai_vision_dir = temp_dir / "ai_vision"
-        ai_vision_dir.mkdir(parents=True, exist_ok=True)
+        temp_dir.mkdir(parents=True, exist_ok=True)
         
         # Save path
-        save_path = ai_vision_dir / "current_ai.png"
+        save_path = temp_dir / "current_ai.png"
         
         # Download image from server
         if server_client.download_image(filename, str(save_path), subfolder, image_type):
-            print(f"[Server API] ✅ Image downloaded: {save_path}")
+            print(f"[GCS] ✅ Image downloaded: {save_path}")
             
-            # Update camera background image (same as serverless)
-            update_camera_background_image(context, save_path)
+            # Update camera background (on-demand refresh - only when new image arrives!)
+            refresh_ai_image()
+            print(f"[GCS] ✓ Camera background updated with new AI image")
             
-            # Save to data/generated with increment
-            save_generated_image_with_increment(context, save_path)
+            # Save to output_path if set (same as RunComfy)
+            props = context.scene.style_engine_props
+            if hasattr(props, 'output_path') and props.output_path and os.path.exists(props.output_path):
+                import shutil
+                from datetime import datetime
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                output_dir = Path(props.output_path) / "generated"
+                output_dir.mkdir(exist_ok=True, parents=True)
+                
+                output_path = output_dir / f"{timestamp}_gcs.png"
+                try:
+                    shutil.copy2(save_path, output_path)
+                    print(f"[GCS] 💾 Saved to {output_path}")
+                except Exception as e:
+                    print(f"[GCS] Failed to save to output_path: {e}")
+            else:
+                print(f"[GCS] Output path not set, skipping save")
             
             # Trigger next generation cycle if auto-generate is enabled
-            if context.scene.style_engine.auto_generate:
-                trigger_next_generation_cycle(context)
+            trigger_next_generation_cycle(context)
         else:
-            print("[Server API] Failed to download image")
+            print(f"[GCS] ❌ Failed to download image")
     
     except Exception as e:
-        print(f"[Server API] Error in completion callback: {e}")
+        print(f"[GCS] Error in completion callback: {e}")
         import traceback
         traceback.print_exc()
+        # Still trigger next cycle even on error
+        trigger_next_generation_cycle(context)
 
 
 def on_generation_complete(context, success, result, error, workflow_type='sdxl'):
