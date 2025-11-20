@@ -37,6 +37,29 @@ class WM_OT_ProjectTextureScene(Operator):
         return {'FINISHED'}
 
 
+class WM_OT_SetVisualization(Operator):
+    """Switch camera background visualization type"""
+    bl_idname = "style_engine.set_visualization"
+    bl_label = "Set Visualization"
+    bl_description = "Switch between Combined, Silhouette (Canny), and Depth visualizations"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    viz_type: bpy.props.EnumProperty(
+        name="Visualization Type",
+        items=[
+            ('COMBINED', "Combined", "Final generated image"),
+            ('CANNY', "Silhouette", "Canny edge detection"),
+            ('DEPTH', "Depth", "Depth map"),
+        ],
+        default='COMBINED'
+    )
+    
+    def execute(self, context):
+        style_props = context.scene.style_engine_props
+        style_props.visualization_type = self.viz_type
+        return {'FINISHED'}
+
+
 # ----------------------------------------------------------------
 # MAIN PIE MENU
 # ----------------------------------------------------------------
@@ -144,47 +167,67 @@ class STYLEENGINE_MT_pie_main(Menu):
                  icon='FILE_REFRESH')
         
         # ═══════════════════════════════════════════════════
-        # Position 3: RIGHT (EAST) - Reference Image
+        # Position 3: RIGHT (EAST) - Visualization Type
         # ═══════════════════════════════════════════════════
-        box = pie.box()
-        col = box.column(align=True)
-        col.scale_y = 1.1
+        # Check if preview images are enabled
+        prefs = context.preferences.addons.get('styleengine')
+        show_visualization = (prefs and 
+                             prefs.preferences.api_backend == 'GCS' and 
+                             prefs.preferences.gcs_download_preview_images)
         
-        # Header
-        row = col.row()
-        row.label(text="Reference Image", icon='IMAGE_REFERENCE')
-        col.separator()
-        
-        # Enable/disable IPAdapter
-        row = col.row()
-        row.scale_y = 1.3
-        row.prop(style_props, "use_ipadapter", 
-                 text="Use Reference Image", 
-                 toggle=True,
-                 icon='CHECKMARK' if style_props.use_ipadapter else 'CHECKBOX_DEHLT')
-        
-        col.separator()
-        
-        # Only show settings if enabled
-        if style_props.use_ipadapter:
-            # File picker
-            col.label(text="Image File")
-            col.prop(style_props, "ipadapter_reference_image", text="")
+        if show_visualization:
+            # Show Visualization Type switcher
+            box = pie.box()
+            col = box.column(align=True)
+            col.scale_y = 1.1
+            
+            # Header
+            row = col.row()
+            row.label(text="Visualization", icon='VIEW_CAMERA')
+            col.separator()
+            
+            # Visualization type buttons
+            row = col.row(align=True)
+            row.scale_y = 1.5
+            
+            # Combined button
+            op = row.operator("style_engine.set_visualization", 
+                             text="Combined", 
+                             icon='IMAGE_DATA',
+                             depress=(style_props.visualization_type == 'COMBINED'))
+            op.viz_type = 'COMBINED'
+            
+            # Silhouette button
+            op = row.operator("style_engine.set_visualization", 
+                             text="Silhouette", 
+                             icon='MESH_PLANE',
+                             depress=(style_props.visualization_type == 'CANNY'))
+            op.viz_type = 'CANNY'
+            
+            # Depth button
+            op = row.operator("style_engine.set_visualization", 
+                             text="Depth", 
+                             icon='EMPTY_SINGLE_ARROW',
+                             depress=(style_props.visualization_type == 'DEPTH'))
+            op.viz_type = 'DEPTH'
             
             col.separator()
             
-            # Type dropdown
-            col.label(text="Mode")
-            col.prop(style_props, "ipadapter_weight_type", text="")
-            
-            col.separator()
-            
-            # Strength slider
-            col.label(text="Strength")
-            col.prop(style_props, "ipadapter_strength", text="", slider=True)
+            # Show current visualization
+            col.label(text=f"Current: {style_props.visualization_type.title()}", icon='INFO')
         else:
-            # Show message when disabled
-            col.label(text="Enable to configure", icon='INFO')
+            # Fallback: empty box or placeholder
+            box = pie.box()
+            col = box.column(align=True)
+            col.scale_y = 1.1
+            
+            row = col.row()
+            row.label(text="Visualization", icon='VIEW_CAMERA')
+            col.separator()
+            
+            col.label(text="Enable 'Download Preview", icon='INFO')
+            col.label(text="Images' in GCS settings")
+            col.label(text="to use this feature")
 
 
 # ----------------------------------------------------------------
@@ -194,6 +237,7 @@ class STYLEENGINE_MT_pie_main(Menu):
 classes = (
     WM_OT_ProjectTextureUV,
     WM_OT_ProjectTextureScene,
+    WM_OT_SetVisualization,
     STYLEENGINE_MT_pie_main,
 )
 

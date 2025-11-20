@@ -1803,7 +1803,7 @@ def generate_ai_image_cloud(context):
                 print(f"[GCS] ✓ Uploaded {ref_upload_count} reference images")
             print(f"[GCS]")
             
-            # Load workflow JSON file (StyleEngine.json from addon's workflows/)
+            # Load workflow JSON file (StyleEnginePreview.json from addon's workflows/)
             workflow_json = load_workflow_json_for_gcs()
             if not workflow_json:
                 print("[GCS] Failed to load workflow JSON")
@@ -2289,7 +2289,8 @@ def load_workflow_json_for_server(workflow_type):
 def load_workflow_json_for_gcs():
     """
     Load workflow JSON file for GCS mode (self-hosted ComfyUI).
-    Uses StyleEngine.json from the addon's workflows/ directory.
+    Uses StyleEnginePreview.json from the addon's workflows/ directory.
+    This workflow includes SaveImage nodes for Canny and Depth preview images.
     
     Returns:
         dict: Workflow JSON or None if failed
@@ -2301,8 +2302,8 @@ def load_workflow_json_for_gcs():
     addon_dir = Path(__file__).parent  # This is scripts/addons/styleengine/
     workflows_dir = addon_dir / "workflows"
     
-    # Use StyleEngine.json for GCS mode
-    workflow_file = workflows_dir / "StyleEngine.json"
+    # Use StyleEnginePreview.json for GCS mode (includes preview SaveImage nodes)
+    workflow_file = workflows_dir / "StyleEnginePreview.json"
     
     try:
         with open(workflow_file, 'r') as f:
@@ -2311,7 +2312,7 @@ def load_workflow_json_for_gcs():
         return workflow_json
     except Exception as e:
         print(f"[GCS] ❌ Failed to load workflow {workflow_file}: {e}")
-        print(f"[GCS] Make sure StyleEngine.json exists at: {workflow_file}")
+        print(f"[GCS] Make sure StyleEnginePreview.json exists at: {workflow_file}")
         return None
 
 
@@ -2340,34 +2341,69 @@ def on_generation_complete_server(context, success, result, error, workflow_type
         images = runcomfy_server_client.extract_output_images(result)
         
         if not images:
-            print("[Server API] No output images found in result")
+            print("[GCS] No output images found in result")
+            trigger_next_generation_cycle(context)
             return
-        
-        # Download first image
-        first_image = images[0]
-        filename = first_image['filename']
-        subfolder = first_image.get('subfolder', '')
-        image_type = first_image.get('type', 'output')
-        
-        print(f"[GCS] Downloading image: {filename}")
         
         # Get temp directory (already includes ai_vision)
         temp_dir = get_temp_directory(context)
         temp_dir.mkdir(parents=True, exist_ok=True)
         
-        # Save path
-        save_path = temp_dir / "current_ai.png"
+        # Check if preview images should be downloaded
+        prefs = context.preferences.addons['styleengine'].preferences
+        download_previews = prefs.gcs_download_preview_images
         
-        # Download image from server
-        if server_client.download_image(filename, str(save_path), subfolder, image_type):
-            print(f"[GCS] ✅ Image downloaded: {save_path}")
+        print(f"[GCS] Found {len(images)} output images")
+        if download_previews:
+            print(f"[GCS] Preview images enabled - downloading all images")
+        
+        # Download each image
+        main_image_downloaded = False
+        for img_info in images:
+            filename = img_info['filename']
+            subfolder = img_info.get('subfolder', '')
+            image_type = img_info.get('type', 'output')
             
-            # Update camera background (on-demand refresh - only when new image arrives!)
+            # Determine save name based on filename prefix
+            if filename.startswith('canny'):
+                if not download_previews:
+                    continue  # Skip preview images if disabled
+                save_name = 'canny.png'
+                print(f"[GCS] Downloading Canny edge map: {filename}")
+            elif filename.startswith('depth'):
+                if not download_previews:
+                    continue  # Skip preview images if disabled
+                save_name = 'depth.png'
+                print(f"[GCS] Downloading Depth map: {filename}")
+            elif filename.startswith('StyleEngine'):
+                save_name = 'current_ai.png'
+                print(f"[GCS] Downloading final image: {filename}")
+            else:
+                # Unknown image, skip
+                print(f"[GCS] Skipping unknown image: {filename}")
+                continue
+            
+            save_path = temp_dir / save_name
+            
+            # Download image from server
+            if server_client.download_image(filename, str(save_path), subfolder, image_type):
+                print(f"[GCS] ✅ Saved: {save_name}")
+                if save_name == 'current_ai.png':
+                    main_image_downloaded = True
+            else:
+                print(f"[GCS] ❌ Failed to download: {save_name}")
+        
+        # Update camera background if main image was downloaded
+        if main_image_downloaded:
+            # Reset visualization to COMBINED (final image) after generation
+            props = context.scene.style_engine_props
+            if hasattr(props, 'visualization_type'):
+                props.visualization_type = 'COMBINED'
+            
             refresh_ai_image()
             print(f"[GCS] ✓ Camera background updated with new AI image")
             
             # Save to output_path if set (same as RunComfy)
-            props = context.scene.style_engine_props
             if hasattr(props, 'output_path') and props.output_path and os.path.exists(props.output_path):
                 import shutil
                 from datetime import datetime
@@ -2377,17 +2413,15 @@ def on_generation_complete_server(context, success, result, error, workflow_type
                 
                 output_path = output_dir / f"{timestamp}_gcs.png"
                 try:
-                    shutil.copy2(save_path, output_path)
+                    shutil.copy2(temp_dir / "current_ai.png", output_path)
                     print(f"[GCS] 💾 Saved to {output_path}")
                 except Exception as e:
                     print(f"[GCS] Failed to save to output_path: {e}")
             else:
                 print(f"[GCS] Output path not set, skipping save")
-            
-            # Trigger next generation cycle if auto-generate is enabled
-            trigger_next_generation_cycle(context)
-        else:
-            print(f"[GCS] ❌ Failed to download image")
+        
+        # Trigger next generation cycle if auto-generate is enabled
+        trigger_next_generation_cycle(context)
     
     except Exception as e:
         print(f"[GCS] Error in completion callback: {e}")

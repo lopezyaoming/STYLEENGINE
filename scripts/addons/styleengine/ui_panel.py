@@ -253,6 +253,71 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         update=update_background_opacity
     )
     
+    def update_visualization_type(self, context):
+        """Switch camera background between Combined, Canny, and Depth visualizations."""
+        from pathlib import Path
+        from . import workspace_setup
+        
+        # Get temp directory
+        temp_dir = workspace_setup.get_temp_directory(context)
+        
+        # Determine which image to display
+        if self.visualization_type == 'COMBINED':
+            image_path = temp_dir / "current_ai.png"
+            display_name = "Combined (Final)"
+        elif self.visualization_type == 'CANNY':
+            image_path = temp_dir / "canny.png"
+            display_name = "Silhouette (Canny)"
+        elif self.visualization_type == 'DEPTH':
+            image_path = temp_dir / "depth.png"
+            display_name = "Depth Map"
+        else:
+            return
+        
+        # Check if file exists
+        if not image_path.exists():
+            print(f"[Visualization] ⚠️ {display_name} not found at {image_path}")
+            print(f"[Visualization] Enable 'Download Preview Images' in preferences and generate an image first")
+            return
+        
+        # Update camera background
+        if "ai_camera" in bpy.data.objects:
+            ai_camera = bpy.data.objects["ai_camera"]
+            cam_data = ai_camera.data
+            
+            if cam_data.background_images:
+                bg = cam_data.background_images[0]
+                
+                # Load or reload the image
+                image_name = image_path.name
+                if image_name in bpy.data.images:
+                    img = bpy.data.images[image_name]
+                    img.reload()
+                else:
+                    img = bpy.data.images.load(str(image_path))
+                
+                bg.image = img
+                print(f"[Visualization] ✓ Switched to: {display_name}")
+                
+                # Force viewport update
+                for area in context.screen.areas:
+                    if area.type == 'VIEW_3D':
+                        area.tag_redraw()
+        else:
+            print(f"[Visualization] ⚠️ ai_camera not found. Setup workspace first.")
+    
+    visualization_type: bpy.props.EnumProperty(
+        name="Visualization Type",
+        description="Switch between different visualization modes",
+        items=[
+            ('COMBINED', "Combined", "Final generated image", 'IMAGE_DATA', 0),
+            ('CANNY', "Silhouette", "Canny edge detection (what the AI sees as edges)", 'MESH_PLANE', 1),
+            ('DEPTH', "Depth", "Depth map (what the AI sees as depth)", 'EMPTY_SINGLE_ARROW', 2),
+        ],
+        default='COMBINED',
+        update=update_visualization_type
+    )
+    
     def update_ai_resolution(self, context):
         """
         ROCK SOLID: Update resolution immediately when user changes dropdown.

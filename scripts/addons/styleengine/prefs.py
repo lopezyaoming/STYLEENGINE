@@ -255,6 +255,12 @@ class StyleEnginePreferences(AddonPreferences):
         description="Connection status of the GCS server",
         default="Not Connected"
     )
+    
+    gcs_download_preview_images: BoolProperty(
+        name="Download Preview Images",
+        description="Download Canny and Depth preview images for visual feedback (stored in temp directory)",
+        default=False
+    )
 
     # ----------------------------------------------------------------
     # SERVER API MODE SETTINGS (DISABLED/LATENT)
@@ -429,6 +435,15 @@ class StyleEnginePreferences(AddonPreferences):
                 box.separator()
                 status_col = box.column(align=True)
                 status_col.label(text=f"Status: {self.gcs_server_status}", icon='INFO')
+            
+            # Download preview images option
+            box.separator()
+            preview_box = box.box()
+            preview_box.label(text="Preview Images:", icon='IMAGE_DATA')
+            col = preview_box.column(align=True)
+            col.prop(self, "gcs_download_preview_images", text="Download Canny & Depth Maps")
+            col.label(text="Preview images saved to temp directory for visual feedback", icon='INFO')
+            col.scale_y = 0.8
             
             # Test connection button
             box.separator()

@@ -1,0 +1,252 @@
+╔══════════════════════════════════════════════════════════════════╗
+║           STYLE ENGINE PIE MENU (Alt+W)                          ║
+║           VISUALIZATION SWITCHER - RIGHT SLOT                    ║
+╚══════════════════════════════════════════════════════════════════╝
+
+                         ┌─────────────┐
+                         │   PROJECT   │
+                         │   TEXTURE   │
+                         └─────────────┘
+                                │
+                                │
+        ┌───────────────────────┼───────────────────────┐
+        │                       │                       │
+        │                       │                       │
+┌───────────────┐       ┌───────────────┐       ┌───────────────┐
+│     SETUP     │       │   GENERATE    │       │ VISUALIZATION │ ← NEW!
+│   WORKSPACE   │       │     IMAGE     │       │     TYPE      │
+│               │       │               │       │               │
+│ • Resolution  │       │ • Influences  │       │ ┌───┬───┬───┐ │
+│ • Opacity     │       │ • Steps       │       │ │ C │ S │ D │ │
+└───────────────┘       │ • Autogen     │       │ └───┴───┴───┘ │
+                        └───────────────┘       └───────────────┘
+                                                   C = Combined
+                                                   S = Silhouette
+                                                   D = Depth
+
+
+╔══════════════════════════════════════════════════════════════════╗
+║              VISUALIZATION SWITCHER - DETAILED VIEW              ║
+╚══════════════════════════════════════════════════════════════════╝
+
+┌──────────────────────────────────────────────────────────────────┐
+│ 📷 Visualization                                                 │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  WHEN ENABLED (GCS + Download Preview Images ON):               │
+│                                                                  │
+│  ┌────────────────┬────────────────┬────────────────┐           │
+│  │  🖼️ Combined   │  🔲 Silhouette │  ➡️ Depth      │           │
+│  │   [PRESSED]    │                │                │           │
+│  └────────────────┴────────────────┴────────────────┘           │
+│                                                                  │
+│  ℹ️ Current: Combined                                           │
+│                                                                  │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  WHEN DISABLED (Not GCS or Preview Images OFF):                 │
+│                                                                  │
+│  ℹ️ Enable 'Download Preview                                    │
+│     Images' in GCS settings                                      │
+│     to use this feature                                          │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
+
+
+╔══════════════════════════════════════════════════════════════════╗
+║                  VISUALIZATION SWITCHING DEMO                    ║
+╚══════════════════════════════════════════════════════════════════╝
+
+STEP 1: PRESS Alt+W
+────────────────────────────────────────────────────────────────────
+                    [Pie menu opens]
+
+
+STEP 2: LOOK RIGHT (EAST)
+────────────────────────────────────────────────────────────────────
+    ┌──────────────────────────────────────┐
+    │ 📷 Visualization                     │
+    ├──────────────────────────────────────┤
+    │ ┌──────┬──────┬──────┐               │
+    │ │  🖼️  │  🔲  │  ➡️  │               │
+    │ └──────┴──────┴──────┘               │
+    │ ℹ️ Current: Combined                 │
+    └──────────────────────────────────────┘
+
+
+STEP 3: CLICK "SILHOUETTE"
+────────────────────────────────────────────────────────────────────
+    Camera background switches to canny.png
+    
+    ┌──────────────────────────────────────┐
+    │ 📷 Visualization                     │
+    ├──────────────────────────────────────┤
+    │ ┌──────┬──────┬──────┐               │
+    │ │  🖼️  │ [🔲] │  ➡️  │  ← PRESSED    │
+    │ └──────┴──────┴──────┘               │
+    │ ℹ️ Current: Canny                    │
+    └──────────────────────────────────────┘
+    
+    Console: [Visualization] ✓ Switched to: Silhouette (Canny)
+
+
+STEP 4: CLICK "DEPTH"
+────────────────────────────────────────────────────────────────────
+    Camera background switches to depth.png
+    
+    ┌──────────────────────────────────────┐
+    │ 📷 Visualization                     │
+    ├──────────────────────────────────────┤
+    │ ┌──────┬──────┬──────┐               │
+    │ │  🖼️  │  🔲  │ [➡️] │  ← PRESSED    │
+    │ └──────┴──────┴──────┘               │
+    │ ℹ️ Current: Depth                    │
+    └──────────────────────────────────────┘
+    
+    Console: [Visualization] ✓ Switched to: Depth Map
+
+
+STEP 5: CLICK "COMBINED"
+────────────────────────────────────────────────────────────────────
+    Camera background switches to current_ai.png
+    
+    ┌──────────────────────────────────────┐
+    │ 📷 Visualization                     │
+    ├──────────────────────────────────────┤
+    │ ┌──────┬──────┬──────┐               │
+    │ │ [🖼️] │  🔲  │  ➡️  │  ← PRESSED    │
+    │ └──────┴──────┴──────┘               │
+    │ ℹ️ Current: Combined                 │
+    └──────────────────────────────────────┘
+    
+    Console: [Visualization] ✓ Switched to: Combined (Final)
+
+
+╔══════════════════════════════════════════════════════════════════╗
+║                  WHAT YOU SEE IN VIEWPORT                        ║
+╚══════════════════════════════════════════════════════════════════╝
+
+COMBINED VIEW (current_ai.png):
+┌────────────────────────────────────────────────────────────────┐
+│                                                                │
+│   ╔═══════════════════════════════════════════════╗           │
+│   ║                                               ║           │
+│   ║     🏠                                        ║           │
+│   ║         🌲🌲                                  ║           │
+│   ║                                               ║           │
+│   ║              🌊🌊🌊🌊🌊🌊                     ║           │
+│   ║                                               ║           │
+│   ╚═══════════════════════════════════════════════╝           │
+│                                                                │
+│   Full color, final AI-generated image                        │
+│                                                                │
+└────────────────────────────────────────────────────────────────┘
+
+
+SILHOUETTE VIEW (canny.png):
+┌────────────────────────────────────────────────────────────────┐
+│                                                                │
+│   ╔═══════════════════════════════════════════════╗           │
+│   ║                                               ║           │
+│   ║     ╔═╗                                       ║           │
+│   ║     ║ ║    ╱╲  ╱╲                            ║           │
+│   ║     ╚═╝   ╱  ╲╱  ╲                           ║           │
+│   ║                                               ║           │
+│   ║          ═══════════════                      ║           │
+│   ║                                               ║           │
+│   ╚═══════════════════════════════════════════════╝           │
+│                                                                │
+│   White edges on black background (edge detection)            │
+│                                                                │
+└────────────────────────────────────────────────────────────────┘
+
+
+DEPTH VIEW (depth.png):
+┌────────────────────────────────────────────────────────────────┐
+│                                                                │
+│   ╔═══════════════════════════════════════════════╗           │
+│   ║                                               ║           │
+│   ║     ██                                        ║           │
+│   ║         ▓▓▓▓                                  ║           │
+│   ║                                               ║           │
+│   ║              ░░░░░░░░░░░░                     ║           │
+│   ║                                               ║           │
+│   ╚═══════════════════════════════════════════════╝           │
+│                                                                │
+│   Grayscale depth map (bright=near, dark=far)                 │
+│                                                                │
+└────────────────────────────────────────────────────────────────┘
+
+
+╔══════════════════════════════════════════════════════════════════╗
+║                  TYPICAL ARTIST WORKFLOW                         ║
+╚══════════════════════════════════════════════════════════════════╝
+
+1. GENERATE IMAGE
+   ├─ Alt+W → Generate Image
+   ├─ Wait for completion
+   └─ ✓ Camera shows final image (auto-set to COMBINED)
+
+2. INSPECT EDGES
+   ├─ Alt+W → Right → Silhouette
+   ├─ Check edge detection quality
+   └─ Verify important contours are captured
+
+3. INSPECT DEPTH
+   ├─ Alt+W → Right → Depth
+   ├─ Check depth perception
+   └─ Verify foreground/background separation
+
+4. BACK TO FINAL
+   ├─ Alt+W → Right → Combined
+   └─ View final result
+
+5. ITERATE
+   ├─ Adjust scene geometry
+   ├─ Alt+W → Generate Image
+   └─ Repeat inspection cycle
+
+
+╔══════════════════════════════════════════════════════════════════╗
+║                  REQUIREMENTS & SETUP                            ║
+╚══════════════════════════════════════════════════════════════════╝
+
+TO USE THIS FEATURE:
+────────────────────────────────────────────────────────────────────
+1. ✅ Backend Mode = "Self-Hosted ComfyUI" (GCS)
+2. ✅ "Download Preview Images" enabled in preferences
+3. ✅ At least one generation completed
+4. ✅ Workspace setup (ai_camera exists)
+
+IF REQUIREMENTS NOT MET:
+────────────────────────────────────────────────────────────────────
+Pie menu shows:
+┌──────────────────────────────────────┐
+│ 📷 Visualization                     │
+├──────────────────────────────────────┤
+│ ℹ️ Enable 'Download Preview          │
+│    Images' in GCS settings            │
+│    to use this feature                │
+└──────────────────────────────────────┘
+
+
+╔══════════════════════════════════════════════════════════════════╗
+║                  KEYBOARD SHORTCUTS                              ║
+╚══════════════════════════════════════════════════════════════════╝
+
+Alt+W                  → Open Style Engine pie menu
+Alt+W → Right → Click  → Switch visualization
+Esc                    → Close pie menu
+
+
+╔══════════════════════════════════════════════════════════════════╗
+║                  QUICK REFERENCE                                 ║
+╚══════════════════════════════════════════════════════════════════╝
+
+📍 Location:       Alt+W → RIGHT (EAST) slot
+🎯 Purpose:        Quick visualization switching
+🔄 Auto-reset:     Returns to COMBINED after generation
+📁 Files used:     current_ai.png, canny.png, depth.png
+⚙️ Requirement:    GCS mode + Download Preview Images enabled
+🎨 Use case:       Inspect ControlNet preprocessing
+

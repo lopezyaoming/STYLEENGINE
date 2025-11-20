@@ -1,0 +1,138 @@
+╔══════════════════════════════════════════════════════════════════╗
+║                    BLENDER PREFERENCES                           ║
+║                  Add-ons → Style Engine                          ║
+╚══════════════════════════════════════════════════════════════════╝
+
+┌──────────────────────────────────────────────────────────────────┐
+│ 🌐 Backend Mode                                                  │
+├──────────────────────────────────────────────────────────────────┤
+│  ◉ Self-Hosted ComfyUI                                           │
+│     Connect directly to a self-hosted ComfyUI instance           │
+│     (GCS, AWS, or Localhost)                                     │
+└──────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────┐
+│ 🖥️ Self-Hosted ComfyUI Server                                   │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│ 🌐 Server URL:                                                   │
+│ ┌──────────────────────────────────────────────────────────────┐ │
+│ │ http://34.19.119.45:8188                                     │ │
+│ └──────────────────────────────────────────────────────────────┘ │
+│                                                                  │
+│ ✓ URL format looks valid                                        │
+│                                                                  │
+│ Example URLs:                                                    │
+│   • Google Cloud: http://34.19.119.45:8188                      │
+│   • Localhost: http://127.0.0.1:8188                            │
+│   • AWS: http://ec2-xx-xx-xx-xx.compute.amazonaws.com:8188      │
+│                                                                  │
+│ ℹ️ Status: Connected                                            │
+│                                                                  │
+│ ┌────────────────────────────────────────────────────────────┐  │
+│ │ 🖼️ Preview Images:                                          │  │
+│ ├────────────────────────────────────────────────────────────┤  │
+│ │ ☑ Download Canny & Depth Maps                              │  │
+│ │ ℹ️ Preview images saved to temp directory for visual       │  │
+│ │    feedback                                                 │  │
+│ └────────────────────────────────────────────────────────────┘  │
+│                                                                  │
+│ ┌──────────────────────────────────────────────────────────────┐ │
+│ │           🔌 Test Server Connection                          │ │
+│ └──────────────────────────────────────────────────────────────┘ │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
+
+
+╔══════════════════════════════════════════════════════════════════╗
+║                    WHAT GETS DOWNLOADED                          ║
+╚══════════════════════════════════════════════════════════════════╝
+
+┌─────────────────────────┬─────────────────────────────────────────┐
+│ Preview Images: OFF     │ Preview Images: ON                      │
+│ (Default)               │                                         │
+├─────────────────────────┼─────────────────────────────────────────┤
+│                         │                                         │
+│ 📁 Temp Directory:      │ 📁 Temp Directory:                      │
+│   └─ current_ai.png     │   ├─ current_ai.png  ← Final image     │
+│                         │   ├─ canny.png       ← Edge detection  │
+│                         │   └─ depth.png       ← Depth map       │
+│                         │                                         │
+│ 📊 Bandwidth: ~1 MB     │ 📊 Bandwidth: ~3 MB                     │
+│ ⏱️ Time: ~500ms         │ ⏱️ Time: ~1.5s                          │
+│                         │                                         │
+└─────────────────────────┴─────────────────────────────────────────┘
+
+
+╔══════════════════════════════════════════════════════════════════╗
+║                    CONSOLE OUTPUT EXAMPLE                        ║
+╚══════════════════════════════════════════════════════════════════╝
+
+WITH PREVIEW IMAGES ENABLED:
+────────────────────────────────────────────────────────────────────
+[GCS] Found 3 output images
+[GCS] Preview images enabled - downloading all images
+[GCS] Downloading Canny edge map: canny_00023_.png
+[GCS] ✅ Saved: canny.png
+[GCS] Downloading Depth map: depth_00023_.png
+[GCS] ✅ Saved: depth.png
+[GCS] Downloading final image: StyleEngine_00023_.png
+[GCS] ✅ Saved: current_ai.png
+[GCS] ✓ Camera background updated with new AI image
+────────────────────────────────────────────────────────────────────
+
+WITH PREVIEW IMAGES DISABLED (DEFAULT):
+────────────────────────────────────────────────────────────────────
+[GCS] Found 3 output images
+[GCS] Downloading final image: StyleEngine_00023_.png
+[GCS] ✅ Saved: current_ai.png
+[GCS] ✓ Camera background updated with new AI image
+────────────────────────────────────────────────────────────────────
+
+
+╔══════════════════════════════════════════════════════════════════╗
+║                    VISUAL PREVIEW EXAMPLES                       ║
+╚══════════════════════════════════════════════════════════════════╝
+
+┌──────────────────────┬──────────────────────┬──────────────────────┐
+│   CANNY.PNG          │   DEPTH.PNG          │   CURRENT_AI.PNG     │
+│   (Edge Detection)   │   (Depth Map)        │   (Final Image)      │
+├──────────────────────┼──────────────────────┼──────────────────────┤
+│                      │                      │                      │
+│  ╔═══╗               │  ░░░░░░░░            │   ╔═══════╗          │
+│  ║   ║  ╔═══╗        │  ░░░░░░░░            │   ║ 🏠 🌲 ║          │
+│  ║   ║  ║   ║        │  ▓▓▓▓▓▓▓▓            │   ║       ║          │
+│  ╚═══╝  ║   ║        │  ▓▓▓▓▓▓▓▓            │   ║ 🌊🌊🌊 ║          │
+│         ╚═══╝        │  ████████            │   ╚═══════╝          │
+│                      │                      │                      │
+│  White edges on      │  Bright = near       │  Full color          │
+│  black background    │  Dark = far          │  final artwork       │
+│                      │                      │                      │
+└──────────────────────┴──────────────────────┴──────────────────────┘
+
+
+╔══════════════════════════════════════════════════════════════════╗
+║                    WHEN TO USE THIS FEATURE                      ║
+╚══════════════════════════════════════════════════════════════════╝
+
+✅ ENABLE WHEN:                    ❌ KEEP DISABLED WHEN:
+──────────────────────────────────────────────────────────────────
+• Debugging ControlNet issues      • Production workflow (default)
+• Learning how preprocessors work  • Bandwidth is limited
+• Quality control checks           • Speed is priority
+• Documenting your process         • You only need final image
+• Verifying edge detection         • Storage concerns
+• Understanding depth influence    • Fast iteration needed
+
+
+╔══════════════════════════════════════════════════════════════════╗
+║                    QUICK REFERENCE                               ║
+╚══════════════════════════════════════════════════════════════════╝
+
+📍 Location:  Edit → Preferences → Add-ons → Style Engine
+🎯 Purpose:   Visual feedback on ControlNet preprocessing
+💾 Storage:   Temp directory only (auto-cleanup)
+⚙️ Default:   Disabled (for speed and bandwidth)
+🔄 Workflow:  Requires StyleEnginePreview.json
+📊 Impact:    +2 images, +2 MB, +1 second per generation
+
