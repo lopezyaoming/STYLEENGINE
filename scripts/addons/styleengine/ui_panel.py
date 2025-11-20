@@ -3,10 +3,15 @@
 # ================================================================
 
 import bpy
+import bpy.utils.previews
 import shutil
 from pathlib import Path
 from . import utils
 from . import workspace_setup
+
+# Global preview collection for reference image thumbnails
+# This persists across draw calls to avoid loading images repeatedly
+preview_collections = {}
 
 # ----------------------------------------------------------------
 # 1. PROPERTY GROUP
@@ -1578,6 +1583,39 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
         output_box.label(text="Output Path:", icon='FILE_FOLDER')
         output_box.prop(style_props, "output_path", text="")
 
+        # --- Generation Status (MINIMAL) ---
+        try:
+            from . import runcomfy_polling
+            from . import runcomfy_deployment
+            
+            # Only show status if using GCS mode
+            prefs = context.preferences.addons['styleengine'].preferences
+            if hasattr(prefs, 'api_backend') and prefs.api_backend == 'GCS':
+                status = runcomfy_polling.RunComfyPoller.get_status_summary()
+                
+                # Only show box if generating or if we have last generation time
+                if status['is_generating'] or status['last_generation_time'] > 0:
+                    layout.separator()
+                    status_box = layout.box()
+                    row = status_box.row()
+                    
+                    if status['is_generating']:
+                        # Show current generation status
+                        icon = 'RENDER_ANIMATION' if status['status_text'] == 'Generating' else 'TIME'
+                        row.label(text=f"{status['status_text']}: {status['elapsed']}s", icon=icon)
+                    else:
+                        # Show idle status with last generation time
+                        row.label(text="Ready", icon='CHECKMARK')
+                    
+                    # Show last generation time if available
+                    if status['last_generation_time'] > 0:
+                        row = status_box.row()
+                        row.scale_y = 0.8
+                        row.label(text=f"Previous: {status['last_generation_time']}s", icon='SORTTIME')
+        except Exception as e:
+            # Silently fail if status unavailable
+            pass
+
         # --- Prompt Builder (VISIBLE) ---
         layout.separator()
         prompt_box = layout.box()
@@ -1877,27 +1915,39 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                         preview_box = col.box()
                         preview_col = preview_box.column(align=True)
                         
-                        # Ensure preview exists (generate if needed)
+                        # Display image thumbnail using preview collection (Poliigon method)
                         try:
-                            if not img.preview:
-                                img.preview_ensure()
+                            # Get the persistent preview collection
+                            pcoll = preview_collections.get("ref_images")
                             
-                            # Force GL load if needed
-                            if img.bindcode == 0:
-                                img.gl_load()
-                            
-                            # Use the image's preview icon directly
-                            # scale=5.0 gives a good balance between size and UI space
-                            if img.preview and img.preview.icon_id > 0:
-                                preview_col.template_icon(icon_value=img.preview.icon_id, scale=5.0)
+                            if pcoll is None:
+                                preview_col.label(text="[No Collection]", icon='ERROR')
                             else:
-                                # Fallback to generic image icon if no preview
-                                preview_col.label(text="[No Preview]", icon='IMAGE_DATA')
-                                print(f"[UI] Warning: No preview for {img.name}, icon_id={img.preview.icon_id if img.preview else 'None'}")
+                                # Generate unique key for this image
+                                thumb_key = f"{slot_id}_{img.name}"
+                                
+                                # Load thumbnail into preview collection if not already loaded
+                                if thumb_key not in pcoll:
+                                    if img.filepath:
+                                        abs_path = bpy.path.abspath(img.filepath)
+                                        try:
+                                            pcoll.load(thumb_key, abs_path, 'IMAGE')
+                                        except Exception as e:
+                                            print(f"[UI] Failed to load preview for {img.name}: {e}")
+                                
+                                # Display the thumbnail using template_icon
+                                if thumb_key in pcoll:
+                                    thumb = pcoll[thumb_key]
+                                    if thumb.icon_id > 0:
+                                        preview_col.template_icon(icon_value=thumb.icon_id, scale=5.0)
+                                    else:
+                                        preview_col.label(text="[Invalid Icon]", icon='IMAGE_DATA')
+                                else:
+                                    preview_col.label(text="[Not Loaded]", icon='IMAGE_DATA')
+                            
                         except Exception as e:
-                            # Error generating preview
-                            preview_col.label(text="[Preview Error]", icon='ERROR')
-                            print(f"[UI] Error generating preview for {img.name}: {e}")
+                            preview_col.label(text="[Error]", icon='ERROR')
+                            print(f"[UI] Error displaying thumbnail for {img.name}: {e}")
                         
                         col.separator(factor=0.2)
                     
@@ -2020,11 +2070,20 @@ def register():
     for cls in classes:
         bpy.utils.register_class(cls)
     bpy.types.Scene.style_engine_props = bpy.props.PointerProperty(type=StyleEngineProperties)
+    
+    # Create persistent preview collection for reference image thumbnails
+    pcoll = bpy.utils.previews.new()
+    preview_collections["ref_images"] = pcoll
 
 def unregister():
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
     del bpy.types.Scene.style_engine_props
+    
+    # Remove preview collections
+    for pcoll in preview_collections.values():
+        bpy.utils.previews.remove(pcoll)
+    preview_collections.clear()
 
 if __name__ == "__main__":
     register()

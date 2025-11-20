@@ -49,6 +49,7 @@ class RunComfyPoller:
     
     # Class-level state (persists across calls)
     active_requests = {}  # request_id -> RequestState
+    last_generation_time = 0  # Duration of last completed generation (seconds)
     
     @classmethod
     def start_polling(cls, deployment_id, request_id, callback, workflow_type):
@@ -134,6 +135,8 @@ class RunComfyPoller:
                                 
                                 if status_str == 'success':
                                     # Success!
+                                    # Record generation time
+                                    cls.last_generation_time = int(elapsed)
                                     state.callback(success=True, result=prompt_data, workflow_type=state.workflow_type)
                                     completed.append(request_id)
                                     print(f"[{mode_name}] Request {request_id[:8]} completed!")
@@ -188,6 +191,8 @@ class RunComfyPoller:
                         
                         # Handle completion
                         if state.status == 'completed':
+                            # Record generation time
+                            cls.last_generation_time = int(elapsed)
                             result = client.get_result(state.deployment_id, request_id)
                             state.callback(success=True, result=result, workflow_type=state.workflow_type)
                             completed.append(request_id)
@@ -231,6 +236,13 @@ class RunComfyPoller:
         for req_id in completed:
             del cls.active_requests[req_id]
             print(f"[Polling] Cleaned up request {req_id[:8]}")
+        
+        # Force UI redraw to update status display
+        if cls.active_requests:
+            for window in bpy.context.window_manager.windows:
+                for area in window.screen.areas:
+                    if area.type == 'VIEW_3D':
+                        area.tag_redraw()
         
         # Return interval or None to stop timer
         if cls.active_requests:
@@ -315,6 +327,47 @@ class RunComfyPoller:
             })
         
         return info
+    
+    @classmethod
+    def get_status_summary(cls):
+        """
+        Get concise status summary for UI display.
+        
+        Returns:
+            dict: {
+                'is_generating': bool,
+                'elapsed': int (seconds),
+                'last_generation_time': int (seconds),
+                'status_text': str
+            }
+        """
+        if not cls.active_requests:
+            return {
+                'is_generating': False,
+                'elapsed': 0,
+                'last_generation_time': cls.last_generation_time,
+                'status_text': 'Idle'
+            }
+        
+        # Get first active request (typically only one at a time)
+        state = next(iter(cls.active_requests.values()))
+        current_time = time.time()
+        elapsed = int(current_time - state.start_time)
+        
+        # Determine status text
+        if state.status == 'in_queue':
+            status_text = 'Queued'
+        elif state.status == 'in_progress':
+            status_text = 'Generating'
+        else:
+            status_text = 'Processing'
+        
+        return {
+            'is_generating': True,
+            'elapsed': elapsed,
+            'last_generation_time': cls.last_generation_time,
+            'status_text': status_text
+        }
 
 
 # ----------------------------------------------------------------
