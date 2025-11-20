@@ -144,8 +144,8 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
     
     texture_influence: bpy.props.FloatProperty(
         name="Texture Influence",
-        description="Controls how much projected textures affect AI generation (0.0 to 1.0) - PLACEHOLDER for future feature",
-        default=0.1,
+        description="Controls denoise strength in img2img workflow (GCS mode). 0.0 = keep 100% of render, 1.0 = full AI generation ignoring render",
+        default=0.0,
         min=0.0,
         max=1.0,
         update=update_session_json

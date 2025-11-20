@@ -1803,7 +1803,7 @@ def generate_ai_image_cloud(context):
                 print(f"[GCS] ✓ Uploaded {ref_upload_count} reference images")
             print(f"[GCS]")
             
-            # Load workflow JSON file (StyleEnginePreview.json from addon's workflows/)
+            # Load workflow JSON file (StyleEngineTexture.json from addon's workflows/)
             workflow_json = load_workflow_json_for_gcs()
             if not workflow_json:
                 print("[GCS] Failed to load workflow JSON")
@@ -1827,6 +1827,12 @@ def generate_ai_image_cloud(context):
             # ControlNet strengths (Nodes 40, 41 - PrimitiveFloat)
             workflow_json["40"]["inputs"]["value"] = session_data.get('silhouette_influence', 1.0)  # Canny
             workflow_json["41"]["inputs"]["value"] = session_data.get('depth_influence', 1.0)  # Depth
+            
+            # Texture Influence / Denoise Control (Node 135 - easy float)
+            # Controls how much of the original render is kept vs AI generation
+            # 0.0 = Keep 100% of render (denoise=0, img2img with no changes)
+            # 1.0 = Full AI generation (denoise=1, ignore render completely)
+            workflow_json["135"]["inputs"]["value"] = session_data.get('texture_influence', 0.0)
             
             # ============================================================
             # RESOLUTION (Node 5 - EmptyLatentImage)
@@ -1905,6 +1911,7 @@ def generate_ai_image_cloud(context):
             print(f"[GCS]   - Resolution: {resolution.get('width', 1024)}x{resolution.get('height', 1024)}")
             print(f"[GCS]   - Steps: {session_data.get('steps', 15)}")
             print(f"[GCS]   - ControlNet: Canny={session_data.get('silhouette_influence', 1.0):.2f}, Depth={session_data.get('depth_influence', 1.0):.2f}")
+            print(f"[GCS]   - Texture Influence: {session_data.get('texture_influence', 0.0):.2f} (0=keep render, 1=full AI)")
             print(f"[GCS]   - Global Strengths: ST={ref_images.get('style_transfer_strength', 0.0):.2f}, Comp={ref_images.get('composition_strength', 1.0):.2f}, Force={ref_images.get('force_transfer_strength', 0.0):.2f}")
             
             # Time the submission operation
@@ -2289,8 +2296,11 @@ def load_workflow_json_for_server(workflow_type):
 def load_workflow_json_for_gcs():
     """
     Load workflow JSON file for GCS mode (self-hosted ComfyUI).
-    Uses StyleEnginePreview.json from the addon's workflows/ directory.
-    This workflow includes SaveImage nodes for Canny and Depth preview images.
+    Uses StyleEngineTexture.json from the addon's workflows/ directory.
+    This workflow includes:
+    - SaveImage nodes for Canny (133) and Depth (134) preview images
+    - VAEEncode (132) for img2img workflow
+    - Texture control (135) for denoise strength (0=keep render, 1=full AI)
     
     Returns:
         dict: Workflow JSON or None if failed
@@ -2302,8 +2312,8 @@ def load_workflow_json_for_gcs():
     addon_dir = Path(__file__).parent  # This is scripts/addons/styleengine/
     workflows_dir = addon_dir / "workflows"
     
-    # Use StyleEnginePreview.json for GCS mode (includes preview SaveImage nodes)
-    workflow_file = workflows_dir / "StyleEnginePreview.json"
+    # Use StyleEngineTexture.json for GCS mode (img2img with texture control)
+    workflow_file = workflows_dir / "StyleEngineTexture.json"
     
     try:
         with open(workflow_file, 'r') as f:
@@ -2312,7 +2322,7 @@ def load_workflow_json_for_gcs():
         return workflow_json
     except Exception as e:
         print(f"[GCS] ❌ Failed to load workflow {workflow_file}: {e}")
-        print(f"[GCS] Make sure StyleEnginePreview.json exists at: {workflow_file}")
+        print(f"[GCS] Make sure StyleEngineTexture.json exists at: {workflow_file}")
         return None
 
 
@@ -2358,6 +2368,8 @@ def on_generation_complete_server(context, success, result, error, workflow_type
             print(f"[GCS] Preview images enabled - downloading all images")
         
         # Download each image
+        # Note: Node IDs changed in StyleEngineTexture.json (133=canny, 134=depth)
+        # but filename_prefix values remain the same, so detection still works
         main_image_downloaded = False
         for img_info in images:
             filename = img_info['filename']
