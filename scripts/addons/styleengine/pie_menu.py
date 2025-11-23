@@ -27,8 +27,8 @@ class WM_OT_ProjectTextureUV(Operator):
 class WM_OT_ProjectTextureScene(Operator):
     """Project AI texture onto selected objects from camera view"""
     bl_idname = "style_engine.project_texture_scene"
-    bl_label = "Project in Scene"
-    bl_description = "Project current_ai.png from camera perspective onto scene geometry"
+    bl_label = "Project on Object"
+    bl_description = "Project current_ai.png from camera perspective onto selected objects"
     bl_options = {'REGISTER', 'UNDO'}
     
     def execute(self, context):
@@ -60,6 +60,34 @@ class WM_OT_SetVisualization(Operator):
         return {'FINISHED'}
 
 
+class WM_OT_SetRenderQuality(Operator):
+    """Set render quality for AI generation"""
+    bl_idname = "style_engine.set_render_quality"
+    bl_label = "Set Render Quality"
+    bl_description = "Choose between Fast (Workbench) or Detailed (EEVEE) render quality"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    quality: bpy.props.EnumProperty(
+        name="Quality",
+        items=[
+            ('FAST', "Fast", "Workbench render - fast preview quality"),
+            ('DETAILED', "Detailed", "EEVEE render - high quality for img2img"),
+        ],
+        default='FAST'
+    )
+    
+    def execute(self, context):
+        style_props = context.scene.style_engine_props
+        style_props.render_quality = self.quality
+        
+        if self.quality == 'FAST':
+            self.report({'INFO'}, "Render Quality: Fast (Workbench)")
+        else:
+            self.report({'INFO'}, "Render Quality: Detailed (EEVEE)")
+        
+        return {'FINISHED'}
+
+
 # ----------------------------------------------------------------
 # MAIN PIE MENU
 # ----------------------------------------------------------------
@@ -87,11 +115,12 @@ class STYLEENGINE_MT_pie_main(Menu):
         col.separator()
         
         # Buttons
-        col.operator("style_engine.project_texture_uv", 
-                     text="Project in Object UV", 
-                     icon='UV')
+        # UV projection - commented out for now
+        # col.operator("style_engine.project_texture_uv", 
+        #              text="Project in Object UV", 
+        #              icon='UV')
         col.operator("style_engine.project_texture_scene", 
-                     text="Project in Scene", 
+                     text="Project on Object", 
                      icon='CAMERA_DATA')
         
         # ═══════════════════════════════════════════════════
@@ -148,7 +177,7 @@ class STYLEENGINE_MT_pie_main(Menu):
         influence_col.prop(style_props, "depth_influence", 
                           text="Depth", slider=True)
         influence_col.prop(style_props, "texture_influence", 
-                          text="Texture", slider=True)
+                          text="Influence", slider=True)
         
         col.separator()
         
@@ -165,6 +194,39 @@ class STYLEENGINE_MT_pie_main(Menu):
                  text="Autogenerate", 
                  toggle=True, 
                  icon='FILE_REFRESH')
+        
+        col.separator()
+        
+        # Render Quality selector
+        quality_box = col.box()
+        quality_col = quality_box.column(align=True)
+        quality_col.label(text="Render Quality", icon='SHADING_RENDERED')
+        
+        # Two buttons: Fast (Workbench) and Detailed (EEVEE)
+        row = quality_col.row(align=True)
+        row.scale_y = 1.3
+        
+        # Fast button
+        op = row.operator("style_engine.set_render_quality", 
+                         text="Fast", 
+                         icon='SHADING_WIRE',
+                         depress=(style_props.render_quality == 'FAST'))
+        op.quality = 'FAST'
+        
+        # Detailed button
+        op = row.operator("style_engine.set_render_quality", 
+                         text="Detailed", 
+                         icon='SHADING_RENDERED',
+                         depress=(style_props.render_quality == 'DETAILED'))
+        op.quality = 'DETAILED'
+        
+        quality_col.separator(factor=0.5)
+        
+        # Show description based on current selection
+        if style_props.render_quality == 'FAST':
+            quality_col.label(text="Workbench - Quick iterations", icon='INFO')
+        else:
+            quality_col.label(text="EEVEE - Better for img2img", icon='INFO')
         
         # ═══════════════════════════════════════════════════
         # Position 3: RIGHT (EAST) - Visualization Type
@@ -238,6 +300,7 @@ classes = (
     WM_OT_ProjectTextureUV,
     WM_OT_ProjectTextureScene,
     WM_OT_SetVisualization,
+    WM_OT_SetRenderQuality,
     STYLEENGINE_MT_pie_main,
 )
 

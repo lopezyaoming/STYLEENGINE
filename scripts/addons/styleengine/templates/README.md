@@ -1,112 +1,169 @@
-# Prompt Templates
+# Style Engine - Prompt Templates
 
-This folder contains reusable prompt templates for the **Prompt Builder** feature.
+This directory contains prompt templates for the Style Engine addon's Prompt Builder feature.
 
-## How to Use
+---
 
-1. **Enable Prompt Builder** - Check the "Enable Prompt Builder" checkbox in the UI
-2. **Templates Auto-Load** - All templates in this folder are automatically loaded into Blender's text editor
-3. **Use Templates** - Open any STYLEENGINE_* text block, view/modify the content
-4. **Generate** - Content is automatically parsed when you generate
+## 📁 Available Templates
 
-## Included Templates
+### 1. **Empty** (`STYLEENGINE_Empty.txt`)
+- Blank template with all tag sections ready to fill
+- Use this as a starting point for custom prompts
+- All tags are empty, ready for your content
 
-- **STYLEENGINE_Cinematic_Scene.txt** - Futuristic city, concept art style
-- **STYLEENGINE_Fantasy_Dragon.txt** - Epic dragon scene, digital painting
-- **STYLEENGINE_Portrait_Photo.txt** - Professional portrait photography
-- **STYLEENGINE_SciFi_Robot.txt** - Photorealistic 3D robot render
-- **STYLEENGINE_Product_Shot.txt** - Commercial product photography
+### 2. **Vizdev** (`STYLEENGINE_Vizdev.txt`)
+- Visual Development / Concept Art style
+- Optimized for environment design and matte painting aesthetics
+- Painterly, cinematic, story-driven atmosphere
+- Best for: Concept art, production design, environment exploration
 
-## Creating Your Own Templates
+### 3. **Photorealistic** (`STYLEENGINE_Photorealistic.txt`)
+- Professional photography style
+- Optimized for realistic, commercial-quality results
+- Studio lighting and proper technical photography keywords
+- Best for: Product shots, architectural photography, realistic renders
 
-### Method 1: Save from UI
-1. Write your prompt in any text block using the tag format (see below)
-2. Click **"Save as Template"** button
-3. Enter a name (will be prefixed with STYLEENGINE_)
-4. Template is saved to this folder
+---
 
-### Method 2: Create File Manually
-1. Create a new .txt file in this folder
-2. Name it **STYLEENGINE_YourName.txt** (must start with STYLEENGINE_)
-3. Write your prompt using the tag format (see below)
-4. Click **"Load Templates"** button in UI to refresh
+## 🎨 Template Format
 
-## Template Format
+All templates use the **comment-style tag format**:
 
-Templates use clean comment-style tags with syntax highlighting:
-
-```python
-# Subject:
-main subject or focal point
-
-# Style:
-art style and medium
-
-# Details:
-specific details or actions
-
-# Environment:
-background setting or scene context
-
-# Mood:
-mood or atmosphere descriptors
-
-# Camera:
-camera angle/perspective or lens info
-
-# Lighting:
-lighting conditions or color tone
-
-# Negative Prompt:
-things to avoid in generation
 ```
-
-**Note:** In Blender's text editor, the `#` headers will be syntax highlighted, making your templates easy to read!
-
-## Supported File Types
-
-- **.txt** - Plain text (recommended)
-- **.md** - Markdown (works too!)
-
-Files must start with **STYLEENGINE_** to be recognized as templates.
-
-## Tips
-
-- **Organize by project** - Create templates for each project/scene
-- **Share with team** - Commit this folder to version control
-- **Backup custom templates** - Keep copies of your favorites
-- **Mix and match** - Combine elements from different templates
-- **Use spacing freely** - Empty lines between sections are fine
-- **Syntax highlighting** - Tags are highlighted automatically in text editor
-
-## Example Template
-
-```python
 # Subject:
-cyberpunk street market
+your subject here
 
 # Style:
-digital painting, neon aesthetic, blade runner inspired
+art style, medium, technique
 
 # Details:
-holographic signs, street vendors, rain-slicked pavement
+specific details, actions, features
 
 # Environment:
-dense urban alley, towering buildings
+background, setting, location
 
 # Mood:
-atmospheric, moody, dystopian
+atmosphere, feeling, emotion
 
 # Camera:
-street-level perspective, cinematic framing
+camera angle, perspective, shot type
 
 # Lighting:
-neon lights reflecting in puddles, volumetric fog
+lighting conditions, quality, direction
 
 # Negative Prompt:
-bright daylight, clean, utopian
+things to avoid in the generation
 ```
 
 ---
 
-**Happy prompting!** 🎨
+## 🔧 How to Use Templates
+
+### In Blender:
+
+1. **Enable Prompt Builder**
+   - Open Style Engine workspace
+   - In the UI panel, enable "Use Prompt Builder" checkbox
+
+2. **Load a Template**
+   - In the text editor, click the text icon dropdown
+   - Select a template (e.g., `STYLEENGINE_Vizdev`)
+   - The template will load with pre-filled tags
+
+3. **Customize the Prompt**
+   - Modify any tag content to fit your needs
+   - Leave tags empty if not needed
+   - Add or remove content as desired
+
+4. **Generate**
+   - Press Alt+W → Generate Image
+   - The Prompt Builder will parse the tags and create a coherent prompt
+
+---
+
+## ✍️ Creating Custom Templates
+
+To create your own template:
+
+1. **Create a new text file** in this directory
+2. **Name it:** `STYLEENGINE_YourName.txt`
+   - Must start with `STYLEENGINE_`
+   - Use underscores instead of spaces
+3. **Use the tag format** shown above
+4. **Fill in your default values** for each tag
+5. **Reload addon** or restart Blender to see your template
+
+---
+
+## 🎯 Tag Descriptions
+
+| Tag | Purpose | Example |
+|-----|---------|---------|
+| **Subject** | Main focal point | "futuristic city", "ancient temple" |
+| **Style** | Art style and medium | "concept art, matte painting", "8k photography" |
+| **Details** | Specific features | "detailed architecture", "crisp textures" |
+| **Environment** | Setting/background | "mountain landscape", "studio setup" |
+| **Mood** | Atmosphere/feeling | "cinematic, epic", "clean, professional" |
+| **Camera** | Perspective/angle | "wide-angle shot", "professional camera" |
+| **Lighting** | Light conditions | "dramatic natural light", "studio lighting" |
+| **Negative Prompt** | Things to avoid | "blurry, low quality, cartoon" |
+
+---
+
+## 💡 Tips for Effective Prompts
+
+### For Vizdev/Concept Art:
+- ✅ Use "concept art", "matte painting", "visual development"
+- ✅ Include "painterly", "atmospheric", "cinematic"
+- ✅ Specify "establishing shot", "wide-angle"
+- ✅ Mention "dramatic lighting", "atmospheric depth"
+- ❌ Avoid "photorealistic", "photograph"
+
+### For Photorealistic:
+- ✅ Use "photorealistic", "professional photography", "8k"
+- ✅ Include "sharp focus", "highly detailed", "crisp"
+- ✅ Specify "studio lighting", "proper exposure"
+- ✅ Mention "professional camera", "depth of field"
+- ❌ Avoid "painting", "illustration", "artistic"
+
+---
+
+## 📌 Template Philosophy
+
+These templates are designed to be:
+- **Professional** - Industry-standard terminology
+- **Focused** - Clear purpose for each template
+- **Flexible** - Easy to customize for your needs
+- **Effective** - Optimized keywords for SDXL
+
+**Less is more:** We provide 3 focused templates instead of many random examples. This keeps the workflow clean and purposeful.
+
+---
+
+## 🚀 Advanced Usage
+
+### Mixing Styles:
+You can combine elements from different templates:
+- Start with Vizdev template
+- Add photorealistic lighting keywords
+- Adjust negative prompt accordingly
+
+### Iteration:
+- Generate with template
+- Note what works/doesn't work
+- Adjust tags incrementally
+- Save successful combinations as new templates
+
+---
+
+## 📝 Notes
+
+- Templates are loaded at addon startup
+- Changes to templates require addon reload
+- Template names must start with `STYLEENGINE_`
+- Use comment-style tags (# Tag Name:), not HTML tags
+- Empty tags are ignored by the parser
+
+---
+
+**Ready to create!** Choose a template, customize it, and generate amazing AI images with Style Engine. 🎨✨

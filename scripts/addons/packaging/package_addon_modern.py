@@ -72,6 +72,18 @@ REQUIRED_FILES = [
     'README.md',
 ]
 
+# Important files to verify (will report if found)
+IMPORTANT_FILES = [
+    'workflows/StyleEngineTexture.json',  # Main GCS workflow
+    'workflows/StyleEnginePreview.json',  # Preview workflow
+    'workflows/StyleEngine.json',  # Legacy workflow
+    'template.blend',  # Workspace template
+    'prefs.py',  # Preferences
+    'ui_panel.py',  # UI
+    'pie_menu.py',  # Pie menu
+    'workspace_setup.py',  # Core functionality
+]
+
 # ================================================================
 # HELPER FUNCTIONS
 # ================================================================
@@ -354,6 +366,35 @@ def package_addon():
         return False
     
     print("[OK] ZIP structure validated")
+    print()
+    
+    # Verify important files are included
+    print("Verifying important files...")
+    with zipfile.ZipFile(output_zip, 'r') as zf:
+        entries = zf.namelist()
+        addon_name = Path(entries[0]).parts[0]
+        
+        found_important = []
+        missing_important = []
+        
+        for important_file in IMPORTANT_FILES:
+            # Check if file exists in ZIP
+            expected_path = f"{addon_name}/{important_file}"
+            if expected_path in entries:
+                found_important.append(important_file)
+            else:
+                missing_important.append(important_file)
+        
+        if found_important:
+            print(f"[OK] Found {len(found_important)}/{len(IMPORTANT_FILES)} important files:")
+            for f in found_important:
+                print(f"  [+] {f}")
+        
+        if missing_important:
+            print(f"[WARNING] Missing {len(missing_important)} important files:")
+            for f in missing_important:
+                print(f"  [-] {f}")
+    
     print()
     
     # Get ZIP info

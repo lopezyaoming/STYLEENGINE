@@ -136,16 +136,16 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
     silhouette_influence: bpy.props.FloatProperty(
         name="Silhouette Influence",
         description="Controls the strength of the silhouette (0.0 to 1.0)",
-        default=0.75,
+        default=0.5,
         min=0.0,
         max=1.0,
         update=update_session_json
     )
     
     texture_influence: bpy.props.FloatProperty(
-        name="Texture Influence",
-        description="Controls denoise strength in img2img workflow (GCS mode). 0.0 = keep 100% of render, 1.0 = full AI generation ignoring render",
-        default=0.0,
+        name="Influence",
+        description="Controls how much of the render to keep in img2img workflow (GCS mode). 1.0 = keep 100% of render, 0.0 = full AI generation ignoring render",
+        default=1.0,
         min=0.0,
         max=1.0,
         update=update_session_json
@@ -157,6 +157,17 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         default=15,
         min=15,
         max=30,
+        update=update_session_json
+    )
+    
+    render_quality: bpy.props.EnumProperty(
+        name="Render Quality",
+        description="Quality of render sent to AI (affects img2img workflow)",
+        items=[
+            ('FAST', "Fast", "Workbench render - fast preview quality, good for quick iterations", 'SHADING_WIRE', 0),
+            ('DETAILED', "Detailed", "EEVEE render - high quality, better for img2img when texture_influence is low", 'SHADING_RENDERED', 1),
+        ],
+        default='FAST',
         update=update_session_json
     )
 
@@ -247,7 +258,7 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
     background_opacity: bpy.props.FloatProperty(
         name="Background Opacity",
         description="Transparency of the AI background image (0=invisible, 1=opaque)",
-        default=0.7,
+        default=1.0,
         min=0.0,
         max=1.0,
         update=update_background_opacity
@@ -958,7 +969,7 @@ class WM_OT_DeleteGroup(bpy.types.Operator):
 
 
 class WM_OT_ProjectTexture(bpy.types.Operator):
-    """Project AI texture onto all objects from camera view."""
+    """Project AI texture onto selected objects from camera view."""
     bl_idname = "style_engine.project_texture"
     bl_label = "Project Texture"
     bl_options = {'REGISTER', 'UNDO'}
@@ -1004,46 +1015,69 @@ class WM_OT_ProjectTexture(bpy.types.Operator):
         if context.object and context.object.mode != 'OBJECT':
             bpy.ops.object.mode_set(mode='OBJECT')
         
-        # Get all mesh objects
-        mesh_objects = [obj for obj in context.scene.objects if obj.type == 'MESH']
+        # Get only selected mesh objects (changed from all scene objects)
+        mesh_objects = [obj for obj in context.selected_objects if obj.type == 'MESH']
         
         if not mesh_objects:
-            self.report({'WARNING'}, "No mesh objects found in scene")
+            self.report({'WARNING'}, "No mesh objects selected. Please select objects to project texture onto.")
             return {'CANCELLED'}
         
-        # Create or get the shared material
-        mat_name = "projected_material"
-        if mat_name in bpy.data.materials:
-            mat = bpy.data.materials[mat_name]
-            # Update the image in existing material
-            for node in mat.node_tree.nodes:
-                if node.type == 'TEX_IMAGE':
-                    node.image = img
-        else:
-            mat = bpy.data.materials.new(name=mat_name)
-            mat.use_nodes = True
-            nodes = mat.node_tree.nodes
-            links = mat.node_tree.links
-            
-            # Clear default nodes
-            nodes.clear()
-            
-            # Create Principled BSDF
-            bsdf = nodes.new(type='ShaderNodeBsdfPrincipled')
-            bsdf.location = (0, 0)
-            
-            # Create Image Texture node
-            tex_node = nodes.new(type='ShaderNodeTexImage')
-            tex_node.location = (-300, 0)
-            tex_node.image = img
-            
-            # Create Material Output
-            output = nodes.new(type='ShaderNodeOutputMaterial')
-            output.location = (300, 0)
-            
-            # Connect nodes
-            links.new(tex_node.outputs['Color'], bsdf.inputs['Base Color'])
-            links.new(bsdf.outputs['BSDF'], output.inputs['Surface'])
+        # Find next iteration number for unique material/image naming
+        iteration_num = 0
+        while f"iteration_{iteration_num:03d}" in bpy.data.materials:
+            iteration_num += 1
+        
+        iteration_name = f"iteration_{iteration_num:03d}"
+        
+        # Duplicate the current_ai.png image to create an archival copy
+        # This ensures the texture won't change when new AI images are generated
+        img_copy = img.copy()
+        img_copy.name = f"{iteration_name}.png"
+        
+        # Pack the image so it's embedded in the .blend file
+        if not img_copy.packed_file:
+            img_copy.pack()
+        
+        print(f"[Style Engine] 📸 Created archival image: {img_copy.name}")
+        
+        # Create a new unique material for this iteration
+        mat = bpy.data.materials.new(name=iteration_name)
+        mat.use_nodes = True
+        nodes = mat.node_tree.nodes
+        links = mat.node_tree.links
+        
+        # Clear default nodes
+        nodes.clear()
+        
+        # Create Principled BSDF
+        bsdf = nodes.new(type='ShaderNodeBsdfPrincipled')
+        bsdf.location = (0, 0)
+        
+        # Set roughness to 1.0 for matte finish
+        bsdf.inputs['Roughness'].default_value = 1.0
+        
+        # Create Image Texture node with the duplicated image
+        tex_node = nodes.new(type='ShaderNodeTexImage')
+        tex_node.location = (-300, 0)
+        tex_node.image = img_copy  # Use the duplicated image, not the original
+        
+        # Create Material Output
+        output = nodes.new(type='ShaderNodeOutputMaterial')
+        output.location = (300, 0)
+        
+        # Connect nodes
+        # Connect texture to Base Color
+        links.new(tex_node.outputs['Color'], bsdf.inputs['Base Color'])
+        
+        # Connect texture to Specular Tint to prevent white/washed out IOR look
+        # This tints the specular reflections and refractions with the texture color
+        if 'Specular Tint' in bsdf.inputs:
+            links.new(tex_node.outputs['Color'], bsdf.inputs['Specular Tint'])
+        
+        # Connect BSDF to output
+        links.new(bsdf.outputs['BSDF'], output.inputs['Surface'])
+        
+        print(f"[Style Engine] 🎨 Created archival material: {mat.name}")
         
         # Set ai_camera as the scene camera temporarily
         context.scene.camera = ai_camera
@@ -1115,8 +1149,8 @@ class WM_OT_ProjectTexture(bpy.types.Operator):
             except:
                 pass
         
-        self.report({'INFO'}, f"Projected texture onto {projected_count} objects from AI camera")
-        print(f"[Style Engine] 🎨 Projected texture onto {projected_count} objects")
+        self.report({'INFO'}, f"Projected {iteration_name} onto {projected_count} objects")
+        print(f"[Style Engine] 🎨 Projected {iteration_name} onto {projected_count} objects")
         
         # Create iteration snapshot
         self.create_iteration_snapshot(context, mesh_objects)
