@@ -88,6 +88,95 @@ class WM_OT_SetRenderQuality(Operator):
         return {'FINISHED'}
 
 
+class WM_OT_PrevGeneration(Operator):
+    """Navigate to previous generation"""
+    bl_idname = "style_engine.prev_generation"
+    bl_label = "Previous Generation"
+    bl_description = "Load previous generation to current_ai.png"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    def execute(self, context):
+        from . import workspace_setup
+        
+        style_props = context.scene.style_engine_props
+        
+        # Get list of generations
+        generations = workspace_setup.get_generation_list(context)
+        
+        if not generations:
+            self.report({'WARNING'}, "No generations found")
+            return {'CANCELLED'}
+        
+        # Handle index (-1 means latest/newest)
+        if style_props.current_generation_index == -1:
+            # Currently at latest, go to second-to-last
+            new_index = len(generations) - 2
+        else:
+            # Go one step back (older)
+            new_index = style_props.current_generation_index - 1
+        
+        # Clamp to valid range
+        new_index = max(0, min(new_index, len(generations) - 1))
+        
+        # Load the generation
+        if workspace_setup.load_generation_to_current(context, generations[new_index]):
+            style_props.current_generation_index = new_index
+            self.report({'INFO'}, f"Generation {new_index + 1}/{len(generations)}")
+            return {'FINISHED'}
+        else:
+            self.report({'ERROR'}, "Failed to load generation")
+            return {'CANCELLED'}
+
+
+class WM_OT_NextGeneration(Operator):
+    """Navigate to next generation"""
+    bl_idname = "style_engine.next_generation"
+    bl_label = "Next Generation"
+    bl_description = "Load next generation to current_ai.png"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    def execute(self, context):
+        from . import workspace_setup
+        
+        style_props = context.scene.style_engine_props
+        
+        # Get list of generations
+        generations = workspace_setup.get_generation_list(context)
+        
+        if not generations:
+            self.report({'WARNING'}, "No generations found")
+            return {'CANCELLED'}
+        
+        # Handle index (-1 means latest/newest)
+        if style_props.current_generation_index == -1:
+            # Already at latest
+            self.report({'INFO'}, f"Already at latest generation")
+            return {'CANCELLED'}
+        
+        # Go one step forward (newer)
+        new_index = style_props.current_generation_index + 1
+        
+        # Check if we've reached the latest
+        if new_index >= len(generations) - 1:
+            new_index = -1  # Back to "latest" mode
+        
+        # Load the generation
+        if new_index == -1:
+            # Load the latest generation
+            if workspace_setup.load_generation_to_current(context, generations[-1]):
+                style_props.current_generation_index = -1
+                self.report({'INFO'}, f"Latest generation")
+                return {'FINISHED'}
+        else:
+            if workspace_setup.load_generation_to_current(context, generations[new_index]):
+                style_props.current_generation_index = new_index
+                self.report({'INFO'}, f"Generation {new_index + 1}/{len(generations)}")
+                return {'FINISHED'}
+        
+        self.report({'ERROR'}, "Failed to load generation")
+        return {'CANCELLED'}
+
+
 # ----------------------------------------------------------------
 # MAIN PIE MENU
 # ----------------------------------------------------------------
@@ -277,6 +366,50 @@ class STYLEENGINE_MT_pie_main(Menu):
             
             # Show current visualization
             col.label(text=f"Current: {style_props.visualization_type.title()}", icon='INFO')
+            
+            # ═══════════════════════════════════════════════════
+            # Generation Browser - Navigate Through Saved Generations
+            # ═══════════════════════════════════════════════════
+            col.separator()
+            col.label(text="Generation Browser", icon='RENDERLAYERS')
+            
+            # Get generation info
+            from . import workspace_setup
+            generations = workspace_setup.get_generation_list(context)
+            
+            if generations:
+                # Navigation buttons
+                row = col.row(align=True)
+                row.scale_y = 1.3
+                
+                # Check if at boundaries
+                at_oldest = (style_props.current_generation_index == 0)
+                at_latest = (style_props.current_generation_index == -1)
+                
+                # Previous button (go to older)
+                prev_row = row.row(align=True)
+                prev_row.enabled = not at_oldest  # Disable if at oldest
+                prev_row.operator("style_engine.prev_generation", 
+                                 text="", 
+                                 icon='TRIA_LEFT')
+                
+                # Current generation indicator
+                if at_latest:
+                    current_text = f"Latest ({len(generations)})"
+                else:
+                    current_text = f"{style_props.current_generation_index + 1}/{len(generations)}"
+                
+                row.label(text=current_text)
+                
+                # Next button (go to newer)
+                next_row = row.row(align=True)
+                next_row.enabled = not at_latest  # Disable if at latest
+                next_row.operator("style_engine.next_generation", 
+                                 text="", 
+                                 icon='TRIA_RIGHT')
+            else:
+                col.label(text="No generations yet", icon='INFO')
+        
         else:
             # Fallback: empty box or placeholder
             box = pie.box()
@@ -301,6 +434,8 @@ classes = (
     WM_OT_ProjectTextureScene,
     WM_OT_SetVisualization,
     WM_OT_SetRenderQuality,
+    WM_OT_PrevGeneration,
+    WM_OT_NextGeneration,
     STYLEENGINE_MT_pie_main,
 )
 

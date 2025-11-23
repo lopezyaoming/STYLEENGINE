@@ -255,7 +255,7 @@ class StyleEnginePreferences(AddonPreferences):
         description="Connection status of the GCS server",
         default="Not Connected"
     )
-    
+
     gcs_download_preview_images: BoolProperty(
         name="Download Preview Images",
         description="Download Canny and Depth preview images for visual feedback (stored in temp directory)",

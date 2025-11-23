@@ -208,11 +208,21 @@ def register():
     """Register all classes and properties."""
     for module in modules:
         module.register()
+    
+    # Register save handler for automatic session migration
+    if workspace_setup.on_blend_file_saved not in bpy.app.handlers.save_post:
+        bpy.app.handlers.save_post.append(workspace_setup.on_blend_file_saved)
+        print("[Style Engine] ✓ Save handler registered for session migration")
 
 def unregister():
     """Unregister all classes and properties."""
     # Cleanup RunComfy poller
     runcomfy_polling.cleanup_poller()
+    
+    # Unregister save handler
+    if workspace_setup.on_blend_file_saved in bpy.app.handlers.save_post:
+        bpy.app.handlers.save_post.remove(workspace_setup.on_blend_file_saved)
+        print("[Style Engine] ✓ Save handler unregistered")
     
     # Unregister modules
     for module in reversed(modules):

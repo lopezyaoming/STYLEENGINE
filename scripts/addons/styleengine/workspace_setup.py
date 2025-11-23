@@ -15,6 +15,389 @@ import shutil
 # Get the addon directory (works both in dev and when installed from ZIP)
 ADDON_DIR = Path(__file__).parent
 
+# ================================================================
+#    Session Management - Per-Project Library System
+# ================================================================
+
+# Global variables for session management
+_session_temp_dir = None  # Legacy temp directory lock
+_session_id = None  # Unique session identifier
+_session_migrated = False  # Track if migration happened
+_last_blend_path = None  # Track .blend path for "Save As" detection
+
+def get_session_id():
+    """
+    Get or create a unique session ID.
+    This ID stays consistent even if .blend file is saved mid-session.
+    
+    Format: YYYYMMDD_HHMMSS_random6
+    Example: 20251121_143022_abc123
+    
+    Returns:
+        str: Unique session identifier
+    """
+    global _session_id
+    
+    if _session_id is None:
+        import random
+        import string
+        
+        # Generate unique session ID: timestamp + random component
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        _session_id = f"{timestamp}_{random_suffix}"
+        print(f"[Style Engine] 🆔 Session ID: {_session_id}")
+    
+    return _session_id
+
+
+def get_project_library(context=None):
+    """
+    Get the project library path for the current .blend file.
+    
+    Returns:
+        Path or None: Project library path if .blend is saved, None otherwise
+    """
+    if not bpy.data.is_saved:
+        return None
+    
+    blend_path = Path(bpy.data.filepath)
+    project_name = blend_path.stem
+    project_lib = blend_path.parent / f"{project_name}_styleengine"
+    
+    return project_lib
+
+
+def ensure_project_library(context):
+    """
+    Create project library directory structure.
+    
+    Structure:
+        MyProject_styleengine/
+        ├── generations/     - All AI generations (timestamped)
+        ├── iterations/      - Projected texture iterations
+        ├── preview/         - Canny/Depth preview images
+        ├── current_ai.png   - Latest generation (for camera)
+        └── project_metadata.json - Generation history
+    
+    Returns:
+        Path or None: Project library path if created, None if .blend not saved
+    """
+    project_lib = get_project_library(context)
+    
+    if project_lib is None:
+        return None
+    
+    # Create directory structure
+    (project_lib / "generations").mkdir(parents=True, exist_ok=True)
+    (project_lib / "iterations").mkdir(parents=True, exist_ok=True)
+    (project_lib / "preview").mkdir(parents=True, exist_ok=True)
+    
+    print(f"[Style Engine] 📁 Project library: {project_lib}")
+    
+    return project_lib
+
+
+def get_working_directory(context):
+    """
+    Get the working directory for storing generations.
+    
+    Priority:
+    1. Project library (if .blend saved)
+    2. Session-based temp directory (if unsaved)
+    
+    Returns:
+        Path: Directory for storing generations
+    """
+    # Try project library first
+    project_lib = get_project_library(context)
+    if project_lib:
+        ensure_project_library(context)
+        return project_lib / "generations"
+    
+    # Fall back to session-based temp
+    import tempfile
+    session_id = get_session_id()
+    temp_base = Path(tempfile.gettempdir()) / "blender_styleengine" / "sessions"
+    session_dir = temp_base / session_id / "generations"
+    session_dir.mkdir(parents=True, exist_ok=True)
+    
+    return session_dir
+
+
+def migrate_session_to_project(context):
+    """
+    Migrate session data from temp to project library.
+    Called when .blend file is saved for the first time.
+    
+    This copies all generations from the temp session directory
+    to the new project library, preserving all work.
+    """
+    global _session_migrated
+    
+    if _session_migrated:
+        return  # Already migrated
+    
+    # Get paths
+    project_lib = get_project_library(context)
+    if not project_lib:
+        return  # Can't migrate if not saved
+    
+    import tempfile
+    session_id = get_session_id()
+    temp_session = Path(tempfile.gettempdir()) / "blender_styleengine" / "sessions" / session_id
+    
+    if not temp_session.exists():
+        _session_migrated = True  # Nothing to migrate, mark as done
+        return
+    
+    print(f"[Style Engine] 🚚 Migrating session data to project library...")
+    print(f"[Style Engine]    From: {temp_session}")
+    print(f"[Style Engine]    To: {project_lib}")
+    
+    # Create project library structure
+    ensure_project_library(context)
+    
+    migrated_count = 0
+    
+    # Copy all generations
+    source_gens = temp_session / "generations"
+    if source_gens.exists():
+        for img_file in source_gens.glob("*.png"):
+            dest = project_lib / "generations" / img_file.name
+            try:
+                shutil.copy2(img_file, dest)
+                print(f"[Style Engine]    ✓ Migrated: {img_file.name}")
+                migrated_count += 1
+            except Exception as e:
+                print(f"[Style Engine]    ✗ Failed to migrate {img_file.name}: {e}")
+    
+    # Copy metadata if exists
+    source_meta = temp_session / "project_metadata.json"
+    if source_meta.exists():
+        dest_meta = project_lib / "project_metadata.json"
+        try:
+            shutil.copy2(source_meta, dest_meta)
+            print(f"[Style Engine]    ✓ Migrated: project_metadata.json")
+        except Exception as e:
+            print(f"[Style Engine]    ✗ Failed to migrate metadata: {e}")
+    
+    # Copy current_ai.png if exists
+    source_current = temp_session / "current_ai.png"
+    if source_current.exists():
+        dest_current = project_lib / "current_ai.png"
+        try:
+            shutil.copy2(source_current, dest_current)
+            print(f"[Style Engine]    ✓ Migrated: current_ai.png")
+        except Exception as e:
+            print(f"[Style Engine]    ✗ Failed to migrate current_ai.png: {e}")
+    
+    # Copy iteration textures if exist
+    source_iterations = temp_session / "iterations"
+    if source_iterations.exists():
+        iteration_count = 0
+        for img_file in source_iterations.glob("*.png"):
+            dest = project_lib / "iterations" / img_file.name
+            try:
+                shutil.copy2(img_file, dest)
+                print(f"[Style Engine]    ✓ Migrated iteration: {img_file.name}")
+                iteration_count += 1
+            except Exception as e:
+                print(f"[Style Engine]    ✗ Failed to migrate {img_file.name}: {e}")
+        
+        if iteration_count > 0:
+            print(f"[Style Engine]    📦 Migrated {iteration_count} iteration textures")
+    
+    _session_migrated = True
+    print(f"[Style Engine] ✅ Migration complete! ({migrated_count} generations)")
+
+
+def on_blend_file_saved(dummy):
+    """
+    Handler called after .blend file is saved.
+    Triggers migration if this is the first save.
+    """
+    global _last_blend_path
+    
+    try:
+        current_path = Path(bpy.data.filepath) if bpy.data.is_saved else None
+        
+        if current_path:
+            # Check if this is a "Save As" (different path)
+            if _last_blend_path and _last_blend_path != current_path:
+                print(f"[Style Engine] 📝 'Save As' detected - keeping current project library")
+                # Don't migrate again, user is creating a copy
+            else:
+                # First save or normal save - check if migration needed
+                if not _session_migrated:
+                    migrate_session_to_project(bpy.context)
+            
+            _last_blend_path = current_path
+    
+    except Exception as e:
+        print(f"[Style Engine] Error in save handler: {e}")
+
+
+# ================================================================
+#    Generation Browser - Navigate Through Saved Generations
+# ================================================================
+
+def get_generation_list(context):
+    """
+    Get list of all saved generations, sorted chronologically (oldest to newest).
+    
+    Returns:
+        list[Path]: List of generation image paths, sorted by timestamp
+    """
+    working_dir = get_working_directory(context)
+    
+    if not working_dir.exists():
+        return []
+    
+    # Get all PNG files in generations folder
+    generations = list(working_dir.glob("*.png"))
+    
+    # Sort by filename (which includes timestamp, so chronological)
+    generations.sort()
+    
+    return generations
+
+
+def load_generation_to_current(context, generation_path):
+    """
+    Load a specific generation to current_ai.png for viewing/projection.
+    
+    Args:
+        context: Blender context
+        generation_path: Path to the generation to load
+    
+    Returns:
+        bool: True if successful
+    """
+    import shutil
+    
+    if not generation_path.exists():
+        print(f"[Style Engine] ⚠️ Generation not found: {generation_path}")
+        return False
+    
+    # Determine current_ai.png location
+    project_lib = get_project_library(context)
+    
+    if project_lib:
+        # Saved .blend - use project library
+        current_ai_path = project_lib / "current_ai.png"
+    else:
+        # Unsaved - use session temp
+        import tempfile
+        session_id = get_session_id()
+        session_dir = Path(tempfile.gettempdir()) / "blender_styleengine" / "sessions" / session_id
+        session_dir.mkdir(parents=True, exist_ok=True)
+        current_ai_path = session_dir / "current_ai.png"
+    
+    # Also update legacy temp directory for compatibility
+    temp_dir = get_temp_directory(context)
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    legacy_current_ai = temp_dir / "current_ai.png"
+    
+    try:
+        # Copy generation to current_ai.png
+        shutil.copy2(generation_path, current_ai_path)
+        shutil.copy2(generation_path, legacy_current_ai)
+        
+        # Refresh the image in Blender
+        refresh_ai_image()
+        
+        print(f"[Style Engine] 📷 Loaded generation: {generation_path.name}")
+        return True
+    
+    except Exception as e:
+        print(f"[Style Engine] ❌ Failed to load generation: {e}")
+        return False
+
+
+def save_generation_to_library(context, source_image_path, backend='unknown'):
+    """
+    Save a generated image to the project library with proper organization.
+    
+    This function:
+    1. Checks if .blend is saved and migrates session if needed
+    2. Saves timestamped copy to generations folder
+    3. Updates current_ai.png
+    4. Optionally saves to output_path (legacy behavior)
+    
+    Args:
+        context: Blender context
+        source_image_path: Path to the generated image
+        backend: 'GCS', 'RunComfy', or 'Local'
+    
+    Returns:
+        Path: Path to the saved generation file
+    """
+    # Check if .blend was saved since last generation (trigger migration)
+    if bpy.data.is_saved and not _session_migrated:
+        migrate_session_to_project(context)
+    
+    # Get working directory (project library or session temp)
+    working_dir = get_working_directory(context)
+    working_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Generate timestamped filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    microseconds = datetime.now().microsecond // 1000  # milliseconds for uniqueness
+    filename = f"{timestamp}_{microseconds:03d}_{backend.lower()}.png"
+    
+    dest_path = working_dir / filename
+    
+    # Copy to generations folder
+    try:
+        shutil.copy2(source_image_path, dest_path)
+        print(f"[Style Engine] 💾 Saved generation: {filename}")
+    except Exception as e:
+        print(f"[Style Engine] ❌ Failed to save generation: {e}")
+        return None
+    
+    # Update current_ai.png in the appropriate location
+    if bpy.data.is_saved:
+        # Project library
+        project_lib = get_project_library(context)
+        if project_lib:
+            current_ai_path = project_lib / "current_ai.png"
+            try:
+                shutil.copy2(source_image_path, current_ai_path)
+            except Exception as e:
+                print(f"[Style Engine] ⚠️ Failed to update current_ai.png: {e}")
+    else:
+        # Session temp
+        import tempfile
+        session_id = get_session_id()
+        session_dir = Path(tempfile.gettempdir()) / "blender_styleengine" / "sessions" / session_id
+        session_dir.mkdir(parents=True, exist_ok=True)
+        current_ai_path = session_dir / "current_ai.png"
+        try:
+            shutil.copy2(source_image_path, current_ai_path)
+        except Exception as e:
+            print(f"[Style Engine] ⚠️ Failed to update current_ai.png: {e}")
+    
+    # Legacy: Save to output_path if set (for backwards compatibility)
+    props = context.scene.style_engine_props
+    if hasattr(props, 'output_path') and props.output_path and os.path.exists(props.output_path):
+        output_dir = Path(props.output_path) / "generated"
+        output_dir.mkdir(exist_ok=True, parents=True)
+        
+        output_path = output_dir / f"{timestamp}_{backend.lower()}.png"
+        try:
+            shutil.copy2(source_image_path, output_path)
+            print(f"[Style Engine] 📤 Also saved to output_path: {output_path}")
+        except Exception as e:
+            print(f"[Style Engine] ⚠️ Failed to save to output_path: {e}")
+    
+    return dest_path
+
+
+# ================================================================
+#    Legacy Temp Directory System (Maintained for Compatibility)
+# ================================================================
+
 def get_temp_directory(context=None):
     """
     Get the temp directory for storing AI vision data.
@@ -941,21 +1324,29 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
         temp_dir = get_temp_directory(context)
         img_path = temp_dir / "current_ai.png"
         
-        # Load or create the image
+        # Always create a fresh black placeholder image on workspace setup
+        # This ensures clean slate for each project and prevents old temp images from showing
+        props = context.scene.style_engine_props
+        res_str = props.ai_resolution
+        width, height = map(int, res_str.split('x'))
+        
+        # Remove old image if exists
         if "current_ai.png" in bpy.data.images:
-            img = bpy.data.images["current_ai.png"]
-            img.filepath = str(img_path)
-            img.reload()
-        else:
-            if img_path.exists():
-                img = bpy.data.images.load(str(img_path))
-                img.name = "current_ai.png"
-            else:
-                # Create a placeholder with correct resolution
-                props = context.scene.style_engine_props
-                res_str = props.ai_resolution
-                width, height = map(int, res_str.split('x'))
-                img = bpy.data.images.new("current_ai.png", width=width, height=height)
+            bpy.data.images.remove(bpy.data.images["current_ai.png"])
+        
+        # Create fresh black placeholder
+        img = bpy.data.images.new("current_ai.png", width=width, height=height)
+        
+        # Fill with black (0, 0, 0, 1)
+        pixels = [0.0, 0.0, 0.0, 1.0] * (width * height)
+        img.pixels = pixels
+        
+        # Save to disk
+        img.filepath_raw = str(img_path)
+        img.file_format = 'PNG'
+        img.save()
+        
+        print(f"[Style Engine] 🖤 Created fresh black placeholder: {width}x{height}")
         
         # Setup background image properties
         bg_img.image = img
@@ -2441,25 +2832,16 @@ def on_generation_complete_server(context, success, result, error, workflow_type
             if hasattr(props, 'visualization_type'):
                 props.visualization_type = 'COMBINED'
             
+            # Save to project library with new system
+            current_ai_path = temp_dir / "current_ai.png"
+            saved_path = save_generation_to_library(context, current_ai_path, backend='GCS')
+            
+            if saved_path:
+                print(f"[GCS] ✅ Generation saved to library")
+            
+            # Refresh camera background
             refresh_ai_image()
             print(f"[GCS] ✓ Camera background updated with new AI image")
-            
-            # Save to output_path if set (same as RunComfy)
-            if hasattr(props, 'output_path') and props.output_path and os.path.exists(props.output_path):
-                import shutil
-                from datetime import datetime
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                output_dir = Path(props.output_path) / "generated"
-                output_dir.mkdir(exist_ok=True, parents=True)
-                
-                output_path = output_dir / f"{timestamp}_gcs.png"
-                try:
-                    shutil.copy2(temp_dir / "current_ai.png", output_path)
-                    print(f"[GCS] 💾 Saved to {output_path}")
-                except Exception as e:
-                    print(f"[GCS] Failed to save to output_path: {e}")
-            else:
-                print(f"[GCS] Output path not set, skipping save")
         
         # Trigger next generation cycle if auto-generate is enabled
         trigger_next_generation_cycle(context)
@@ -2548,25 +2930,15 @@ def on_generation_complete(context, success, result, error, workflow_type='sdxl'
     if runcomfy_client.download_image_from_url(image_url, str(current_ai_path)):
         print("[Style Engine] ✅ Downloaded to temp")
         
+        # Save to project library with new system
+        saved_path = save_generation_to_library(context, current_ai_path, backend='RunComfy')
+        
+        if saved_path:
+            print(f"[Style Engine] ✅ Generation saved to library")
+        
         # Update camera background (on-demand refresh - only when new image arrives!)
         refresh_ai_image()
         print("[Style Engine] ✓ Camera background updated with new AI image")
-        
-        # Save to output_path if set
-        props = context.scene.style_engine_props
-        if hasattr(props, 'output_path') and props.output_path and os.path.exists(props.output_path):
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_dir = Path(props.output_path) / "generated"
-            output_dir.mkdir(exist_ok=True, parents=True)
-            
-            output_path = output_dir / f"{timestamp}_runcomfy.png"
-            try:
-                shutil.copy2(current_ai_path, output_path)
-                print(f"[Style Engine] 💾 Saved to {output_path}")
-            except Exception as e:
-                print(f"[Style Engine] Failed to save to output_path: {e}")
-        else:
-            print("[Style Engine] Output path not set, skipping save")
     else:
         print("[Style Engine] ❌ Download failed")
     

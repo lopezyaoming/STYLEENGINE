@@ -425,6 +425,14 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         default=True
     )
     
+    # Generation browser - track current generation index
+    current_generation_index: bpy.props.IntProperty(
+        name="Current Generation",
+        description="Index of currently displayed generation (0 = latest, -1 = newest)",
+        default=-1,  # -1 means "latest/newest"
+        min=-1
+    )
+    
     # ================================================================
     # REFERENCE IMAGE SYSTEM (15 slots: 5 per mode)
     # ================================================================
@@ -1040,6 +1048,9 @@ class WM_OT_ProjectTexture(bpy.types.Operator):
         
         print(f"[Style Engine] 📸 Created archival image: {img_copy.name}")
         
+        # Save texture to project library iterations folder (external backup)
+        self.save_iteration_texture(context, img_path, iteration_name)
+        
         # Create a new unique material for this iteration
         mat = bpy.data.materials.new(name=iteration_name)
         mat.use_nodes = True
@@ -1156,6 +1167,52 @@ class WM_OT_ProjectTexture(bpy.types.Operator):
         self.create_iteration_snapshot(context, mesh_objects)
         
         return {'FINISHED'}
+    
+    def save_iteration_texture(self, context, source_image_path, iteration_name):
+        """
+        Save iteration texture to project library iterations folder.
+        Provides external backup of projected textures.
+        
+        Args:
+            context: Blender context
+            source_image_path: Path to current_ai.png
+            iteration_name: Name like 'iteration_000'
+        """
+        from . import workspace_setup
+        from pathlib import Path
+        import shutil
+        
+        # Get project library
+        project_lib = workspace_setup.get_project_library(context)
+        
+        if project_lib:
+            # Save to project library iterations folder
+            iterations_dir = project_lib / "iterations"
+            iterations_dir.mkdir(parents=True, exist_ok=True)
+            
+            dest_path = iterations_dir / f"{iteration_name}.png"
+            
+            try:
+                shutil.copy2(source_image_path, dest_path)
+                print(f"[Style Engine] 💾 Saved texture to: {dest_path.name}")
+            except Exception as e:
+                print(f"[Style Engine] ⚠️ Failed to save texture to iterations folder: {e}")
+        else:
+            # .blend not saved - save to session temp
+            import tempfile
+            session_id = workspace_setup.get_session_id()
+            temp_base = Path(tempfile.gettempdir()) / "blender_styleengine" / "sessions"
+            iterations_dir = temp_base / session_id / "iterations"
+            iterations_dir.mkdir(parents=True, exist_ok=True)
+            
+            dest_path = iterations_dir / f"{iteration_name}.png"
+            
+            try:
+                shutil.copy2(source_image_path, dest_path)
+                print(f"[Style Engine] 💾 Saved texture to session: {dest_path.name}")
+                print(f"[Style Engine] ℹ️  Save .blend to migrate to project library")
+            except Exception as e:
+                print(f"[Style Engine] ⚠️ Failed to save texture: {e}")
     
     def create_iteration_snapshot(self, context, mesh_objects):
         """Create a snapshot of all meshes joined into a single iteration object."""
