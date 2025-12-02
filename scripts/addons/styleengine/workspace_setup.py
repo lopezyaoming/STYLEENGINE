@@ -1167,12 +1167,12 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
         # Create the AI workspace (always from default Layout)
         workspace = self.create_ai_workspace(context)
         
-        # Configure scene render engine to Workbench for performance
-        self.setup_render_engine(context)
+        # NOTE: Render engine is NOT changed by Style Engine
+        # Users can choose Fast (Workbench) or Detailed (EEVEE) via pie menu
+        # This respects the user's existing render setup
         
-        # Skip compositor setup - not needed with Workbench (no render passes)
-        # Compositor is disabled during rendering for performance anyway
-        # self.setup_compositor(context)  # DEPRECATED - Workbench doesn't support Mist/AO passes
+        # Skip compositor setup - not needed (compositor disabled during rendering anyway)
+        # self.setup_compositor(context)  # DEPRECATED
         
         # Clear groups at session start
         self.clear_groups(context)

@@ -5,8 +5,8 @@
 
 bl_info = {
     "name": "Style Engine",
-    "author": "Spiri Bros Co",
-    "version": (0, 2, 1),
+    "author": "Ian Worrel, Juan Jose Lopez",
+    "version": (0, 3, 1),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > Style Engine",
     "description": "In-house AI Generation integration for Blender Workflows",

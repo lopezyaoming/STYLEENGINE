@@ -3,6 +3,13 @@
 Style Engine - Modern Cross-Platform Packaging Script
 Creates proper ZIP with forward slashes for Windows/macOS/Linux compatibility
 
+⚠️  CRITICAL WARNING: SYMLINK DEVELOPMENT WORKFLOW
+====================================================
+Developer uses Blender 4.4 with a SYMLINK to the development folder.
+DO NOT install the packaged ZIP in Blender 4.4 - it will DESTROY the symlink!
+See SYMLINK_DEV_WORKFLOW.md for full details and recovery steps.
+====================================================
+
 Features:
 - Includes ALL addon files automatically
 - Proper cross-platform path handling (forward slashes only)

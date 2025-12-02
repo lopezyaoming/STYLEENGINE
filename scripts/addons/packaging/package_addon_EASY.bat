@@ -3,10 +3,22 @@ REM ================================================================
 REM    Style Engine - Easy Packaging Script
 REM    Simple wrapper that runs the modern Python packaging script
 REM ================================================================
+REM
+REM    WARNING: SYMLINK DEVELOPMENT WORKFLOW
+REM    ========================================
+REM    Developer uses Blender 4.4 with SYMLINK to dev folder.
+REM    DO NOT install packaged ZIP in Blender 4.4 - it breaks symlink!
+REM    See SYMLINK_DEV_WORKFLOW.md for details.
+REM ================================================================
 
 echo.
 echo ================================================================
 echo   Style Engine - Addon Packaging
+echo ================================================================
+echo.
+echo  WARNING: Do NOT test package in Blender 4.4 (dev environment)
+echo           Use other Blender versions for testing
+echo           See SYMLINK_DEV_WORKFLOW.md for details
 echo ================================================================
 echo.
 

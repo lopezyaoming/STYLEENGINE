@@ -145,9 +145,9 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
     texture_influence: bpy.props.FloatProperty(
         name="Influence",
         description="Controls how much of the render to keep in img2img workflow (GCS mode). 1.0 = keep 100% of render, 0.0 = full AI generation ignoring render",
-        default=1.0,
+        default=0.25,
         min=0.0,
-        max=1.0,
+        max=0.7,
         update=update_session_json
     )
     
@@ -1090,58 +1090,46 @@ class WM_OT_ProjectTexture(bpy.types.Operator):
         
         print(f"[Style Engine] 🎨 Created archival material: {mat.name}")
         
-        # Set ai_camera as the scene camera temporarily
-        context.scene.camera = ai_camera
-        
+        # Simple projection: Project from active view onto all selected objects at once
         projected_count = 0
         
-        for obj in mesh_objects:
-            try:
-                # Assign material to object
+        try:
+            # Assign material to all selected objects
+            for obj in mesh_objects:
                 if len(obj.data.materials) == 0:
                     obj.data.materials.append(mat)
                 else:
                     obj.data.materials[0] = mat
-                
-                # Deselect all
-                for o in context.selected_objects:
-                    o.select_set(False)
-                
-                # Select and activate this object
-                obj.select_set(True)
-                context.view_layer.objects.active = obj
-                
-                # Enter edit mode for this specific object
-                bpy.ops.object.mode_set(mode='EDIT')
-                
-                # Select all faces
-                bpy.ops.mesh.select_all(action='SELECT')
-                
-                # Project from camera view
-                bpy.ops.uv.project_from_view(
-                    camera_bounds=True,
-                    correct_aspect=True,
-                    scale_to_bounds=False
-                )
-                
-                # Return to object mode
-                bpy.ops.object.mode_set(mode='OBJECT')
-                
                 projected_count += 1
-                print(f"[Style Engine] ✓ Projected texture on {obj.name}")
-                
-            except Exception as e:
-                print(f"[Style Engine] ✗ Error projecting texture on {obj.name}: {e}")
-                # Make sure we're back in object mode
-                if context.object and context.object.mode != 'OBJECT':
-                    try:
-                        bpy.ops.object.mode_set(mode='OBJECT')
-                    except:
-                        pass
-                continue
-        
-        # Restore original camera
-        context.scene.camera = original_camera
+                print(f"[Style Engine] ✓ Assigned material to {obj.name}")
+            
+            # Enter edit mode (works with all selected objects)
+            bpy.ops.object.mode_set(mode='EDIT')
+            
+            # Select all faces
+            bpy.ops.mesh.select_all(action='SELECT')
+            
+            # Project from active view (user's current viewport)
+            # This is simpler and more intuitive than camera projection
+            bpy.ops.uv.project_from_view(
+                camera_bounds=False,  # Use viewport, not camera
+                correct_aspect=True,
+                scale_to_bounds=False
+            )
+            
+            # Return to object mode
+            bpy.ops.object.mode_set(mode='OBJECT')
+            
+            print(f"[Style Engine] ✓ Projected texture from active view onto {projected_count} objects")
+            
+        except Exception as e:
+            print(f"[Style Engine] ✗ Error during projection: {e}")
+            # Make sure we're back in object mode
+            if context.object and context.object.mode != 'OBJECT':
+                try:
+                    bpy.ops.object.mode_set(mode='OBJECT')
+                except:
+                    pass
         
         # Restore original selection
         for o in context.selected_objects:

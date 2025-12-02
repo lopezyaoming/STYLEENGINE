@@ -1,0 +1,2166 @@
+================================================================================
+                          STYLE ENGINE 0.2.2 BETA
+                            COMPREHENSIVE USER GUIDE
+================================================================================
+
+Version: 0.2.2 Beta
+Date: November 2025
+Author: Spiri Bros Co
+Platform: Blender 4.2+
+
+================================================================================
+TABLE OF CONTENTS
+================================================================================
+
+1. INTRODUCTION
+   1.1 What is Style Engine?
+   1.2 Key Features
+   1.3 System Requirements
+   1.4 Version History
+
+2. INSTALLATION
+   2.1 First-Time Installation
+   2.2 Updating from Previous Version
+   2.3 Uninstallation
+   2.4 Troubleshooting Installation
+
+3. GETTING STARTED
+   3.1 Backend Configuration
+   3.2 Workspace Setup
+   3.3 Your First Generation
+   3.4 Understanding the Interface
+
+4. BACKEND MODES
+   4.1 GCS Mode (Google Cloud Services)
+   4.2 RunComfy Mode (Serverless Cloud)
+   4.3 Local Mode (Future)
+   4.4 Choosing the Right Backend
+
+5. CORE WORKFLOWS
+   5.1 Basic Generation Workflow
+   5.2 img2img Workflow (Texture Control)
+   5.3 Texture Projection Workflow
+   5.4 Iterative Remixing Workflow
+
+6. THE PIE MENU (Alt+W)
+   6.1 Overview
+   6.2 Setup Workspace (LEFT)
+   6.3 Generate Image (BOTTOM)
+   6.4 Project on Object (TOP)
+   6.5 Visualization & Browser (RIGHT)
+
+7. GENERATION CONTROLS
+   7.1 Prompt System
+   7.2 Prompt Builder (Templates)
+   7.3 Influence Sliders
+   7.4 Render Quality (Fast/Detailed)
+   7.5 Steps Control
+
+8. REFERENCE IMAGES
+   8.1 Style Transfer (ST)
+   8.2 Composition (COMP)
+   8.3 Strong Style Transfer (SST)
+   8.4 Managing Reference Images
+   8.5 Weight Controls
+
+9. VISUALIZATION SYSTEM
+   9.1 Combined View (Final Image)
+   9.2 Silhouette View (Canny Edges)
+   9.3 Depth View (Depth Map)
+   9.4 Switching Between Views
+
+10. GENERATION BROWSER
+    10.1 Navigating Generations
+    10.2 Loading Previous Generations
+    10.3 Remixing Workflow
+    10.4 Generation History
+
+11. TEXTURE PROJECTION
+    11.1 Basic Projection
+    11.2 Archival Materials
+    11.3 Iteration System
+    11.4 Multi-Object Projection
+
+12. DATA MANAGEMENT
+    12.1 Per-Project Library Structure
+    12.2 Session Management
+    12.3 File Organization
+    12.4 Backup and Recovery
+
+13. ADVANCED FEATURES
+    13.1 Preview Images (Canny/Depth)
+    13.2 Iteration Snapshots
+    13.3 Custom Templates
+    13.4 Keyboard Shortcuts
+
+14. TROUBLESHOOTING
+    14.1 Common Issues
+    14.2 Error Messages
+    14.3 Performance Issues
+    14.4 Getting Help
+
+15. BEST PRACTICES
+    15.1 Project Organization
+    15.2 Workflow Optimization
+    15.3 Quality Settings
+    15.4 Backup Strategies
+
+16. APPENDIX
+    16.1 Keyboard Shortcuts Reference
+    16.2 File Structure Reference
+    16.3 Settings Reference
+    16.4 Glossary
+
+================================================================================
+1. INTRODUCTION
+================================================================================
+
+1.1 WHAT IS STYLE ENGINE?
+--------------------------
+
+Style Engine is a Blender addon that integrates AI image generation directly 
+into your 3D modeling workflow. It allows you to:
+
+- Generate AI images from your 3D renders in real-time
+- Project AI textures onto your 3D objects
+- Navigate through generation history
+- Mix different AI styles in a single scene
+- Control the balance between render and AI generation
+
+Think of it as a bridge between your 3D work and AI generation, enabling 
+iterative workflows where you can quickly explore visual styles, apply 
+textures, and build complex scenes with multiple AI generations.
+
+
+1.2 KEY FEATURES
+-----------------
+
+GENERATION FEATURES:
+• Three backend modes (GCS, RunComfy, Local)
+• img2img workflow with texture control
+• ControlNet integration (Canny edges + Depth maps)
+• IPAdapter with 15 reference image slots
+• Real-time generation with progress tracking
+
+WORKFLOW FEATURES:
+• Generation browser (navigate through history)
+• Texture projection (project AI onto objects)
+• Archival materials (freeze textures in time)
+• Iterative remixing (mix old and new generations)
+• Per-project library (automatic organization)
+
+INTERFACE FEATURES:
+• Pie menu (Alt+W) for quick access
+• Visualization switcher (Combined/Silhouette/Depth)
+• Render quality selector (Fast/Detailed)
+• Reference image thumbnails
+• Progress and status indicators
+
+
+1.3 SYSTEM REQUIREMENTS
+------------------------
+
+MINIMUM:
+• Blender 4.2 or newer
+• Windows 10/11, macOS 10.15+, or Linux
+• 8GB RAM
+• Internet connection (for cloud backends)
+
+RECOMMENDED:
+• Blender 4.4+
+• 16GB RAM
+• SSD for faster file operations
+• Dedicated GPU (for EEVEE rendering)
+
+BACKEND REQUIREMENTS:
+• GCS Mode: Google Cloud ComfyUI instance
+• RunComfy Mode: RunComfy API credentials
+• Local Mode: Local ComfyUI installation (future)
+
+
+1.4 VERSION HISTORY
+--------------------
+
+0.2.2 Beta (November 2025) - Current
+• Per-project library system
+• Generation browser with navigation
+• Enhanced texture projection
+• Session management
+• Template cleanup
+• Simplified workflows
+
+0.2.1 Alpha (November 2025)
+• GCS mode implementation
+• Visualization switcher
+• Render quality selector
+• Texture control (img2img)
+
+0.1.x Alpha (October 2025)
+• Initial release
+• Basic generation workflow
+• RunComfy integration
+
+
+================================================================================
+2. INSTALLATION
+================================================================================
+
+2.1 FIRST-TIME INSTALLATION
+----------------------------
+
+STEP 1: Download
+• Obtain styleengine.zip (364 KB)
+• Verify file integrity (should be ~364 KB)
+
+STEP 2: Install in Blender
+1. Open Blender 4.2 or newer
+2. Go to: Edit → Preferences → Add-ons
+3. Click "Install from Disk..." button (top right)
+4. Navigate to styleengine.zip
+5. Click "Install Add-on"
+6. Find "Style Engine" in the list
+7. Check the checkbox to enable it
+
+STEP 3: Verify Installation
+• Look for console output: "[Style Engine] Initial path detection"
+• Check for: "Style Engine" tab in 3D viewport sidebar (press N)
+• Open pie menu: Alt+W (should show Style Engine menu)
+
+STEP 4: Configure Backend
+• Edit → Preferences → Add-ons → Style Engine
+• Choose backend mode (GCS or RunComfy)
+• Enter credentials/server URL
+• Click "Test Connection"
+
+
+2.2 UPDATING FROM PREVIOUS VERSION
+-----------------------------------
+
+IMPORTANT: Always uninstall old version first!
+
+STEP 1: Uninstall Old Version
+1. Edit → Preferences → Add-ons
+2. Find "Style Engine" in the list
+3. Click the X button to remove
+4. **RESTART BLENDER** (critical!)
+
+STEP 2: Install New Version
+1. Follow "First-Time Installation" steps above
+2. Your settings will be preserved (stored in Blender preferences)
+3. Your project libraries remain intact (in project folders)
+
+STEP 3: Verify Update
+• Check version in addon preferences
+• Test basic generation
+• Check that old projects still load correctly
+
+
+2.3 UNINSTALLATION
+-------------------
+
+STEP 1: Disable Addon
+1. Edit → Preferences → Add-ons
+2. Find "Style Engine"
+3. Uncheck the checkbox
+
+STEP 2: Remove Addon
+1. Click the X button
+2. Restart Blender
+
+STEP 3: Clean Up (Optional)
+• Delete project libraries (YourProject_styleengine folders)
+• Clear system temp: C:\Users\You\AppData\Local\Temp\blender_styleengine\
+• Remove credentials file (if used)
+
+NOTE: Project libraries contain all your generated images. Only delete if 
+you're sure you don't need them!
+
+
+2.4 TROUBLESHOOTING INSTALLATION
+---------------------------------
+
+ISSUE: "Add-on not loaded" error
+SOLUTION:
+• Make sure you uninstalled old version
+• Restart Blender completely
+• Try installing again
+• Check console for specific error messages
+
+ISSUE: "Module not found" errors
+SOLUTION:
+• Verify styleengine.zip is not corrupted
+• Re-download the addon
+• Make sure you're using Blender 4.2+
+
+ISSUE: Addon checkbox grayed out
+SOLUTION:
+• Check console for Python errors
+• Verify Blender version (must be 4.2+)
+• Try installing in a fresh Blender install
+
+ISSUE: "SyntaxError" or "IndentationError"
+SOLUTION:
+• This indicates a corrupted installation
+• Uninstall completely
+• Restart Blender
+• Reinstall from fresh styleengine.zip
+
+
+================================================================================
+3. GETTING STARTED
+================================================================================
+
+3.1 BACKEND CONFIGURATION
+--------------------------
+
+Before you can generate images, you need to configure a backend.
+
+OPTION A: GCS MODE (Self-Hosted ComfyUI)
+1. Edit → Preferences → Add-ons → Style Engine
+2. Backend Mode: Select "Self-Hosted ComfyUI"
+3. Server URL: Enter your ComfyUI URL (e.g., http://34.19.119.45:8188)
+4. Click "Test Server Connection"
+5. Wait for: "✅ Server is healthy and ready!"
+
+OPTION B: RUNCOMFY MODE (Serverless Cloud)
+1. Edit → Preferences → Add-ons → Style Engine
+2. Backend Mode: Select "RunComfy Cloud"
+3. Enter API Token and User ID
+4. Click "Test Connection"
+5. Wait for: "✅ Connection successful!"
+
+WHICH TO CHOOSE?
+• GCS: Your own server, full control, requires setup
+• RunComfy: Managed service, easy setup, costs per use
+
+
+3.2 WORKSPACE SETUP
+--------------------
+
+Every project starts with workspace setup.
+
+STEP 1: Open or Create .blend File
+• File → New (or open existing project)
+• RECOMMENDED: Save your .blend file first
+  (This enables per-project library immediately)
+
+STEP 2: Setup Workspace
+• Press Alt+W (pie menu)
+• Click "Setup Workspace" (LEFT section)
+• OR: Press N → Style Engine tab → (if visible)
+
+WHAT HAPPENS:
+• Creates "ai_camera" in your scene
+• Positions camera at your current view
+• Creates black placeholder image (1024x1024)
+• Sets up workspace layout
+• Creates prompt text editor
+• Initializes project library (if .blend saved)
+
+CONSOLE OUTPUT:
+[Style Engine] 🆔 Session ID: 20251123_143022_abc123
+[Style Engine] 🔒 Temp directory locked: C:\Projects\MyProject\temp\ai_vision
+[Style Engine] 🖤 Created fresh black placeholder: 1024x1024
+[Style Engine] Created new ai_camera
+[Style Engine] ✓ Loaded workspace template successfully
+
+
+3.3 YOUR FIRST GENERATION
+--------------------------
+
+STEP 1: Write a Prompt
+• Find the text editor in your workspace
+• Type your prompt (e.g., "futuristic city at sunset")
+• OR: Use a template (see section 7.2)
+
+STEP 2: Adjust Settings (Optional)
+• Press Alt+W → BOTTOM section
+• Adjust Silhouette: 0.5 (default)
+• Adjust Depth: 0.5 (default)
+• Adjust Influence: 0.25 (default - good balance)
+• Adjust Steps: 15-30 (15 is fast, 30 is quality)
+
+STEP 3: Generate
+• Press Alt+W
+• Click "Generate Image" (BOTTOM section)
+• Wait for generation (15-30 seconds)
+
+STEP 4: View Result
+• Camera view updates automatically
+• Image saved to generations/ folder
+• Console shows: "✅ Generation saved to library"
+
+CONGRATULATIONS! You've generated your first AI image!
+
+
+3.4 UNDERSTANDING THE INTERFACE
+--------------------------------
+
+THE PIE MENU (Alt+W):
+┌─────────────────────────────────────────┐
+│           [Project Texture]             │
+│                  TOP                    │
+│                                         │
+│  [Setup]  ←  [CENTER]  →  [Viz/Browser]│
+│   LEFT                          RIGHT   │
+│                                         │
+│              [Generate]                 │
+│               BOTTOM                    │
+└─────────────────────────────────────────┘
+
+THE WORKSPACE:
+• Left viewport: Your modeling view
+• Right viewport: AI camera view (if split)
+• Text editor: Prompt input
+• Properties panel: Settings (press N)
+
+THE CAMERA VIEW:
+• Shows current_ai.png (latest generation)
+• Updates when you generate new images
+• Updates when you navigate generations (◀ ▶)
+• Black placeholder when no generation yet
+
+
+================================================================================
+4. BACKEND MODES
+================================================================================
+
+4.1 GCS MODE (Google Cloud Services)
+-------------------------------------
+
+WHAT IT IS:
+Direct connection to a self-hosted ComfyUI instance running on Google Cloud
+(or any cloud provider, or localhost).
+
+SETUP:
+1. Have a ComfyUI server running (e.g., on GCS T4 instance)
+2. Note the IP and port (e.g., http://34.19.119.45:8188)
+3. In Style Engine preferences:
+   • Backend Mode: "Self-Hosted ComfyUI"
+   • Server URL: http://34.19.119.45:8188
+   • Click "Test Server Connection"
+
+FEATURES:
+• Direct HTTP connection (no OAuth2)
+• Full control over server
+• Can use any ComfyUI workflow
+• Preview images (Canny/Depth) available
+
+WORKFLOW:
+StyleEngineTexture.json (img2img with texture control)
+
+BEST FOR:
+• Teams with cloud infrastructure
+• Projects requiring full control
+• High-volume generation
+• Custom workflow needs
+
+
+4.2 RUNCOMFY MODE (Serverless Cloud)
+-------------------------------------
+
+WHAT IT IS:
+Managed serverless ComfyUI service. No server management required.
+
+SETUP:
+1. Get RunComfy API credentials (token + user ID)
+2. In Style Engine preferences:
+   • Backend Mode: "RunComfy Cloud"
+   • Enter API Token
+   • Enter User ID
+   • Click "Test Connection"
+
+FEATURES:
+• Automatic scaling
+• No server maintenance
+• Pay per generation
+• Managed infrastructure
+
+WORKFLOW:
+SDXLREF.json (SDXL with reference images)
+
+BEST FOR:
+• Quick setup
+• No infrastructure management
+• Pay-as-you-go pricing
+• Managed service preference
+
+
+4.3 LOCAL MODE (Future)
+------------------------
+
+WHAT IT IS:
+Direct connection to ComfyUI running on your local machine.
+
+STATUS: Planned for future release
+
+WILL INCLUDE:
+• Localhost connection (127.0.0.1:8188)
+• No internet required
+• Full privacy
+• Free to use (your hardware)
+
+
+4.4 CHOOSING THE RIGHT BACKEND
+-------------------------------
+
+CHOOSE GCS IF:
+• You have Google Cloud credits
+• You want full control
+• You need custom workflows
+• You're working with a team
+
+CHOOSE RUNCOMFY IF:
+• You want quick setup
+• You don't want to manage servers
+• You're okay with pay-per-use
+• You want managed infrastructure
+
+CHOOSE LOCAL IF: (Future)
+• You have powerful local hardware
+• You want complete privacy
+• You want zero cloud costs
+• You're okay with slower generation
+
+
+================================================================================
+5. CORE WORKFLOWS
+================================================================================
+
+5.1 BASIC GENERATION WORKFLOW
+------------------------------
+
+PURPOSE: Generate AI images from your 3D scene
+
+STEPS:
+1. Setup workspace (Alt+W → Setup)
+2. Model your scene in left viewport
+3. Write prompt in text editor
+4. Press Alt+W → Generate Image
+5. Wait for generation (~15-30 seconds)
+6. View result in camera view
+
+TIPS:
+• Start with default settings (Influence 0.25, Steps 15)
+• Use Fast render quality for quick iterations
+• Save your .blend file to enable project library
+• Generate multiple variations before projecting
+
+
+5.2 IMG2IMG WORKFLOW (Texture Control)
+---------------------------------------
+
+PURPOSE: Control how much of your render is kept vs AI generation
+
+THE INFLUENCE SLIDER:
+Located in: Alt+W → BOTTOM → Influences → Influence
+
+VALUE GUIDE:
+• 1.0 = Keep 100% of render (minimal AI, just ControlNet)
+• 0.75 = Keep 75% of render (subtle AI enhancement)
+• 0.5 = 50/50 blend (balanced)
+• 0.25 = Keep 25% of render (good transformation) ← DEFAULT
+• 0.0 = 0% render (full AI generation)
+
+WORKFLOW EXAMPLE:
+1. Model detailed scene with materials
+2. Set Influence to 0.25 (default)
+3. Set Render Quality to "Detailed" (EEVEE)
+4. Generate
+5. Result: AI transforms your render while keeping structure
+
+WHEN TO USE HIGH INFLUENCE (0.7-1.0):
+• Polishing final renders
+• Subtle lighting adjustments
+• Client work requiring approval
+• Maintaining exact geometry
+
+WHEN TO USE LOW INFLUENCE (0.0-0.3):
+• Creative exploration
+• Style transformation
+• Concept art variations
+• Dramatic changes
+
+
+5.3 TEXTURE PROJECTION WORKFLOW
+--------------------------------
+
+PURPOSE: Apply AI-generated textures to your 3D objects
+
+BASIC STEPS:
+1. Generate AI image
+2. Position your viewport to desired projection angle
+3. Select object(s) to project onto
+4. Alt+W → Project on Object (TOP)
+5. Texture projects from your current view
+
+WHAT HAPPENS:
+• Creates archival material (iteration_000, iteration_001, etc.)
+• Creates archival image (iteration_000.png)
+• Assigns material to selected objects
+• Projects UVs from your active view
+• Saves texture to iterations/ folder
+
+TIPS:
+• Position view carefully before projecting
+• Works with single or multiple objects
+• Each projection creates unique material
+• Textures frozen in time (won't change with new generations)
+
+
+5.4 ITERATIVE REMIXING WORKFLOW
+--------------------------------
+
+PURPOSE: Mix different AI generations on different objects
+
+ADVANCED WORKFLOW:
+1. Generate 3-5 different style variations
+   • Photorealistic
+   • Concept art
+   • Painterly
+   • Sketch
+   • etc.
+
+2. Navigate to first generation
+   • Alt+W → RIGHT → Click ◀ (go back)
+   • Camera shows first generation
+
+3. Select objects for this style
+   • Select Cube, Sphere, etc.
+
+4. Project on Object
+   • Alt+W → Project on Object
+   • Objects get first generation texture
+
+5. Navigate to second generation
+   • Alt+W → RIGHT → Click ▶ (go forward)
+   • Camera shows second generation
+
+6. Select different objects
+   • Select Monkey, Torus, etc.
+
+7. Project on Object
+   • Alt+W → Project on Object
+   • Objects get second generation texture
+
+8. Repeat for more generations
+   • Navigate ◀ ▶
+   • Select objects
+   • Project
+
+RESULT: Multiple AI styles in one scene!
+
+
+================================================================================
+6. THE PIE MENU (Alt+W)
+================================================================================
+
+6.1 OVERVIEW
+-------------
+
+The pie menu is your main interface for Style Engine. Press Alt+W anywhere 
+in the 3D viewport to access all features.
+
+LAYOUT:
+         [TOP: Project Texture]
+                  ↑
+    [LEFT: Setup] ← → [RIGHT: Visualization/Browser]
+                  ↓
+        [BOTTOM: Generate]
+
+KEYBOARD SHORTCUT: Alt+W
+WORKS IN: All modes (Object, Edit, Sculpt, etc.)
+
+
+6.2 SETUP WORKSPACE (LEFT)
+---------------------------
+
+LOCATION: Alt+W → LEFT section
+
+FEATURES:
+• Setup Workspace button
+• Background Opacity slider
+• Resolution dropdown
+
+SETUP WORKSPACE BUTTON:
+• Creates ai_camera
+• Positions camera at current view
+• Creates black placeholder
+• Sets up workspace layout
+• Initializes project library
+
+BACKGROUND OPACITY:
+• Controls transparency of AI image in camera
+• Range: 0.0 (invisible) to 1.0 (opaque)
+• Default: 1.0 (fully visible)
+
+RESOLUTION:
+• Choose AI image resolution
+• Options: 512x512, 768x768, 1024x1024, 1536x1536, etc.
+• Default: 1024x1024
+• Affects: Generated image size, render resolution
+
+
+6.3 GENERATE IMAGE (BOTTOM)
+----------------------------
+
+LOCATION: Alt+W → BOTTOM section
+
+FEATURES:
+• Generate Image button (big, prominent)
+• Influence sliders (Silhouette, Depth, Influence)
+• Steps slider
+• Autogenerate toggle
+• Render Quality selector (Fast/Detailed)
+
+GENERATE IMAGE BUTTON:
+• Starts AI generation process
+• Uses current prompt and settings
+• Saves to generations/ folder
+• Updates camera view when complete
+
+INFLUENCE SLIDERS:
+• Silhouette: Controls Canny edge strength (0.0-1.0)
+  Default: 0.5
+  
+• Depth: Controls depth map strength (0.0-1.0)
+  Default: 0.5
+  
+• Influence: Controls render preservation (0.0-1.0)
+  Default: 0.25 (75% AI, 25% render)
+
+STEPS:
+• Number of sampling steps (15-30)
+• More steps = higher quality, longer time
+• Default: 15 (good balance)
+
+AUTOGENERATE:
+• Toggle continuous generation
+• Generates new image every ~30 seconds
+• Useful for rapid iteration
+
+RENDER QUALITY:
+• Fast: Workbench render (~0.1s)
+• Detailed: EEVEE render (~1-3s)
+• Choose based on Influence value:
+  - High Influence (0.7+) → Use Detailed
+  - Low Influence (0.0-0.3) → Use Fast
+
+
+6.4 PROJECT ON OBJECT (TOP)
+----------------------------
+
+LOCATION: Alt+W → TOP section
+
+FEATURE:
+• Project on Object button
+
+WHAT IT DOES:
+• Projects current_ai.png onto selected objects
+• Creates archival material (iteration_xxx)
+• Projects from your active viewport view
+• Saves texture to iterations/ folder
+
+HOW TO USE:
+1. Position your viewport (important!)
+2. Select object(s)
+3. Click "Project on Object"
+4. Texture projects from your view
+
+TIPS:
+• Position view carefully before projecting
+• Works with multiple objects at once
+• Each projection creates unique material
+• Textures won't change with new generations
+
+
+6.5 VISUALIZATION & BROWSER (RIGHT)
+------------------------------------
+
+LOCATION: Alt+W → RIGHT section
+
+FEATURES (when GCS + Preview Images enabled):
+• Visualization type switcher
+  - Combined (final image)
+  - Silhouette (Canny edges)
+  - Depth (depth map)
+
+• Generation Browser
+  - ◀ Previous generation
+  - Current position indicator
+  - ▶ Next generation
+
+VISUALIZATION SWITCHER:
+• Combined: Shows final AI-generated image
+• Silhouette: Shows Canny edge detection
+• Depth: Shows depth map
+• Useful for debugging ControlNet
+
+GENERATION BROWSER:
+• Navigate through all saved generations
+• ◀ button: Go to older generation
+• ▶ button: Go to newer generation
+• Display shows: "Latest (5)" or "3/5"
+• Buttons disabled at boundaries
+
+HOW TO USE:
+1. Generate 3-5 images
+2. Alt+W → RIGHT
+3. Click ◀ to go back in history
+4. Click ▶ to go forward
+5. Camera view updates in real-time
+6. Project whichever generation is loaded
+
+
+================================================================================
+7. GENERATION CONTROLS
+================================================================================
+
+7.1 PROMPT SYSTEM
+------------------
+
+WHERE TO WRITE:
+• Text editor in workspace (usually bottom area)
+• Text block named "STYLEENGINE_Prompt"
+• Can also use any text block in Text Editor
+
+BASIC PROMPTING:
+Just write your prompt as plain text:
+"futuristic city at sunset, neon lights, cyberpunk style"
+
+The prompt is automatically synced when you generate.
+
+TIPS:
+• Be specific about style and mood
+• Include lighting and camera angle
+• Mention important details
+• Keep it under 200 words for best results
+
+
+7.2 PROMPT BUILDER (Templates)
+-------------------------------
+
+WHAT IT IS:
+Structured prompt system using tags for organized prompting.
+
+HOW TO ENABLE:
+1. In UI panel (press N → Style Engine)
+2. Find "Prompt Settings"
+3. Check "Enable Prompt Builder"
+
+AVAILABLE TEMPLATES:
+• Empty: Blank slate for custom prompts
+• Vizdev: Concept art / visual development
+• Photorealistic: Professional photography
+
+TEMPLATE FORMAT:
+# Subject:
+your subject here
+
+# Style:
+art style, medium
+
+# Details:
+specific details
+
+# Environment:
+background, setting
+
+# Mood:
+atmosphere, feeling
+
+# Camera:
+angle, perspective
+
+# Lighting:
+lighting conditions
+
+# Negative Prompt:
+things to avoid
+
+HOW TO USE:
+1. Enable Prompt Builder
+2. Click "Load Templates"
+3. Select a template from text editor dropdown
+4. Customize the tags
+5. Generate
+6. Prompt Builder combines tags into coherent prompt
+
+EXAMPLE (Vizdev Template):
+# Subject:
+ancient temple ruins
+
+# Style:
+concept art, matte painting, visual development art
+
+# Details:
+overgrown vegetation, atmospheric perspective
+
+# Environment:
+misty jungle landscape
+
+# Mood:
+mysterious, ancient, abandoned
+
+# Camera:
+wide-angle establishing shot
+
+# Lighting:
+soft morning light filtering through fog
+
+# Negative Prompt:
+photorealistic, modern, cluttered
+
+RESULT:
+"concept art, matte painting, visual development art of ancient temple ruins 
+with overgrown vegetation, atmospheric perspective, in misty jungle landscape. 
+mysterious, ancient, abandoned atmosphere. wide-angle establishing shot 
+perspective; lit by soft morning light filtering through fog."
+
+
+7.3 INFLUENCE SLIDERS
+----------------------
+
+LOCATION: Alt+W → BOTTOM → Influences section
+
+THREE SLIDERS:
+
+SILHOUETTE (Canny Strength):
+• Controls: Canny edge detection strength
+• Range: 0.0 (no edges) to 1.0 (strong edges)
+• Default: 0.5
+• Effect: How much AI follows your scene's edges
+• Use high (0.7-1.0) for: Precise geometry matching
+• Use low (0.0-0.3) for: Loose interpretation
+
+DEPTH (Depth Strength):
+• Controls: Depth map influence
+• Range: 0.0 (no depth) to 1.0 (strong depth)
+• Default: 0.5
+• Effect: How much AI respects your scene's depth
+• Use high (0.7-1.0) for: Accurate spatial relationships
+• Use low (0.0-0.3) for: Flat, graphic style
+
+INFLUENCE (Texture Control):
+• Controls: How much render to keep in img2img
+• Range: 0.0 (full AI) to 1.0 (keep render)
+• Default: 0.25 (75% AI, 25% render)
+• Effect: Balance between render and AI generation
+• Use high (0.7-1.0) for: Subtle enhancement, keep render
+• Use low (0.0-0.3) for: Creative transformation
+
+INTERACTION:
+These sliders work together:
+• High Silhouette + High Depth = Precise, geometric
+• Low Silhouette + Low Depth = Loose, artistic
+• High Influence = Render-based (use Detailed quality)
+• Low Influence = AI-based (use Fast quality)
+
+
+7.4 RENDER QUALITY (Fast/Detailed)
+-----------------------------------
+
+LOCATION: Alt+W → BOTTOM → Render Quality
+
+TWO OPTIONS:
+
+FAST (Workbench):
+• Render time: ~0.1 seconds
+• Quality: Preview quality
+• Best for: Quick iterations, low Influence values
+• Use when: Influence < 0.5 (AI does most work)
+
+DETAILED (EEVEE Next):
+• Render time: ~1-3 seconds
+• Quality: High quality with lighting
+• Best for: Final renders, high Influence values
+• Use when: Influence > 0.5 (keeping most of render)
+
+CHOOSING:
+• Influence 0.0-0.3 → Use Fast
+• Influence 0.4-0.6 → Either works
+• Influence 0.7-1.0 → Use Detailed
+
+NOTE: Style Engine does NOT change your scene's render engine.
+This setting only affects the render sent to AI.
+
+
+7.5 STEPS CONTROL
+------------------
+
+LOCATION: Alt+W → BOTTOM → Steps
+
+WHAT IT CONTROLS:
+Number of sampling steps for AI generation.
+
+RANGE: 15-30 steps
+
+GUIDE:
+• 15 steps: Fast, good quality (default)
+• 20 steps: Better quality, slightly slower
+• 25 steps: High quality, slower
+• 30 steps: Maximum quality, slowest
+
+RULE OF THUMB:
+• Quick iterations: 15 steps
+• Final renders: 20-25 steps
+• Maximum quality: 30 steps
+
+TIME IMPACT:
+• 15 steps: ~15-20 seconds
+• 20 steps: ~20-25 seconds
+• 25 steps: ~25-30 seconds
+• 30 steps: ~30-40 seconds
+
+
+================================================================================
+8. REFERENCE IMAGES
+================================================================================
+
+8.1 STYLE TRANSFER (ST)
+-----------------------
+
+PURPOSE: Transfer style from reference images
+
+LOCATION: UI Panel → Reference Images → Style Transfer
+
+SLOTS: 5 (ST1-ST5)
+
+HOW TO USE:
+1. Expand "Style Transfer" section
+2. Click + button on empty slot
+3. Browse to reference image
+4. Image loads with thumbnail preview
+5. Adjust weight slider (0.0-1.0)
+6. Set Global Strength slider
+
+BEST FOR:
+• Artistic style transfer
+• Painterly effects
+• Color palette matching
+• Texture style
+
+EXAMPLE:
+Reference: Van Gogh painting
+Weight: 1.0
+Global Strength: 0.8
+Result: Your scene with Van Gogh's style
+
+
+8.2 COMPOSITION (COMP)
+-----------------------
+
+PURPOSE: Match composition and layout from reference
+
+LOCATION: UI Panel → Reference Images → Composition
+
+SLOTS: 5 (COMP1-COMP5)
+
+HOW TO USE:
+1. Expand "Composition" section
+2. Add reference images
+3. Adjust individual weights
+4. Set Global Strength
+
+BEST FOR:
+• Layout matching
+• Spatial arrangement
+• Framing and composition
+• Structural guidance
+
+EXAMPLE:
+Reference: Architectural photo
+Weight: 1.0
+Global Strength: 1.0
+Result: Your scene matches reference composition
+
+
+8.3 STRONG STYLE TRANSFER (SST)
+--------------------------------
+
+PURPOSE: Aggressive style transfer with strong influence
+
+LOCATION: UI Panel → Reference Images → Transfer
+
+SLOTS: 5 (SST1-SST5)
+
+HOW TO USE:
+1. Expand "Transfer" section
+2. Add reference images
+3. Adjust weights
+4. Set Global Strength
+
+BEST FOR:
+• Dramatic style changes
+• Strong artistic effects
+• Complete reimagining
+• Maximum style influence
+
+DIFFERENCE FROM ST:
+• ST: Subtle, balanced style transfer
+• SST: Strong, aggressive style transfer
+• SST overrides more of the base generation
+
+
+8.4 MANAGING REFERENCE IMAGES
+------------------------------
+
+LOADING IMAGES:
+1. Click + button on slot
+2. Browse to image file
+3. Image loads and shows thumbnail
+4. Adjust weight slider
+
+REMOVING IMAGES:
+1. Click X button on slot
+2. Image removed from that slot
+3. Weight resets to 0.0
+
+RELOADING IMAGES:
+1. Click refresh button (if image file changed)
+2. Thumbnail updates
+
+TIPS:
+• Use high-quality reference images
+• Images are packed into .blend file
+• Thumbnails generated automatically
+• Can use same image in multiple slots
+
+
+8.5 WEIGHT CONTROLS
+--------------------
+
+TWO LEVELS OF CONTROL:
+
+GLOBAL STRENGTH:
+• Affects all images in that mode
+• Located at top of each section
+• Range: 0.0-1.0
+• Default: Varies by mode
+
+INDIVIDUAL WEIGHTS:
+• Per-image control
+• Located under each thumbnail
+• Range: 0.0-1.0
+• Default: 1.0 (when image loaded)
+
+HOW THEY INTERACT:
+Final influence = Global Strength × Individual Weight
+
+EXAMPLE:
+• Global Strength: 0.8
+• ST1 Weight: 1.0
+• ST2 Weight: 0.5
+• Result:
+  - ST1 influence: 0.8 × 1.0 = 0.8
+  - ST2 influence: 0.8 × 0.5 = 0.4
+
+
+================================================================================
+9. VISUALIZATION SYSTEM
+================================================================================
+
+9.1 COMBINED VIEW (Final Image)
+--------------------------------
+
+WHAT IT SHOWS:
+The final AI-generated image (current_ai.png)
+
+WHEN TO USE:
+• Default view for normal work
+• Viewing final results
+• Choosing which generation to project
+• General modeling workflow
+
+HOW TO SWITCH:
+• Alt+W → RIGHT → Click "Combined"
+• Or: Automatically set after each generation
+
+
+9.2 SILHOUETTE VIEW (Canny Edges)
+----------------------------------
+
+WHAT IT SHOWS:
+Canny edge detection map (white edges on black background)
+
+WHEN TO USE:
+• Debugging edge detection
+• Understanding what AI sees as edges
+• Verifying Silhouette influence is working
+• Quality control
+
+WHAT YOU'LL SEE:
+• White lines where edges detected
+• Black background
+• Shows contours and silhouettes
+• Helps understand ControlNet guidance
+
+HOW TO SWITCH:
+• Alt+W → RIGHT → Click "Silhouette"
+
+REQUIRES:
+• GCS mode
+• "Download Preview Images" enabled in preferences
+
+
+9.3 DEPTH VIEW (Depth Map)
+---------------------------
+
+WHAT IT SHOWS:
+Depth Anything depth map (grayscale: bright=near, dark=far)
+
+WHEN TO USE:
+• Debugging depth perception
+• Understanding spatial relationships
+• Verifying Depth influence is working
+• Quality control
+
+WHAT YOU'LL SEE:
+• Bright areas: Close to camera
+• Dark areas: Far from camera
+• Grayscale gradient
+• Shows depth understanding
+
+HOW TO SWITCH:
+• Alt+W → RIGHT → Click "Depth"
+
+REQUIRES:
+• GCS mode
+• "Download Preview Images" enabled in preferences
+
+
+9.4 SWITCHING BETWEEN VIEWS
+----------------------------
+
+WORKFLOW:
+1. Generate image
+2. Alt+W → RIGHT
+3. Click "Silhouette" to check edges
+4. Click "Depth" to check depth
+5. Click "Combined" to return to final image
+
+AUTO-RESET:
+• After each generation, automatically resets to "Combined"
+• Ensures you always see new results first
+
+TIPS:
+• Use Silhouette view to verify edge detection
+• Use Depth view to check spatial understanding
+• Compare views to understand AI decision-making
+• Switch back to Combined for normal work
+
+
+================================================================================
+10. GENERATION BROWSER
+================================================================================
+
+10.1 NAVIGATING GENERATIONS
+----------------------------
+
+LOCATION: Alt+W → RIGHT → Generation Browser
+
+CONTROLS:
+• ◀ (Previous): Go to older generation
+• Position indicator: "Latest (5)" or "3/5"
+• ▶ (Next): Go to newer generation
+
+HOW IT WORKS:
+• All generations saved to generations/ folder
+• Sorted chronologically (oldest to newest)
+• Index -1 = Latest/newest (default)
+• Index 0 = Oldest generation
+
+NAVIGATION:
+1. Generate 3-5 images first
+2. Alt+W → RIGHT
+3. See: ◀  Latest (5)  ▶
+4. Click ◀ to go back (older)
+5. Click ▶ to go forward (newer)
+6. Camera view updates immediately
+
+BUTTON STATES:
+• ◀ Disabled: At oldest generation (can't go back)
+• ▶ Disabled: At latest generation (can't go forward)
+• Both Enabled: Can navigate both directions
+
+
+10.2 LOADING PREVIOUS GENERATIONS
+----------------------------------
+
+WHAT HAPPENS:
+When you navigate with ◀ ▶:
+1. Selected generation copied to current_ai.png
+2. Camera view refreshes
+3. Image immediately visible
+4. Ready for projection
+
+PERSISTENCE:
+• Position remembered across pie menu opens/closes
+• Resets to "Latest" after new generation
+• Persists during Blender session
+
+FILE OPERATIONS:
+• Copies generation to current_ai.png
+• Updates both project library and legacy temp
+• Fast operation (~15-70ms)
+
+
+10.3 REMIXING WORKFLOW
+-----------------------
+
+COMPLETE EXAMPLE:
+
+STEP 1: Generate Variations
+1. Generate photorealistic style → Gen 1
+2. Change prompt to concept art → Gen 2
+3. Change prompt to painterly → Gen 3
+4. Result: 3 different styles saved
+
+STEP 2: Navigate and Project
+1. Alt+W → RIGHT → Click ◀ twice
+   → Camera shows Gen 1 (photorealistic)
+   
+2. Select background objects
+3. Alt+W → Project on Object
+   → Background gets photorealistic texture
+
+4. Alt+W → RIGHT → Click ▶ once
+   → Camera shows Gen 2 (concept art)
+   
+5. Select mid-ground objects
+6. Alt+W → Project on Object
+   → Mid-ground gets concept art texture
+
+7. Alt+W → RIGHT → Click ▶ once
+   → Camera shows Gen 3 (painterly)
+   
+8. Select foreground objects
+9. Alt+W → Project on Object
+   → Foreground gets painterly texture
+
+RESULT: Three different AI styles in one scene!
+
+
+10.4 GENERATION HISTORY
+------------------------
+
+WHERE GENERATIONS ARE SAVED:
+
+SAVED .BLEND:
+MyProject_styleengine/
+└── generations/
+    ├── 20251123_143022_001_gcs.png
+    ├── 20251123_143145_002_gcs.png
+    ├── 20251123_143301_003_gcs.png
+    └── ...
+
+UNSAVED .BLEND:
+C:\Users\You\AppData\Local\Temp\blender_styleengine\
+└── sessions\
+    └── 20251123_143022_abc123\
+        └── generations\
+            └── ...
+
+FILENAME FORMAT:
+YYYYMMDD_HHMMSS_mmm_backend.png
+
+EXAMPLE:
+20251123_143022_001_gcs.png
+│        │       │   └─ Backend (gcs/runcomfy)
+│        │       └───── Milliseconds (001-999)
+│        └───────────── Time (143022 = 14:30:22)
+└────────────────────── Date (20251123 = Nov 23, 2025)
+
+BENEFITS:
+• Chronological sorting
+• Unique filenames (no overwrites)
+• Know which backend generated each
+• Easy to find specific generations
+
+
+================================================================================
+11. TEXTURE PROJECTION
+================================================================================
+
+11.1 BASIC PROJECTION
+----------------------
+
+PURPOSE: Apply AI texture to 3D objects
+
+SIMPLE WORKFLOW:
+1. Generate AI image (or navigate to one)
+2. Position your viewport to desired angle
+3. Select object(s)
+4. Alt+W → Project on Object
+5. Done!
+
+WHAT HAPPENS:
+• Material created (iteration_xxx)
+• Texture assigned
+• UVs projected from your view
+• Texture saved to iterations/ folder
+
+TIPS:
+• Position view carefully (texture projects from what you see)
+• Works with single or multiple objects
+• Select objects before projecting
+• Can project same generation multiple times from different angles
+
+
+11.2 ARCHIVAL MATERIALS
+------------------------
+
+WHAT ARE THEY:
+Unique materials created for each projection that never change.
+
+NAMING:
+• iteration_000 (first projection)
+• iteration_001 (second projection)
+• iteration_002 (third projection)
+• etc.
+
+WHY ARCHIVAL:
+• Textures frozen in time
+• Won't update when you generate new images
+• Each projection is independent
+• Can mix multiple generations in one scene
+
+MATERIAL SETUP:
+• Principled BSDF shader
+• Roughness: 1.0 (matte finish)
+• Base Color: Connected to texture
+• Specular Tint: Connected to texture (prevents white IOR look)
+
+IMAGE STORAGE:
+• Packed into .blend file (embedded)
+• Saved to iterations/ folder (external backup)
+• Named: iteration_000.png, iteration_001.png, etc.
+
+
+11.3 ITERATION SYSTEM
+----------------------
+
+WHAT IT TRACKS:
+Every texture projection creates an iteration.
+
+ITERATION COMPONENTS:
+1. Material: iteration_000
+2. Image (packed): iteration_000.png (in .blend)
+3. Image (external): iteration_000.png (in iterations/ folder)
+4. 3D Snapshot: Iteration_000 (optional, in "Iterations" collection)
+
+NUMBERING:
+• Sequential: 000, 001, 002, etc.
+• Automatic: Finds next available number
+• Persistent: Numbers don't reuse
+
+FINDING ITERATIONS:
+• Materials: Shader Editor → Material dropdown
+• Images (packed): UV/Image Editor → Image dropdown
+• Images (external): File browser → iterations/ folder
+• 3D Snapshots: Outliner → "Iterations" collection
+
+
+11.4 MULTI-OBJECT PROJECTION
+-----------------------------
+
+PROJECTING ON MULTIPLE OBJECTS:
+
+STEP 1: Select All Objects
+• Select first object
+• Shift+Click other objects
+• Or: Box select (B key)
+• Or: Select all (A key) and deselect unwanted
+
+STEP 2: Position View
+• Rotate view to desired projection angle
+• Zoom to frame objects
+• This is your projection direction
+
+STEP 3: Project
+• Alt+W → Project on Object
+• All selected objects get the same material
+• UVs projected from your view
+
+RESULT:
+• All objects share iteration_xxx material
+• All have same texture
+• All projected from same angle
+
+TIPS:
+• Works best with objects facing same direction
+• For different angles, project separately
+• All objects must be mesh type
+• Non-mesh objects ignored
+
+
+================================================================================
+12. DATA MANAGEMENT
+================================================================================
+
+12.1 PER-PROJECT LIBRARY STRUCTURE
+-----------------------------------
+
+WHAT IT IS:
+Automatic folder created alongside your .blend file that stores all 
+project-related images.
+
+STRUCTURE:
+MyProject.blend
+MyProject_styleengine/              ← Project library
+├── generations/                    ← All AI generations
+│   ├── 20251123_143022_001_gcs.png
+│   ├── 20251123_143145_002_gcs.png
+│   └── ...
+├── iterations/                     ← Projected textures
+│   ├── iteration_000.png
+│   ├── iteration_001.png
+│   └── ...
+├── preview/                        ← Canny/Depth maps (optional)
+│   ├── 20251123_143022_canny.png
+│   ├── 20251123_143022_depth.png
+│   └── ...
+├── current_ai.png                  ← Latest for camera
+└── project_metadata.json           ← History (future)
+
+BENEFITS:
+• All images organized in one place
+• Portable (move .blend + folder together)
+• Never lose work (automatic saving)
+• Easy to backup (backup the folder)
+• Clear organization
+
+
+12.2 SESSION MANAGEMENT
+-----------------------
+
+FOR UNSAVED .BLEND FILES:
+
+WHAT HAPPENS:
+• Unique session ID created (e.g., 20251123_143022_abc123)
+• Images saved to temp: 
+  C:\Users\You\AppData\Local\Temp\blender_styleengine\sessions\SESSION_ID\
+• Session data preserved for 7 days
+• Can be recovered if you save .blend later
+
+WHEN YOU SAVE .BLEND:
+• Automatic migration triggered
+• All session data copied to project library
+• Console shows: "🚚 Migrating session data..."
+• Future generations go directly to project library
+
+SESSION ID FORMAT:
+YYYYMMDD_HHMMSS_random6
+Example: 20251123_143022_abc123
+
+WHY SESSION IDS:
+• Unique even with multiple Blender instances
+• Prevents collision between unsaved projects
+• Allows recovery of unsaved work
+• Human-readable timestamps
+
+
+12.3 FILE ORGANIZATION
+-----------------------
+
+GENERATIONS FOLDER:
+• Contains: All AI-generated images
+• Naming: Timestamped with backend tag
+• Sorted: Chronologically
+• Purpose: Complete generation history
+
+ITERATIONS FOLDER:
+• Contains: Projected texture backups
+• Naming: iteration_000.png, iteration_001.png, etc.
+• Sorted: Numerically
+• Purpose: External backup of textures
+
+PREVIEW FOLDER:
+• Contains: Canny and Depth preview images
+• Naming: Timestamped with _canny or _depth suffix
+• Optional: Only if "Download Preview Images" enabled
+• Purpose: Visual feedback for debugging
+
+CURRENT_AI.PNG:
+• The active image shown in camera
+• Updated when generating or navigating
+• Used for texture projection
+• Temporary (changes frequently)
+
+
+12.4 BACKUP AND RECOVERY
+-------------------------
+
+WHAT TO BACKUP:
+• Your .blend file
+• YourProject_styleengine/ folder (entire folder)
+• Both together = complete project
+
+RECOVERY SCENARIOS:
+
+SCENARIO 1: .blend file corrupts
+• Open iterations/ folder
+• All projected textures available
+• Open generations/ folder
+• All AI images available
+• Recreate project from these assets
+
+SCENARIO 2: Forgot to save .blend
+• Check temp sessions folder within 7 days
+• Find your session ID
+• Copy generations/ folder to safe location
+• Save .blend file and migration will happen
+
+SCENARIO 3: Accidentally deleted generation
+• Check generations/ folder
+• All generations preserved
+• Use generation browser to reload
+
+BACKUP STRATEGY:
+1. Save .blend file regularly
+2. Include YourProject_styleengine/ in backups
+3. Optional: Copy important generations to separate archive
+4. Cloud backup recommended for important projects
+
+
+================================================================================
+13. ADVANCED FEATURES
+================================================================================
+
+13.1 PREVIEW IMAGES (Canny/Depth)
+----------------------------------
+
+WHAT THEY ARE:
+Intermediate preprocessing images showing what ControlNet sees.
+
+DEFAULT: Enabled (checked by default in GCS mode)
+
+HOW TO DISABLE (if needed):
+1. Edit → Preferences → Add-ons → Style Engine
+2. Backend Mode: Self-Hosted ComfyUI (GCS)
+3. Find "Preview Images" section
+4. Uncheck "Download Canny & Depth Maps"
+
+WHAT GETS DOWNLOADED:
+• canny.png: Edge detection map
+• depth.png: Depth Anything depth map
+• current_ai.png: Final image (always)
+
+WHERE SAVED:
+• Temp directory only (for preview)
+• Not saved to generations/ folder
+• Replaced with each generation
+
+USE CASES:
+• Debugging ControlNet issues
+• Understanding AI perception
+• Quality control
+• Learning how preprocessing works
+
+PERFORMANCE:
+• Disabled: 1 image, ~1 MB, ~0.5s
+• Enabled (default): 3 images, ~3 MB, ~1.5s
+
+
+13.2 ITERATION SNAPSHOTS
+-------------------------
+
+WHAT THEY ARE:
+3D snapshots of your scene at the moment of texture projection.
+
+HOW TO ENABLE:
+• Enabled by default
+• Toggle: "Save Iterations" checkbox (if visible in UI)
+
+WHAT HAPPENS:
+1. You project texture on objects
+2. System duplicates all projected objects
+3. Joins them into single mesh
+4. Names it: Iteration_000, Iteration_001, etc.
+5. Moves to "Iterations" collection
+6. Hides from viewport (eye icon)
+7. Disables in renders (camera icon)
+
+FINDING SNAPSHOTS:
+• Outliner → "Iterations" collection
+• Objects named: Iteration_000, Iteration_001, etc.
+
+VIEWING SNAPSHOTS:
+• Click eye icon in outliner to unhide
+• Object becomes visible
+• Has projected material applied
+
+USE CASES:
+• Version control (save different stages)
+• Comparison (unhide multiple, compare side-by-side)
+• Rollback (duplicate old iteration, continue from there)
+• Export (export specific iteration as FBX/OBJ)
+
+
+13.3 CUSTOM TEMPLATES
+----------------------
+
+CREATING YOUR OWN:
+
+STEP 1: Create File
+• Navigate to: scripts/addons/styleengine/templates/
+• Create new file: STYLEENGINE_YourName.txt
+• Must start with "STYLEENGINE_"
+
+STEP 2: Use Template Format
+# Subject:
+your subject
+
+# Style:
+your style
+
+# Details:
+your details
+
+# Environment:
+your environment
+
+# Mood:
+your mood
+
+# Camera:
+your camera
+
+# Lighting:
+your lighting
+
+# Negative Prompt:
+things to avoid
+
+STEP 3: Reload Addon
+• Disable and re-enable addon
+• Or: Restart Blender
+• Template appears in text editor dropdown
+
+STEP 4: Use Template
+• Enable Prompt Builder
+• Click "Load Templates"
+• Select your template
+• Customize and generate
+
+
+13.4 KEYBOARD SHORTCUTS
+------------------------
+
+MAIN SHORTCUTS:
+• Alt+W: Open pie menu (all modes)
+
+PIE MENU SHORTCUTS:
+• Alt+W → LEFT: Setup workspace
+• Alt+W → BOTTOM: Generate image
+• Alt+W → TOP: Project on object
+• Alt+W → RIGHT: Visualization/Browser
+
+NAVIGATION (in Generation Browser):
+• ◀ button: Previous generation
+• ▶ button: Next generation
+
+BLENDER STANDARD:
+• N: Toggle sidebar (Style Engine panel)
+• T: Toggle toolbar
+• A: Select all
+• Alt+A: Deselect all
+
+
+================================================================================
+14. TROUBLESHOOTING
+================================================================================
+
+14.1 COMMON ISSUES
+-------------------
+
+ISSUE: "No generations found" in browser
+SOLUTION:
+• Generate at least one image first
+• Check that .blend is saved (or session active)
+• Verify generations/ folder exists
+• Check console for save errors
+
+ISSUE: Projection doesn't work
+SOLUTION:
+• Make sure objects are selected
+• Verify objects are mesh type (not camera, light, etc.)
+• Check that current_ai.png exists (generate first)
+• Position your view before projecting
+• Check console for specific error messages
+
+ISSUE: Old image shows in camera
+SOLUTION:
+• Click "Setup Workspace" again
+• This creates fresh black placeholder
+• Then generate new image
+
+ISSUE: Navigation buttons disabled
+SOLUTION:
+• ◀ disabled: You're at oldest generation
+• ▶ disabled: You're at latest generation
+• Generate more images to enable navigation
+
+ISSUE: Preview images not downloading
+SOLUTION:
+• Check "Download Preview Images" is enabled
+• Verify you're using GCS mode (not RunComfy)
+• Check that StyleEngineTexture.json workflow is loaded
+• Verify ComfyUI has SaveImage nodes for canny/depth
+
+
+14.2 ERROR MESSAGES
+--------------------
+
+"AI Camera not found. Please setup workspace first."
+→ Run Setup Workspace (Alt+W → LEFT)
+
+"No mesh objects selected. Please select objects to project texture onto."
+→ Select at least one mesh object before projecting
+
+"AI image not found at [path]. Generate an image first."
+→ Generate an image before trying to project
+
+"Server connection check failed: [error]"
+→ Check server URL, verify server is running, test connection
+
+"Failed to load workflow [path]"
+→ Verify StyleEngineTexture.json exists in workflows/ folder
+
+"Generation failed: [error]"
+→ Check console for specific error
+→ Verify backend is configured correctly
+→ Test connection to backend
+
+
+14.3 PERFORMANCE ISSUES
+------------------------
+
+SLOW GENERATION:
+• Check your backend (GCS/RunComfy)
+• Reduce Steps (try 15 instead of 30)
+• Use Fast render quality
+• Check internet connection speed
+
+SLOW PROJECTION:
+• Reduce number of objects (project in batches)
+• Simplify geometry (fewer faces)
+• Already optimized (should be fast)
+
+SLOW NAVIGATION:
+• Should be instant (~15-70ms)
+• If slow, check disk speed
+• SSD recommended for best performance
+
+BLENDER FREEZING:
+• Check console for errors
+• Verify you're not in an infinite loop
+• Disable Autogenerate if enabled
+• Restart Blender if needed
+
+
+14.4 GETTING HELP
+------------------
+
+CONSOLE OUTPUT:
+• Window → Toggle System Console
+• All operations print status messages
+• Look for errors (marked with ❌)
+• Copy console output for support
+
+DOCUMENTATION:
+• Check scripts/addons/markdowns/ folder
+• Comprehensive guides for each feature
+• Technical documentation available
+
+SUPPORT:
+• Internal tool (Spiri Bros Co)
+• Contact technical lead: Juan
+• Provide: Console output, .blend file, steps to reproduce
+
+
+================================================================================
+15. BEST PRACTICES
+================================================================================
+
+15.1 PROJECT ORGANIZATION
+--------------------------
+
+RECOMMENDED WORKFLOW:
+1. Create project folder: C:\Projects\MyProject\
+2. Save .blend file: MyProject.blend
+3. Setup workspace (creates MyProject_styleengine/)
+4. Generate images (saved to generations/)
+5. Project textures (saved to iterations/)
+
+FOLDER STRUCTURE:
+C:\Projects\MyProject\
+├── MyProject.blend
+├── MyProject_styleengine/
+│   ├── generations/
+│   ├── iterations/
+│   └── preview/
+├── references/              ← Your reference images
+├── exports/                 ← Exported renders
+└── notes.txt                ← Project notes
+
+TIPS:
+• Save .blend early to enable project library
+• Keep MyProject_styleengine/ with your .blend
+• Include both in version control
+• Backup both together
+
+
+15.2 WORKFLOW OPTIMIZATION
+---------------------------
+
+FOR QUICK ITERATIONS:
+• Use Fast render quality
+• Set Steps to 15
+• Set Influence to 0.0-0.3 (let AI do the work)
+• Generate multiple variations quickly
+• Navigate and choose best
+
+FOR FINAL QUALITY:
+• Use Detailed render quality
+• Set Steps to 20-25
+• Set Influence to 0.5-0.7 (keep render structure)
+• Take time to refine prompt
+• Use reference images for style
+
+FOR CONCEPT ART:
+• Use Vizdev template
+• Set Influence to 0.0-0.3
+• Use Fast render quality
+• Generate many variations
+• Mix styles on different objects
+
+FOR PRODUCT VISUALIZATION:
+• Use Photorealistic template
+• Set Influence to 0.7-1.0
+• Use Detailed render quality
+• Model detailed geometry
+• Use proper lighting
+
+
+15.3 QUALITY SETTINGS
+-----------------------
+
+RESOLUTION:
+• 512x512: Fast, preview quality
+• 1024x1024: Standard, good balance (default)
+• 1536x1536: High quality, slower
+
+STEPS:
+• 15: Fast iterations
+• 20: Good quality
+• 25: High quality
+• 30: Maximum quality
+
+INFLUENCE:
+• 0.0-0.2: Creative, loose
+• 0.3-0.5: Balanced
+• 0.6-0.8: Conservative
+• 0.9-1.0: Minimal AI
+
+RENDER QUALITY:
+• Fast: Always good for Influence < 0.5
+• Detailed: Required for Influence > 0.7
+
+
+15.4 BACKUP STRATEGIES
+-----------------------
+
+ESSENTIAL BACKUPS:
+1. .blend file (your 3D work)
+2. YourProject_styleengine/ folder (all images)
+
+BACKUP FREQUENCY:
+• After major milestones
+• Before major changes
+• Daily for active projects
+• Before client presentations
+
+BACKUP LOCATIONS:
+• Local: External drive
+• Cloud: Google Drive, Dropbox, etc.
+• Version control: Git (for .blend)
+• Archive: ZIP important projects
+
+WHAT TO BACKUP:
+✅ .blend file
+✅ YourProject_styleengine/ folder
+✅ Reference images (if external)
+❌ Temp folders (not needed)
+❌ __pycache__ (not needed)
+
+
+================================================================================
+16. APPENDIX
+================================================================================
+
+16.1 KEYBOARD SHORTCUTS REFERENCE
+----------------------------------
+
+MAIN:
+Alt+W ........................ Open Style Engine pie menu
+
+PIE MENU:
+Alt+W → LEFT ................. Setup Workspace
+Alt+W → BOTTOM ............... Generate Image
+Alt+W → TOP .................. Project on Object
+Alt+W → RIGHT ................ Visualization/Browser
+
+BLENDER STANDARD:
+N ............................ Toggle sidebar
+T ............................ Toggle toolbar
+A ............................ Select all
+Alt+A ........................ Deselect all
+B ............................ Box select
+Shift+Click .................. Add to selection
+
+
+16.2 FILE STRUCTURE REFERENCE
+------------------------------
+
+PROJECT LIBRARY:
+MyProject_styleengine/
+├── generations/         All AI generations (timestamped)
+├── iterations/          Projected textures (numbered)
+├── preview/             Canny/Depth maps (optional)
+├── current_ai.png       Latest generation (camera display)
+└── project_metadata.json Future: Generation history
+
+SESSION TEMP (Unsaved):
+C:\Users\You\AppData\Local\Temp\blender_styleengine\
+└── sessions/
+    └── SESSION_ID/
+        ├── generations/
+        ├── iterations/
+        └── current_ai.png
+
+ADDON LOCATION:
+C:\Users\You\AppData\Roaming\Blender Foundation\Blender\4.4\
+└── scripts\addons\styleengine\
+    ├── workflows/       ComfyUI workflow JSON files
+    ├── templates/       Prompt templates
+    └── *.py             Python modules
+
+
+16.3 SETTINGS REFERENCE
+------------------------
+
+DEFAULT VALUES:
+• Background Opacity: 1.0 (fully visible)
+• Silhouette Influence: 0.5
+• Depth Influence: 0.5
+• Texture Influence: 0.25 (75% AI, 25% render)
+• Steps: 15
+• Resolution: 1024x1024
+• Render Quality: Fast (Workbench)
+• Visualization: Combined
+• Generation Index: -1 (Latest)
+
+INFLUENCE RANGES:
+• 0.0-1.0 for all sliders
+• 0.0 = minimum effect
+• 1.0 = maximum effect
+
+STEPS RANGE:
+• 15-30 steps
+• Lower = faster
+• Higher = better quality
+
+RESOLUTION OPTIONS:
+• 512x512, 768x768, 1024x1024, 1536x1536, 2048x2048
+
+
+16.4 GLOSSARY
+--------------
+
+AI CAMERA:
+The camera object created by Style Engine that displays AI-generated images
+as its background.
+
+ARCHIVAL MATERIAL:
+A unique material (iteration_xxx) that contains a frozen copy of an AI 
+texture, ensuring it never changes when new images are generated.
+
+BACKEND:
+The service used for AI generation (GCS, RunComfy, or Local).
+
+CANNY:
+Edge detection algorithm that identifies contours and silhouettes in images.
+
+COMBINED VIEW:
+The default visualization showing the final AI-generated image.
+
+CONTROLNET:
+AI technique that uses edge/depth maps to guide image generation while 
+maintaining structure.
+
+CURRENT_AI.PNG:
+The active AI image displayed in the camera view and used for projection.
+
+DEPTH MAP:
+Grayscale image showing distance from camera (bright=near, dark=far).
+
+GENERATION:
+A single AI-generated image saved to the generations/ folder.
+
+GENERATION BROWSER:
+UI feature that allows navigation through saved generations using ◀ ▶ buttons.
+
+IMG2IMG:
+Image-to-image workflow where AI starts from an existing image (your render)
+rather than generating from scratch.
+
+INFLUENCE:
+Control slider that determines how much of your render is kept (1.0) vs how
+much AI generation is applied (0.0).
+
+IPADAPTER:
+AI technique that uses reference images to influence style, composition, or
+other aspects of generation.
+
+ITERATION:
+A projected texture with its associated material and optional 3D snapshot.
+
+PER-PROJECT LIBRARY:
+Folder structure (YourProject_styleengine/) that stores all images and data
+for a specific .blend file.
+
+PROJECT LIBRARY:
+See "Per-Project Library"
+
+SESSION ID:
+Unique identifier for unsaved Blender sessions (format: YYYYMMDD_HHMMSS_random6).
+
+SILHOUETTE:
+See "Canny"
+
+STYLE TRANSFER:
+Technique of applying the artistic style from one image to another.
+
+TEXTURE INFLUENCE:
+See "Influence"
+
+VISUALIZATION:
+Different views of AI generation process (Combined, Silhouette, Depth).
+
+VIZDEV:
+Visual development - concept art and pre-production design work.
+
+
+================================================================================
+END OF USER GUIDE
+================================================================================
+
+For more information, see:
+• scripts/addons/markdowns/ - Detailed feature documentation
+• docs/ - Architecture and technical docs
+• README.md - Quick start guide
+
+Style Engine 0.2.2 Beta
+© 2025 Spiri Bros Co
+

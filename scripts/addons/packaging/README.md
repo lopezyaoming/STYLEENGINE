@@ -2,6 +2,19 @@
 
 Modern, cross-platform packaging system for the Style Engine Blender addon.
 
+## ⚠️ CRITICAL: Development Symlink Warning
+
+**READ THIS BEFORE PACKAGING OR TESTING!**
+
+The developer uses a **symlink-based development workflow** with Blender 4.4:
+- 🔗 Blender's addon folder is a **SYMLINK** to the development folder
+- ⚠️ **Installing the packaged ZIP in Blender 4.4 will DESTROY the symlink!**
+- 🚨 **NEVER test packages in Blender 4.4** - use other versions instead
+
+**📖 See [SYMLINK_DEV_WORKFLOW.md](SYMLINK_DEV_WORKFLOW.md) for full details and recovery steps.**
+
+---
+
 ## 🚀 Quick Start
 
 ### Windows

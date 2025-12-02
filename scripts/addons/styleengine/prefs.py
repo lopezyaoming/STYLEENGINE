@@ -238,10 +238,10 @@ class StyleEnginePreferences(AddonPreferences):
         name="Backend",
         description="Choose which backend service to use for generation",
         items=[
-            ('RUNCOMFY', "RunComfy Cloud", "Use RunComfy serverless cloud API (Managed, requires API credentials)"),
-            ('GCS', "Self-Hosted ComfyUI", "Connect directly to a self-hosted ComfyUI instance (GCS, AWS, or Localhost)")
+            ('GCS', "Self-Hosted ComfyUI", "Connect directly to a self-hosted ComfyUI instance (GCS, AWS, or Localhost)"),
+            ('RUNCOMFY', "RunComfy Cloud", "Use RunComfy serverless cloud API (Managed, requires API credentials)")
         ],
-        default='RUNCOMFY'
+        default='GCS'
     )
     
     gcs_server_url: StringProperty(
@@ -259,7 +259,7 @@ class StyleEnginePreferences(AddonPreferences):
     gcs_download_preview_images: BoolProperty(
         name="Download Preview Images",
         description="Download Canny and Depth preview images for visual feedback (stored in temp directory)",
-        default=False
+        default=True
     )
 
     # ----------------------------------------------------------------
@@ -297,226 +297,48 @@ class StyleEnginePreferences(AddonPreferences):
     def draw(self, context):
         layout = self.layout
         
-        # ----------------------------------------------------------------
-        # BACKEND MODE SELECTION
-        # ----------------------------------------------------------------
-        mode_box = layout.box()
-        mode_box.label(text="Backend Mode", icon='WORLD')
-        mode_box.prop(self, "api_backend", text="")
+        # ================================================================
+        # BASIC SETTINGS (always visible, minimal)
+        # ================================================================
+        basic_box = layout.box()
+        basic_box.label(text="Basic Settings", icon='SETTINGS')
         
-        layout.separator()
+        # Backend selector
+        basic_box.prop(self, "api_backend", text="Backend")
+        basic_box.separator()
         
-        # ----------------------------------------------------------------
-        # API CREDENTIALS (RunComfy only)
-        # ----------------------------------------------------------------
-        if self.api_backend == 'RUNCOMFY':
-            box = layout.box()
-            box.label(text="API Configuration", icon='KEYINGSET')
+        # Self-Hosted ComfyUI (GCS) - minimal setup
+        if self.api_backend == 'GCS':
+            basic_box.prop(self, "gcs_server_url", text="Server URL")
             
-            # ═══ QUICK IMPORT BUTTON (prominent at the top) ═══
-            import_box = box.box()
-            import_box.label(text="Quick Setup", icon='IMPORT')
+            # Test button
+            row = basic_box.row()
+            row.scale_y = 1.3
+            row.operator("style_engine.test_gcs_connection", text="Test Connection", icon='PLUGIN')
+        
+        # RunComfy Cloud - minimal credentials
+        else:
+            basic_box.prop(self, "credentials_file_path", text="Credentials File")
+            row = basic_box.row()
+            row.scale_y = 1.3
+            row.operator("style_engine.import_credentials", text="Import Credentials", icon='IMPORT')
             
-            # File path selector
-            col = import_box.column(align=True)
-            col.label(text="Credentials File:")
-            col.prop(self, "credentials_file_path", text="")
+            basic_box.separator()
             
-            col.separator()
-            
-            # Import button
-            row = col.row()
-            row.scale_y = 1.5
-            row.operator("style_engine.import_credentials", icon='IMPORT')
-            
-            col.separator()
-            
-            # Help text
-            help_row = col.row()
-            help_row.label(text="💡 Browse to your credentials.txt or leave empty to auto-search", icon='INFO')
-            
-            box.separator()
-            
-            # Environment variable preference
-            box.prop(self, "use_env_vars")
-            box.separator()
-            
-            # Check for environment variables
-            env_token = os.environ.get('RUNCOMFY_API_TOKEN', '')
-            env_user_id = os.environ.get('RUNCOMFY_USER_ID', '')
-            
-            # RunComfy Settings
-            runcomfy_box = box.box()
-            runcomfy_box.label(text="RunComfy API Settings", icon='NETWORK_DRIVE')
-            
-            # Show environment variable status
-            if env_token:
-                row = runcomfy_box.row()
-                row.label(text="✓ RUNCOMFY_API_TOKEN found in environment", icon='CHECKMARK')
-            else:
-                row = runcomfy_box.row()
-                row.label(text="⚠ RUNCOMFY_API_TOKEN not found in environment", icon='ERROR')
-            
-            if env_user_id:
-                row = runcomfy_box.row()
-                row.label(text="✓ RUNCOMFY_USER_ID found in environment", icon='CHECKMARK')
-            else:
-                row = runcomfy_box.row()
-                row.label(text="⚠ RUNCOMFY_USER_ID not found in environment", icon='ERROR')
-            
-            runcomfy_box.separator()
-            
-            # Toggle to show/hide sensitive data
-            runcomfy_box.prop(self, "show_api_keys", icon='HIDE_OFF' if self.show_api_keys else 'HIDE_ON')
-            
-            # API Token field
-            col = runcomfy_box.column(align=True)
+            # Manual credentials (compact)
+            basic_box.prop(self, "show_api_keys", text="Show Credentials", toggle=True)
             if self.show_api_keys:
-                col.prop(self, "runcomfy_api_token", text="API Token")
-            else:
-                # Show masked version
-                row = col.row(align=True)
-                row.label(text="API Token:")
-                if self.runcomfy_api_token or env_token:
-                    row.label(text="••••••••••••••••")
-                else:
-                    row.label(text="(not set)")
+                basic_box.prop(self, "runcomfy_api_token", text="API Token")
+                basic_box.prop(self, "runcomfy_user_id", text="User ID")
             
-            # User ID field
-            if self.show_api_keys:
-                col.prop(self, "runcomfy_user_id", text="User ID")
-            else:
-                # Show masked version
-                row = col.row(align=True)
-                row.label(text="User ID:")
-                if self.runcomfy_user_id or env_user_id:
-                    row.label(text="••••••••••••••••")
-                else:
-                    row.label(text="(not set)")
-            
-            # Test connection button
-            runcomfy_box.separator()
-            row = runcomfy_box.row()
-            row.operator("style_engine.test_connection", icon='PLUGIN')
+            # Test button
+            row = basic_box.row()
+            row.scale_y = 1.3
+            row.operator("style_engine.test_connection", text="Test Connection", icon='PLUGIN')
         
-        # ----------------------------------------------------------------
-        # GCS SERVER CONFIGURATION
-        # ----------------------------------------------------------------
-        elif self.api_backend == 'GCS':
-            box = layout.box()
-            box.label(text="Self-Hosted ComfyUI Server", icon='NETWORK_DRIVE')
-            
-            # Server URL field
-            col = box.column(align=True)
-            col.label(text="Server URL:", icon='URL')
-            col.prop(self, "gcs_server_url", text="")
-            
-            # Show URL validation
-            if self.gcs_server_url:
-                if "http" in self.gcs_server_url.lower() and ":" in self.gcs_server_url:
-                    row = box.row()
-                    row.label(text="✓ URL format looks valid", icon='CHECKMARK')
-                else:
-                    row = box.row()
-                    row.label(text="⚠ Check URL format (must include http:// or https:// and port)", icon='ERROR')
-            else:
-                row = box.row()
-                row.label(text="⚠ Server URL not set", icon='ERROR')
-            
-            box.separator()
-            col = box.column(align=True)
-            col.label(text="Example URLs:")
-            col.label(text="  • Google Cloud: http://34.19.119.45:8188")
-            col.label(text="  • Localhost: http://127.0.0.1:8188")
-            col.label(text="  • AWS: http://ec2-xx-xx-xx-xx.compute.amazonaws.com:8188")
-            
-            # Server status
-            if self.gcs_server_status:
-                box.separator()
-                status_col = box.column(align=True)
-                status_col.label(text=f"Status: {self.gcs_server_status}", icon='INFO')
-            
-            # Download preview images option
-            box.separator()
-            preview_box = box.box()
-            preview_box.label(text="Preview Images:", icon='IMAGE_DATA')
-            col = preview_box.column(align=True)
-            col.prop(self, "gcs_download_preview_images", text="Download Canny & Depth Maps")
-            col.label(text="Preview images saved to temp directory for visual feedback", icon='INFO')
-            col.scale_y = 0.8
-            
-            # Test connection button
-            box.separator()
-            row = box.row()
-            row.scale_y = 1.5
-            row.operator("style_engine.test_gcs_connection", icon='PLUGIN', text="Test Server Connection")
-        
-        # ----------------------------------------------------------------
-        # WORKFLOW CONFIGURATION (RunComfy only)
-        # ----------------------------------------------------------------
-        if self.api_backend == 'RUNCOMFY':
-            layout.separator()
-            workflow_box = layout.box()
-            header_row = workflow_box.row(align=True)
-            icon = 'TRIA_DOWN' if self.show_workflow_config else 'TRIA_RIGHT'
-            header_row.prop(self, "show_workflow_config", text="Workflow Configuration", 
-                           icon=icon, emboss=False, toggle=True)
-            
-            if self.show_workflow_config:
-                # Unified Workflow ID
-                col = workflow_box.column(align=True)
-                col.label(text="Workflow IDs (provided by developer):", icon='FILE_SCRIPT')
-                col.prop(self, "runcomfy_workflow_id", text="Workflow ID")
-                
-                workflow_box.separator()
-                
-                # Unified Deployment ID
-                col = workflow_box.column(align=True)
-                col.label(text="Deployment IDs (optional - auto-created if empty):", icon='NETWORK_DRIVE')
-                col.prop(self, "runcomfy_deployment_id", text="Deployment ID")
-                
-                workflow_box.separator()
-                col = workflow_box.column(align=True)
-                col.label(text="Note: Both SDXL and IPAdapter workflows use the same deployment.", icon='INFO')
-            
-            # ----------------------------------------------------------------
-            # HARDWARE SETTINGS
-            # ----------------------------------------------------------------
-            layout.separator()
-            hardware_box = layout.box()
-            header_row = hardware_box.row(align=True)
-            icon = 'TRIA_DOWN' if self.show_hardware_settings else 'TRIA_RIGHT'
-            header_row.prop(self, "show_hardware_settings", text="Hardware Settings", 
-                           icon=icon, emboss=False, toggle=True)
-            
-            if self.show_hardware_settings:
-                # Hardware tier
-                hardware_box.label(text="GPU Tier:", icon='SHADING_RENDERED')
-                hardware_box.prop(self, "runcomfy_hardware_tier", text="")
-                
-                hardware_box.separator()
-                
-                # Scaling settings
-                hardware_box.label(text="Scaling Configuration:", icon='MOD_ARRAY')
-                col = hardware_box.column(align=True)
-                col.prop(self, "runcomfy_min_instances")
-                col.prop(self, "runcomfy_max_instances")
-                col.prop(self, "runcomfy_queue_size")
-                
-                hardware_box.separator()
-                
-                # Keep warm
-                hardware_box.label(text="Instance Management:", icon='TIME')
-                hardware_box.prop(self, "runcomfy_keep_warm_seconds")
-                
-                hardware_box.separator()
-                col = hardware_box.column(align=True)
-                col.label(text="Note: Min instances = 0 means scale to zero when idle.", icon='INFO')
-                col.label(text="Higher queue size allows more parallel requests.")
-        
-        # ----------------------------------------------------------------
-        # ADVANCED SETTINGS
-        # ----------------------------------------------------------------
+        # ================================================================
+        # ADVANCED SETTINGS (collapsible, hidden by default)
+        # ================================================================
         layout.separator()
         advanced_box = layout.box()
         header_row = advanced_box.row(align=True)
@@ -525,194 +347,61 @@ class StyleEnginePreferences(AddonPreferences):
                        icon=icon, emboss=False, toggle=True)
         
         if self.show_advanced_settings:
-            # Timeout settings
-            advanced_box.label(text="Timeout Configuration:", icon='SORTTIME')
+            
+            # GCS: Preview images option
+            if self.api_backend == 'GCS':
+                advanced_box.separator()
+                advanced_box.label(text="Preview Images", icon='IMAGE_DATA')
+                advanced_box.prop(self, "gcs_download_preview_images", text="Download Canny & Depth")
+            
+            # RunComfy: Workflow & Hardware
+            if self.api_backend == 'RUNCOMFY':
+                advanced_box.separator()
+                advanced_box.label(text="Workflow Configuration", icon='FILE_SCRIPT')
+                advanced_box.prop(self, "runcomfy_workflow_id", text="Workflow ID")
+                advanced_box.prop(self, "runcomfy_deployment_id", text="Deployment ID")
+                
+                advanced_box.separator()
+                advanced_box.label(text="Hardware Settings", icon='SHADING_RENDERED')
+                advanced_box.prop(self, "runcomfy_hardware_tier", text="GPU Tier")
+                
+                col = advanced_box.column(align=True)
+                col.prop(self, "runcomfy_min_instances")
+                col.prop(self, "runcomfy_max_instances")
+                col.prop(self, "runcomfy_queue_size")
+                col.prop(self, "runcomfy_keep_warm_seconds")
+            
+            # Timeout settings (both backends)
+            advanced_box.separator()
+            advanced_box.label(text="Timeout Configuration", icon='SORTTIME')
             col = advanced_box.column(align=True)
             col.prop(self, "runcomfy_request_timeout")
             col.prop(self, "runcomfy_poll_interval")
             
+            # ComfyUI path
             advanced_box.separator()
+            advanced_box.label(text="ComfyUI Installation", icon='FILE_FOLDER')
+            advanced_box.prop(self, "comfy_path", text="Path")
+            
+            # Conflict resolution
+            advanced_box.separator()
+            advanced_box.label(text="Conflict Resolution", icon='ERROR')
+            advanced_box.prop(self, "debug_mode", text="Debug Mode")
+            
             col = advanced_box.column(align=True)
-            col.label(text="Note: Higher timeout allows longer generations.", icon='INFO')
-            col.label(text="Lower poll interval provides faster status updates.")
-            
-            # ----------------------------------------------------------------
-            # ROBUSTNESS SETTINGS - Conflict Resolution
-            # ----------------------------------------------------------------
-            advanced_box.separator()
-            advanced_box.separator()
-            advanced_box.label(text="Conflict Resolution (for HEAVYPOLY, etc.):", icon='ERROR')
-            
-            # Debug mode (prominent)
-            col = advanced_box.column(align=True)
-            col.prop(self, "debug_mode", text="🐛 Debug Mode (Verbose Logging)")
-            
-            advanced_box.separator()
-            
-            # Resource naming
-            col = advanced_box.column(align=True)
-            col.label(text="Resource Naming:", icon='FILE_TEXT')
             col.prop(self, "camera_name_override", text="Camera Name")
             col.prop(self, "workspace_name_override", text="Workspace Name")
             col.prop(self, "image_name_override", text="Image Name")
             
-            advanced_box.separator()
-            
             # Feature toggles
+            advanced_box.separator()
+            advanced_box.label(text="Feature Toggles", icon='PREFERENCES')
             col = advanced_box.column(align=True)
-            col.label(text="Feature Toggles:", icon='PREFERENCES')
-            
-            # HEAVYPOLY Integration
-            row = col.row(align=True)
-            row.prop(self, "enable_heavypoly_compatibility")
-            if self.enable_heavypoly_compatibility:
-                row.label(text="", icon='CHECKMARK')
-            
-            col.separator()
-            
+            col.prop(self, "enable_heavypoly_compatibility")
             col.prop(self, "enable_camera_switching")
             col.prop(self, "enable_workspace_creation")
             col.prop(self, "enable_viewport_split")
             col.prop(self, "enable_auto_render")
-            
-            advanced_box.separator()
-            col = advanced_box.column(align=True)
-            col.label(text="Note: Disable features if conflicts occur with other addons.", icon='INFO')
-            col.label(text="Camera switching is SURGICAL (temporary, instant restore).")
-        
-        # ComfyUI Path Settings
-        layout.separator()
-        comfy_box = layout.box()
-        comfy_box.label(text="ComfyUI Installation", icon='FILE_FOLDER')
-        
-        # ComfyUI path field
-        col = comfy_box.column(align=True)
-        col.prop(self, "comfy_path", text="ComfyUI Path")
-        
-        # Show status
-        if self.comfy_path:
-            comfy_exists = os.path.exists(self.comfy_path)
-            input_exists = os.path.exists(os.path.join(self.comfy_path, "input"))
-            output_exists = os.path.exists(os.path.join(self.comfy_path, "output"))
-            
-            row = comfy_box.row()
-            if comfy_exists:
-                row.label(text="✓ ComfyUI folder found", icon='CHECKMARK')
-            else:
-                row.label(text="✗ ComfyUI folder not found", icon='ERROR')
-            
-            if input_exists:
-                row = comfy_box.row()
-                row.label(text="✓ Input folder found", icon='CHECKMARK')
-            else:
-                row = comfy_box.row()
-                row.label(text="✗ Input folder not found", icon='ERROR')
-                
-            if output_exists:
-                row = comfy_box.row()
-                row.label(text="✓ Output folder found", icon='CHECKMARK')
-            else:
-                row = comfy_box.row()
-                row.label(text="✗ Output folder not found", icon='ERROR')
-        else:
-            row = comfy_box.row()
-            row.label(text="⚠ ComfyUI path not set", icon='ERROR')
-        
-        comfy_box.separator()
-        col = comfy_box.column(align=True)
-        col.label(text="Example paths:")
-        col.label(text="  • Windows: C:\\ComfyUI or D:\\AI\\ComfyUI")
-        col.label(text="  • macOS: /Applications/ComfyUI")
-        col.label(text="  • Linux: /home/user/ComfyUI or ~/ComfyUI")
-        
-        # ----------------------------------------------------------------
-        # SERVER API MODE (DISABLED/LATENT)
-        # ----------------------------------------------------------------
-        # NOTE: Server API mode commented out - Machines API requires special access.
-        # Serverless mode with min_instances=1 provides equivalent performance.
-        # Uncomment below if API access becomes available.
-        
-        # layout.separator()
-        # server_box = layout.box()
-        # server_box.label(text="Server API Mode", icon='NETWORK_DRIVE')
-        # 
-        # # Use Server API toggle
-        # row = server_box.row()
-        # row.prop(self, "use_server_api", text="Use Server API (instead of Serverless)")
-        # 
-        # if self.use_server_api:
-        #     # Show warning about server maintenance
-        #     server_box.separator()
-        #     warning_col = server_box.column(align=True)
-        #     warning_col.label(text="⚠ Server API Mode Active", icon='ERROR')
-        #     warning_col.label(text="You are responsible for maintaining the server instance.")
-        #     warning_col.label(text="Provides faster generation but requires a running ComfyUI backend.")
-        #     
-        #     server_box.separator()
-        #     
-        #     # Server URL field
-        #     col = server_box.column(align=True)
-        #     col.label(text="ComfyUI Backend Server URL:", icon='URL')
-        #     col.prop(self, "comfyui_server_url", text="")
-        #     
-        #     # Show URL validation
-        #     if self.comfyui_server_url:
-        #         if "comfyui.runcomfy.com" in self.comfyui_server_url.lower() or "http" in self.comfyui_server_url.lower():
-        #             row = server_box.row()
-        #             row.label(text="✓ URL format looks valid", icon='CHECKMARK')
-        #         else:
-        #             row = server_box.row()
-        #             row.label(text="⚠ Check URL format", icon='ERROR')
-        #     else:
-        #         row = server_box.row()
-        #         row.label(text="⚠ Server URL not set", icon='ERROR')
-        #     
-        #     server_box.separator()
-        #     col = server_box.column(align=True)
-        #     col.label(text="Example URL:")
-        #     col.label(text="  https://06ac297b-eab1-4e72-a327-db7dc5197cee-comfyui.runcomfy.com")
-        #     
-        #     # Server management buttons
-        #     server_box.separator()
-        #     
-        #     # Show server status if we have a server_id
-        #     if self.runcomfy_server_id:
-        #         status_col = server_box.column(align=True)
-        #         status_col.label(text=f"Server Status: {self.runcomfy_server_status.title()}", icon='INFO')
-        #         status_col.label(text=f"Server ID: {self.runcomfy_server_id[:20]}...")
-        #         server_box.separator()
-        #     
-        #     # Action buttons in a row
-        #     btn_row = server_box.row(align=True)
-        #     
-        #     # Start Server button (if no server or server stopped)
-        #     if not self.runcomfy_server_id or self.runcomfy_server_status in ('unknown', 'stopped', 'failed'):
-        #         btn_row.operator("style_engine.start_server", icon='PLAY', text="Start New Server")
-        #     
-        #     # Test Connection button
-        #     btn_row.operator("style_engine.test_server_connection", icon='PLUGIN', text="Test Connection")
-        #     
-        #     # Stop Server button (if we have an active server)
-        #     if self.runcomfy_server_id and self.runcomfy_server_status not in ('unknown', 'stopped', 'failed'):
-        #         btn_row.operator("style_engine.stop_server", icon='CANCEL', text="Stop Server")
-        # else:
-        #     # Show info about serverless mode
-        #     server_box.separator()
-        #     info_col = server_box.column(align=True)
-        #     info_col.label(text="ℹ Serverless Mode Active (default)", icon='INFO')
-        #     info_col.label(text="Uses RunComfy's managed serverless deployment.")
-        #     info_col.label(text="No server maintenance required, automatic scaling.")
-        
-        # Instructions
-        layout.separator()
-        info_box = layout.box()
-        info_box.label(text="How to use:", icon='INFO')
-        col = info_box.column(align=True)
-        col.label(text="• Set environment variables in your system for automatic detection")
-        col.label(text="• Or manually enter credentials above")
-        col.label(text="• Environment variables take priority if 'Prefer Environment Variables' is enabled")
-        col.label(text="• Point ComfyUI Path to your ComfyUI installation folder")
-        # col.label(text="• Enable 'Use Server API' if you have a dedicated ComfyUI backend server")  # Disabled - Server API latent
 
 
 class WM_OT_TestConnection(bpy.types.Operator):

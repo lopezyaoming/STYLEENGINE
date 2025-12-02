@@ -1,0 +1,47 @@
+⚠️ ⚠️ ⚠️  CRITICAL: READ BEFORE PACKAGING  ⚠️ ⚠️ ⚠️
+
+═══════════════════════════════════════════════════════════════
+  SYMLINK DEVELOPMENT WORKFLOW - DO NOT BREAK!
+═══════════════════════════════════════════════════════════════
+
+SITUATION:
+----------
+- Developer uses Blender 4.4 exclusively for Style Engine dev
+- Blender's addon folder is a SYMLINK to: C:\Coding\STYLEENGINE\scripts\addons\styleengine\
+- This allows instant code sync from Cursor to Blender
+
+⚠️  DANGER:
+-----------
+Installing the packaged styleengine.zip in Blender 4.4 will:
+  → DESTROY the symlink
+  → Replace it with actual files
+  → Break the development workflow
+  → Require manual restoration
+
+✅ DO THIS:
+-----------
+1. Run package_addon_EASY.bat to create styleengine.zip
+2. Test package in OTHER Blender versions (4.2, 4.3, etc.)
+3. NEVER install the ZIP in Blender 4.4
+4. Keep Blender 4.4 pristine with symlink intact
+
+❌ DON'T DO THIS:
+------------------
+1. Don't install styleengine.zip in Blender 4.4
+2. Don't copy files to Blender 4.4's addon folder
+3. Don't delete the symlink
+
+🔧 IF SYMLINK BREAKS:
+----------------------
+See detailed recovery steps in:
+  → SYMLINK_DEV_WORKFLOW.md
+
+Quick fix (PowerShell as Admin):
+  1. Remove-Item "C:\Users\Juan\AppData\...\styleengine" -Recurse -Force
+  2. New-Item -ItemType SymbolicLink -Path "..." -Target "C:\Coding\STYLEENGINE\scripts\addons\styleengine"
+  3. Restart Blender
+
+═══════════════════════════════════════════════════════════════
+For full details: SYMLINK_DEV_WORKFLOW.md
+═══════════════════════════════════════════════════════════════
+

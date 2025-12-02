@@ -11,29 +11,52 @@ from bpy.types import Menu, Operator
 # PLACEHOLDER OPERATORS (To be implemented later)
 # ----------------------------------------------------------------
 
-class WM_OT_ProjectTextureUV(Operator):
-    """Project AI texture onto selected objects using UV mapping"""
-    bl_idname = "style_engine.project_texture_uv"
-    bl_label = "Project in Object UV"
-    bl_description = "Project current_ai.png onto selected objects using UV coordinates"
-    bl_options = {'REGISTER', 'UNDO'}
-    
-    def execute(self, context):
-        self.report({'INFO'}, "UV projection not yet implemented - placeholder")
-        # TODO: Implement UV-based texture projection
-        return {'FINISHED'}
-
-
 class WM_OT_ProjectTextureScene(Operator):
     """Project AI texture onto selected objects from camera view"""
     bl_idname = "style_engine.project_texture_scene"
-    bl_label = "Project on Object"
+    bl_label = "Project Texture"
     bl_description = "Project current_ai.png from camera perspective onto selected objects"
     bl_options = {'REGISTER', 'UNDO'}
     
     def execute(self, context):
         # Use the existing project_texture operator which does camera projection
         bpy.ops.style_engine.project_texture()
+        return {'FINISHED'}
+
+
+class WM_OT_UVTexture(Operator):
+    """Apply UV texture to selected objects"""
+    bl_idname = "style_engine.uv_texture"
+    bl_label = "UV Texture"
+    bl_description = "Apply UV-based texture projection (Coming Soon)"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    def execute(self, context):
+        self.report({'INFO'}, "UV Texture - Coming Soon")
+        return {'FINISHED'}
+
+
+class WM_OT_CreateObject(Operator):
+    """Create 3D object from AI generation"""
+    bl_idname = "style_engine.create_object"
+    bl_label = "Create Object"
+    bl_description = "Generate a new 3D mesh object using AI (Coming Soon)"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    def execute(self, context):
+        self.report({'INFO'}, "Create Object - Coming Soon")
+        return {'FINISHED'}
+
+
+class WM_OT_CreateTexturedObject(Operator):
+    """Create textured 3D object from AI generation"""
+    bl_idname = "style_engine.create_textured_object"
+    bl_label = "Create Textured Object"
+    bl_description = "Generate a new 3D mesh with textures using AI (Coming Soon)"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    def execute(self, context):
+        self.report({'INFO'}, "Create Textured Object - Coming Soon")
         return {'FINISHED'}
 
 
@@ -192,7 +215,7 @@ class STYLEENGINE_MT_pie_main(Menu):
         style_props = context.scene.style_engine_props
         
         # ═══════════════════════════════════════════════════
-        # Position 0: TOP (NORTH) - Project Texture
+        # Position 0: TOP (NORTH) - Object
         # ═══════════════════════════════════════════════════
         box = pie.box()
         col = box.column(align=True)
@@ -200,17 +223,22 @@ class STYLEENGINE_MT_pie_main(Menu):
         
         # Header
         row = col.row()
-        row.label(text="Project Texture", icon='TEXTURE')
+        row.label(text="Object", icon='OBJECT_DATA')
         col.separator()
         
-        # Buttons
-        # UV projection - commented out for now
-        # col.operator("style_engine.project_texture_uv", 
-        #              text="Project in Object UV", 
-        #              icon='UV')
+        # Buttons (4 total)
         col.operator("style_engine.project_texture_scene", 
-                     text="Project on Object", 
-                     icon='CAMERA_DATA')
+                     text="Project Texture", 
+                     icon='TEXTURE')
+        col.operator("style_engine.uv_texture", 
+                     text="UV Texture", 
+                     icon='UV')
+        col.operator("style_engine.create_object", 
+                     text="Create Object", 
+                     icon='MESH_CUBE')
+        col.operator("style_engine.create_textured_object", 
+                     text="Create Textured Object", 
+                     icon='SHADING_TEXTURE')
         
         # ═══════════════════════════════════════════════════
         # Position 1: LEFT (WEST) - Setup Workspace
@@ -430,8 +458,10 @@ class STYLEENGINE_MT_pie_main(Menu):
 # ----------------------------------------------------------------
 
 classes = (
-    WM_OT_ProjectTextureUV,
     WM_OT_ProjectTextureScene,
+    WM_OT_UVTexture,
+    WM_OT_CreateObject,
+    WM_OT_CreateTexturedObject,
     WM_OT_SetVisualization,
     WM_OT_SetRenderQuality,
     WM_OT_PrevGeneration,
