@@ -310,7 +310,7 @@ class StyleEnginePreferences(AddonPreferences):
         # Self-Hosted ComfyUI (GCS) - minimal setup
         if self.api_backend == 'GCS':
             basic_box.prop(self, "gcs_server_url", text="Server URL")
-            
+        
             # Test button
             row = basic_box.row()
             row.scale_y = 1.3
@@ -324,7 +324,7 @@ class StyleEnginePreferences(AddonPreferences):
             row.operator("style_engine.import_credentials", text="Import Credentials", icon='IMPORT')
             
             basic_box.separator()
-            
+        
             # Manual credentials (compact)
             basic_box.prop(self, "show_api_keys", text="Show Credentials", toggle=True)
             if self.show_api_keys:
@@ -335,7 +335,7 @@ class StyleEnginePreferences(AddonPreferences):
             row = basic_box.row()
             row.scale_y = 1.3
             row.operator("style_engine.test_connection", text="Test Connection", icon='PLUGIN')
-        
+            
         # ================================================================
         # ADVANCED SETTINGS (collapsible, hidden by default)
         # ================================================================
@@ -344,7 +344,7 @@ class StyleEnginePreferences(AddonPreferences):
         header_row = advanced_box.row(align=True)
         icon = 'TRIA_DOWN' if self.show_advanced_settings else 'TRIA_RIGHT'
         header_row.prop(self, "show_advanced_settings", text="Advanced Settings", 
-                       icon=icon, emboss=False, toggle=True)
+                           icon=icon, emboss=False, toggle=True)
         
         if self.show_advanced_settings:
             
@@ -370,7 +370,7 @@ class StyleEnginePreferences(AddonPreferences):
                 col.prop(self, "runcomfy_max_instances")
                 col.prop(self, "runcomfy_queue_size")
                 col.prop(self, "runcomfy_keep_warm_seconds")
-            
+                
             # Timeout settings (both backends)
             advanced_box.separator()
             advanced_box.label(text="Timeout Configuration", icon='SORTTIME')
