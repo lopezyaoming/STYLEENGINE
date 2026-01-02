@@ -17,7 +17,9 @@ preview_collections = {}
 _lora_cache = {
     'items': [],
     'timestamp': 0,
-    'cache_duration': 300  # 5 minutes
+    'cache_duration': 300,  # 5 minutes
+    'last_failure': 0,      # Track last failure time
+    'failure_cooldown': 60  # Don't retry for 60 seconds after failure
 }
 
 
@@ -25,36 +27,58 @@ def get_lora_items(self, context):
     """
     Dynamic callback to fetch available LoRa models from ComfyUI server.
     Caches results for 5 minutes to avoid excessive API calls.
+    
+    ROBUST: Returns default items if anything fails (registration, server down, etc.)
     """
     import time
-    from . import runcomfy_deployment
     
-    # Check cache validity
-    current_time = time.time()
-    cache_age = current_time - _lora_cache['timestamp']
-    
-    # Default fallback items
+    # Default fallback items (ALWAYS valid)
     default_items = [
         ('NONE', "None", "No LoRa"),
         ('xl_more_art-full_v1.safetensors', "More Art Full", "Default LoRa"),
     ]
     
+    # Safety: If context is None (during registration), return defaults
+    if context is None:
+        return default_items
+    
+    # Check cache validity
+    current_time = time.time()
+    cache_age = current_time - _lora_cache['timestamp']
+    
     # Return cached if valid
     if _lora_cache['items'] and cache_age < _lora_cache['cache_duration']:
         return _lora_cache['items']
     
+    # Check if we recently failed - don't retry immediately (prevents lag)
+    failure_age = current_time - _lora_cache.get('last_failure', 0)
+    if failure_age < _lora_cache.get('failure_cooldown', 60):
+        # Too soon after failure, return defaults without retrying
+        return default_items
+    
     # Check if in GCS mode (self-hosted ComfyUI)
     try:
-        prefs = context.preferences.addons['styleengine'].preferences
+        # Import only when needed (avoid circular imports during registration)
+        from . import runcomfy_deployment
+        
+        # Safety: Check if preferences are accessible
+        if not hasattr(context, 'preferences'):
+            return default_items
+        
+        prefs = context.preferences.addons.get('styleengine')
+        if not prefs:
+            return default_items
+        
+        prefs = prefs.preferences
         
         if hasattr(prefs, 'api_backend') and prefs.api_backend == 'GCS':
             # Try to fetch from server
             try:
                 server_client = runcomfy_deployment.get_server_client()
                 
-                # Fetch /object_info from ComfyUI server
+                # Fetch /object_info from ComfyUI server (short timeout to avoid lag)
                 print("[Style Engine] Fetching LoRa list from ComfyUI server...")
-                object_info = server_client._request('GET', '/object_info', timeout=5)
+                object_info = server_client._request('GET', '/object_info', timeout=2)
                 
                 if 'LoraLoader' in object_info:
                     lora_loader = object_info['LoraLoader']
@@ -93,14 +117,18 @@ def get_lora_items(self, context):
                                 return items
                 
             except Exception as e:
+                # Mark failure time to avoid repeated timeouts
+                _lora_cache['last_failure'] = current_time
                 print(f"[Style Engine] ⚠️ Failed to fetch LoRas from server: {e}")
+                print(f"[Style Engine] (Will retry in {_lora_cache['failure_cooldown']}s)")
         
         # Fallback to default list
-        print("[Style Engine] Using default LoRa list")
         return default_items
         
     except Exception as e:
-        print(f"[Style Engine] Error in LoRa callback: {e}")
+        # Silently fail during registration, log during normal use
+        if context and hasattr(context, 'preferences'):
+            print(f"[Style Engine] LoRa fetch failed: {e}")
         return default_items
 
 # ----------------------------------------------------------------
@@ -846,6 +874,23 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         max=1.0,
         step=1,
         precision=2,
+        update=update_session_json
+    )
+    
+    # ================================================================
+    # 3D OBJECT GENERATION QUALITY
+    # ================================================================
+    
+    object_quality: bpy.props.EnumProperty(
+        name="3D Quality",
+        description="Generation quality preset for 3D object creation",
+        items=[
+            ('SKETCH', "Sketch", "Ultra-fast preview - Lowest detail for concept testing"),
+            ('FAST', "Fast", "Quick preview - Draft quality for rapid iteration"),
+            ('BALANCED', "Balanced", "Production quality - Recommended for most work"),
+            ('DETAILED', "Detailed", "Maximum detail - Ultra-high quality for hero assets"),
+        ],
+        default='BALANCED',
         update=update_session_json
     )
 

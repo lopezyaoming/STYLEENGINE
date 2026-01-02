@@ -327,7 +327,7 @@ class StyleEnginePreferences(AddonPreferences):
         
             # Manual credentials (compact)
             basic_box.prop(self, "show_api_keys", text="Show Credentials", toggle=True)
-        if self.show_api_keys:
+            if self.show_api_keys:
                 basic_box.prop(self, "runcomfy_api_token", text="API Token")
                 basic_box.prop(self, "runcomfy_user_id", text="User ID")
             
@@ -339,13 +339,13 @@ class StyleEnginePreferences(AddonPreferences):
         # ================================================================
         # ADVANCED SETTINGS (collapsible, hidden by default)
         # ================================================================
-            layout.separator()
+        layout.separator()
         advanced_box = layout.box()
         header_row = advanced_box.row(align=True)
         icon = 'TRIA_DOWN' if self.show_advanced_settings else 'TRIA_RIGHT'
         header_row.prop(self, "show_advanced_settings", text="Advanced Settings", 
                            icon=icon, emboss=False, toggle=True)
-            
+        
         if self.show_advanced_settings:
             
             # GCS: Preview images option

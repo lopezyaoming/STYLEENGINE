@@ -13,7 +13,7 @@
       "camera_azimuths": "0, 90, 180, 270, 0, 180",
       "camera_elevations": "0, 0, 0, 0, 90, -90",
       "view_weights": "1, 0.5, 1, 0.5, 1, 1",
-      "ortho_scale": 1.1000000000000003
+      "ortho_scale": 1.1
     },
     "class_type": "Hy3D21CameraConfig",
     "_meta": {
@@ -26,7 +26,7 @@
       "steps": 10,
       "guidance_scale": 3,
       "texture_size": 1024,
-      "unwrap_mesh": false,
+      "unwrap_mesh": true,
       "seed": 988077496205809,
       "trimesh": [
         "45",

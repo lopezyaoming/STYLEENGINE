@@ -45,7 +45,7 @@
       "camera_azimuths": "0, 90, 180, 270, 0, 180",
       "camera_elevations": "0, 0, 0, 0, 90, -90",
       "view_weights": "1, 0.5, 1, 0.5, 1, 1",
-      "ortho_scale": 1.1000000000000003
+      "ortho_scale": 1.1
     },
     "class_type": "Hy3D21CameraConfig",
     "_meta": {
@@ -128,8 +128,8 @@
       "seed": 656480488364741,
       "attention_mode": "sdpa",
       "image": [
-        "14",
-        2
+        "64",
+        0
       ]
     },
     "class_type": "Hy3DMeshGenerator",
