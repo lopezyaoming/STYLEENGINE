@@ -1,5 +1,160 @@
 # Changelog - Style Engine
 
+## Version 0.3.3 - UV Texture Generation
+
+**Date**: December 29, 2025  
+**Status**: ✅ Complete
+
+### 🎨 New Feature: AI-Powered UV Texture Generation
+
+#### What's New
+Implemented full Hunyuan 3D 2.1 integration for generating UV-mapped textures on existing meshes using AI.
+
+#### Key Features
+- 🎯 **One-Click Texturing**: Select mesh → Click button → Get textured result
+- 📤 **Automatic Upload/Download**: Mesh uploaded to server, textured version imported back
+- 🎨 **AI-Powered**: Uses current_ai.png as style reference
+- 🔄 **Multi-View Baking**: 6 camera angles for complete coverage
+- 🖼️ **Seam Filling**: Automatic inpainting for clean results
+- 📥 **Auto-Import**: Places textured mesh in scene automatically
+
+#### Implementation Details
+
+**Files Modified:**
+1. `runcomfy_server_client.py` (+111 lines)
+   - Added `upload_mesh()` method for GLB/OBJ/FBX uploads
+   - Added `download_mesh()` method for retrieving results
+   - Multipart form-data support for 3D files
+
+2. `pie_menu.py` (+161 lines)
+   - Implemented full `WM_OT_UVTexture` operator
+   - 9-step pipeline (export → upload → process → download → import)
+   - Comprehensive error handling
+   - Detailed console logging
+
+#### How It Works
+
+```
+Select Mesh → Export GLB → Upload to Server → Configure Workflow
+    ↓
+Hunyuan 3D 2.1 Processing (60-120s)
+    ↓
+Download Textured GLB → Import to Scene
+```
+
+#### Workflow Nodes
+
+**objectUVTexture.json** key nodes:
+- Node 55: TrimeshLoad (mesh input)
+- Node 14: Image input (current_ai.png)
+- Node 20: MultiViews Generator (6 angles)
+- Node 21: Bake textures
+- Node 49: Inpaint seams
+- Node 44: Export result
+
+#### Console Output
+
+```
+[UV Texture] STARTING UV TEXTURE GENERATION
+[UV Texture] Step 1: Exporting mesh to GLB...
+[UV Texture] ✓ Exported: 24.3 KB
+[UV Texture] Step 2: Uploading mesh to server...
+[UV Texture] ✓ Uploaded as: Cube_1735516800.glb
+[UV Texture] Step 3: Uploading reference image...
+[UV Texture] ✓ Image uploaded as: current_ai.png
+[UV Texture] Step 7: Waiting for generation (1-2 minutes)...
+[UV Texture] ✓ Generation complete!
+[UV Texture] Step 9: Importing textured mesh into scene...
+[UV Texture] ✓ Imported: Cube_Textured
+[UV Texture] UV TEXTURE GENERATION COMPLETE
+```
+
+---
+
+## Version 0.3.2 - LoRa Model Selection
+
+**Date**: December 29, 2025  
+**Status**: ✅ Complete
+
+### 🎨 New Feature: Dynamic LoRa Model Selection
+
+#### What's New
+Added full LoRa (Low-Rank Adaptation) model support with dynamic server discovery and real-time selection from the pie menu.
+
+#### Key Features
+- 🔄 **Dynamic Discovery**: Automatically fetches available LoRa models from ComfyUI server
+- 💾 **Smart Caching**: 5-minute cache to minimize server requests
+- 🎚️ **Adjustable Strength**: Fine-tune LoRa influence (0.0 to 1.0)
+- 🔄 **Manual Refresh**: Button to force immediate server update
+- 🎯 **Workflow Integration**: Seamlessly applies to Node 34 (LoraLoader)
+
+#### Implementation Details
+
+**Files Modified:**
+1. `ui_panel.py` (+90 lines)
+   - Added `get_lora_items()` callback with server fetch
+   - Created cache system (_lora_cache)
+   - Added 3 properties: `lora_enabled`, `lora_name`, `lora_strength_model`
+   - Implemented `WM_OT_RefreshLoraList` operator
+
+2. `pie_menu.py` (+42 lines)
+   - Added LoRa UI section in Generate Image area
+   - Dropdown with refresh button
+   - Strength slider
+   - Active LoRa indicator
+
+3. `workspace_setup.py` (+22 lines)
+   - Added `lora` section to session.json
+   - Implemented Node 34 override logic
+   - Conditional enable/disable
+
+#### How It Works
+
+```
+User Opens Dropdown
+    ↓
+Check 5-minute cache
+    ↓
+If expired → GET /object_info from ComfyUI
+    ↓
+Parse LoraLoader.input.required.lora_name
+    ↓
+Extract ["lora1.safetensors", "lora2.safetensors", ...]
+    ↓
+Convert to readable names
+    ↓
+Cache & display in UI
+```
+
+#### Session JSON Structure
+
+```json
+{
+  "lora": {
+    "enabled": true,
+    "name": "xl_more_art-full_v1.safetensors",
+    "strength_model": 0.8,
+    "strength_clip": 0.8
+  }
+}
+```
+
+#### Console Output
+
+**Successful fetch:**
+```
+[Style Engine] Fetching LoRa list from ComfyUI server...
+[Style Engine] ✓ Found 15 LoRa models on server
+```
+
+**During generation:**
+```
+[GCS] 🎨 LoRa enabled: xl_more_art-full_v1.safetensors
+[GCS]    Strength: 0.80
+```
+
+---
+
 ## Version 0.0.2 - Auto-Refresh Update
 
 ### 🎯 User Requests Implemented

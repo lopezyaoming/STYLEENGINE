@@ -1,4 +1,82 @@
-# What's New - Style Engine MVP
+# What's New - Style Engine
+
+## 🎯 Version 0.3.3 - UV Texture Generation (December 29, 2025)
+
+### New Feature: AI-Powered Mesh Texturing
+
+**Hunyuan 3D 2.1 is now integrated!** Generate UV-mapped textures for your existing 3D meshes with one click.
+
+**What's New:**
+- ✅ **One-Click UV Texturing**: Select mesh → Click button → Get textured result
+- ✅ **Automatic Upload/Download**: Seamless mesh transfer to/from ComfyUI server
+- ✅ **Multi-View Generation**: 6 camera angles for complete coverage
+- ✅ **AI Style Transfer**: Uses current_ai.png as texture reference
+- ✅ **Seam Inpainting**: Clean, seamless textures
+- ✅ **Auto-Import**: Textured mesh appears in scene automatically
+
+**How to Use:**
+1. Generate an AI image (creates current_ai.png style reference)
+2. Select a mesh object in Blender
+3. Open pie menu (`Shift+E`) → Object section
+4. Click **"UV Texture"**
+5. Wait 1-2 minutes
+6. Textured mesh appears next to original!
+
+**Requirements:**
+- GCS mode (Self-Hosted ComfyUI)
+- Hunyuan 3D 2.1 nodes installed on server
+- current_ai.png exists (generate image first)
+
+**Processing:**
+- Export → Upload (3-5s)
+- Hunyuan 3D generation (60-120s)
+- Download → Import (3-5s)
+- **Total: ~70-135 seconds**
+
+**Files Modified:**
+- `runcomfy_server_client.py` - Added mesh upload/download methods
+- `pie_menu.py` - Implemented full UV Texture operator
+- 9-step pipeline with comprehensive error handling
+
+**Documentation:**
+- See `UV_TEXTURE_FEATURE.md` for complete technical details
+
+---
+
+## 🎨 Version 0.3.2 - LoRa Model Selection (December 29, 2025)
+
+### New Feature: Dynamic LoRa Discovery
+
+**LoRa models are now fully integrated!** Select and apply LoRa models directly from the pie menu with real-time server discovery.
+
+**What's New:**
+- ✅ **Dynamic LoRa Discovery**: Fetches available LoRas from ComfyUI server via `/object_info` API
+- ✅ **Smart Caching**: 5-minute cache to minimize server requests
+- ✅ **Dropdown Selector**: Easy-to-use model picker with readable names
+- ✅ **Strength Control**: Adjustable slider (0.0 to 1.0)
+- ✅ **Refresh Button**: Manual cache clear and re-fetch
+- ✅ **Workflow Integration**: Applies to Node 34 (LoraLoader) automatically
+- ✅ **Session Persistence**: Saves LoRa settings to session.json
+
+**How to Use:**
+1. Open pie menu (`Shift+E`)
+2. Go to "Generate Image" section
+3. Enable "Use LoRa"
+4. Select from dropdown (auto-populated from server)
+5. Adjust strength slider
+6. Generate!
+
+**Files Modified:**
+- `ui_panel.py` - Added properties and server fetch logic
+- `pie_menu.py` - Added LoRa UI section
+- `workspace_setup.py` - Added session.json storage and Node 34 override
+
+**Documentation:**
+- See `LORA_FEATURE_IMPLEMENTATION.md` for complete technical details
+- Updated `CHANGELOG.md` with version 0.3.2 entry
+- Updated `COMPLETED_FEATURES.md` with LoRa section
+
+---
 
 ## 🎉 MVP Implementation Complete!
 

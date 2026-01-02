@@ -4,7 +4,7 @@
 
 An in-house Blender addon that provides real-time AI-generated stylization of your 3D scenes as you model. Built for Blender 4.2+ by Spiri Bros Co.
 
-![Version](https://img.shields.io/badge/version-0.0.1--mvp-blue)
+![Version](https://img.shields.io/badge/version-0.3.3-blue)
 ![Blender](https://img.shields.io/badge/blender-4.2+-orange)
 ![Status](https://img.shields.io/badge/status-mvp--skeleton-yellow)
 
@@ -24,6 +24,8 @@ Think of it as an "AI filter" that shows you how your scene looks when processed
 - **API Credentials Management**: Secure storage with environment variable support
 - **Directory Management**: Auto-creation of temp folders and placeholder images
 - **Complete UI Panel**: All controls and settings ready
+- **LoRa Model Selection**: Dynamic discovery from ComfyUI server with adjustable strength
+- **UV Texture Generation**: AI-powered texture generation for existing meshes (Hunyuan 3D 2.1)
 - **Comprehensive Documentation**: Full guides for users and developers
 
 ### ⏳ Coming Next
@@ -223,9 +225,9 @@ Built with:
 
 ---
 
-**Status**: MVP skeleton complete, ready for AI pipeline integration  
-**Version**: 0.0.1-mvp  
-**Last Updated**: Current session
+**Status**: Production-ready with LoRa and UV Texture support  
+**Version**: 0.3.3  
+**Last Updated**: December 29, 2025
 
 ---
 

@@ -6,10 +6,10 @@
 bl_info = {
     "name": "Style Engine",
     "author": "Ian Worrel, Juan Jose Lopez",
-    "version": (0, 3, 1),
+    "version": (0, 3, 4),
     "blender": (4, 2, 0),
     "location": "View3D > Sidebar > Style Engine",
-    "description": "In-house AI Generation integration for Blender Workflows",
+    "description": "In-house AI Generation integration for Blender Workflows with LoRa and UV Texture support",
     "category": "3D View",
 }
 

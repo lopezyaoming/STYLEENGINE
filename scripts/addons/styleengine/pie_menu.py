@@ -25,15 +25,258 @@ class WM_OT_ProjectTextureScene(Operator):
 
 
 class WM_OT_UVTexture(Operator):
-    """Apply UV texture to selected objects"""
+    """Generate UV textures for selected mesh using AI (Hunyuan 3D 2.1)"""
     bl_idname = "style_engine.uv_texture"
     bl_label = "UV Texture"
-    bl_description = "Apply UV-based texture projection (Coming Soon)"
+    bl_description = "Generate UV-mapped textures for selected mesh using AI and current_ai.png as reference"
     bl_options = {'REGISTER', 'UNDO'}
     
     def execute(self, context):
-        self.report({'INFO'}, "UV Texture - Coming Soon")
-        return {'FINISHED'}
+        from . import workspace_setup
+        from . import runcomfy_deployment
+        from pathlib import Path
+        import tempfile
+        import time
+        
+        # Check if in GCS mode
+        if not runcomfy_deployment.is_server_mode():
+            self.report({'ERROR'}, "UV Texture requires GCS mode (Self-Hosted ComfyUI)")
+            print("[UV Texture] ❌ Feature requires GCS backend mode")
+            return {'CANCELLED'}
+        
+        # Check if object is selected
+        if not context.active_object:
+            self.report({'ERROR'}, "No object selected. Please select a mesh object.")
+            print("[UV Texture] ❌ No active object")
+            return {'CANCELLED'}
+        
+        obj = context.active_object
+        
+        # Check if it's a mesh
+        if obj.type != 'MESH':
+            self.report({'ERROR'}, f"Selected object '{obj.name}' is not a mesh (type: {obj.type})")
+            print(f"[UV Texture] ❌ Object is {obj.type}, not MESH")
+            return {'CANCELLED'}
+        
+        print(f"[UV Texture] ============================================")
+        print(f"[UV Texture] STARTING UV TEXTURE GENERATION")
+        print(f"[UV Texture] Object: {obj.name}")
+        print(f"[UV Texture] ============================================")
+        
+        try:
+            # Step 1: Export mesh as GLB
+            temp_dir = Path(tempfile.gettempdir()) / "styleengine_uv"
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            
+            glb_filename = f"{obj.name}_{int(time.time())}.glb"
+            glb_path = temp_dir / glb_filename
+            
+            print(f"[UV Texture] Step 1: Exporting mesh to GLB...")
+            print(f"[UV Texture]   Export path: {glb_path}")
+            
+            # Export using Blender's GLTF exporter
+            bpy.ops.export_scene.gltf(
+                filepath=str(glb_path),
+                use_selection=True,
+                export_format='GLB',
+                export_texcoords=True,
+                export_normals=True,
+                export_materials='EXPORT',
+                export_cameras=False,
+                export_lights=False
+            )
+            
+            file_size = glb_path.stat().st_size / 1024
+            print(f"[UV Texture] ✓ Exported: {file_size:.1f} KB")
+            
+            # Step 2: Upload mesh to ComfyUI server
+            print(f"[UV Texture] Step 2: Uploading mesh to server...")
+            server_client = runcomfy_deployment.get_server_client()
+            upload_result = server_client.upload_mesh(str(glb_path), overwrite=True)
+            
+            uploaded_mesh_name = upload_result['name']
+            print(f"[UV Texture] ✓ Uploaded as: {uploaded_mesh_name}")
+            
+            # Step 3: Get current_ai.png and upload it
+            print(f"[UV Texture] Step 3: Uploading reference image...")
+            temp_img_dir = workspace_setup.get_temp_directory(context)
+            current_ai_path = temp_img_dir / "current_ai.png"
+            
+            if not current_ai_path.exists():
+                self.report({'ERROR'}, "current_ai.png not found. Generate an image first.")
+                print(f"[UV Texture] ❌ current_ai.png not found at {current_ai_path}")
+                return {'CANCELLED'}
+            
+            img_upload = server_client.upload_image(str(current_ai_path), overwrite=True)
+            uploaded_img_name = img_upload['name']
+            print(f"[UV Texture] ✓ Image uploaded as: {uploaded_img_name}")
+            
+            # Step 4: Load and configure workflow
+            print(f"[UV Texture] Step 4: Loading workflow...")
+            addon_dir = Path(__file__).parent
+            workflow_path = addon_dir / "workflows" / "objectUVTexture.json"
+            
+            if not workflow_path.exists():
+                self.report({'ERROR'}, f"Workflow not found: {workflow_path.name}")
+                print(f"[UV Texture] ❌ Workflow missing: {workflow_path}")
+                return {'CANCELLED'}
+            
+            import json
+            with open(workflow_path, 'r') as f:
+                workflow_json = json.load(f)
+            
+            print(f"[UV Texture] ✓ Loaded workflow: {workflow_path.name}")
+            
+            # Step 5: Override nodes
+            print(f"[UV Texture] Step 5: Configuring workflow nodes...")
+            
+            # Get ComfyUI path from preferences
+            prefs = context.preferences.addons['styleengine'].preferences
+            comfy_base_path = prefs.comfy_path if prefs.comfy_path else ""
+            
+            # If not set, try to detect from server or use common defaults
+            if not comfy_base_path:
+                # Try common paths based on OS
+                import platform
+                if platform.system() == 'Windows':
+                    comfy_base_path = "C:/ComfyUI"
+                else:
+                    comfy_base_path = "/home/Juan/ComfyUI"  # Linux/GCS default
+                print(f"[UV Texture] ⚠️ ComfyUI path not set in preferences, using default: {comfy_base_path}")
+                print(f"[UV Texture] Set in: Edit → Preferences → Style Engine → Advanced → ComfyUI Path")
+            
+            # Construct full server path for mesh (uploads go to input/ directory)
+            mesh_server_path = f"{comfy_base_path}/input/{uploaded_mesh_name}"
+            
+            workflow_json["55"]["inputs"]["load_path"] = mesh_server_path  # Full path!
+            workflow_json["14"]["inputs"]["image"] = uploaded_img_name  # Image name only (LoadImage handles this)
+            workflow_json["32"]["inputs"]["string"] = f"UV_{obj.name}_{int(time.time())}"  # Output name
+            
+            print(f"[UV Texture] ✓ Node 55 (mesh): {mesh_server_path}")
+            print(f"[UV Texture] ✓ Node 14 (image): {uploaded_img_name}")
+            
+            # Step 6: Submit workflow (NON-BLOCKING)
+            print(f"[UV Texture] Step 6: Submitting workflow to server...")
+            self.report({'INFO'}, f"Generating UV textures for {obj.name}... (check console)")
+            
+            result = server_client.queue_prompt(workflow_json)
+            prompt_id = result['prompt_id']
+            print(f"[UV Texture] ✓ Queued: {prompt_id}")
+            print(f"[UV Texture] ⏳ Processing in background (1-2 minutes)...")
+            print(f"[UV Texture] Watch console for completion message")
+            
+            # Capture variables for callback (avoid stale references)
+            output_name = workflow_json["32"]["inputs"]["string"]
+            obj_name = obj.name
+            obj_location = obj.location.copy()
+            download_path = temp_dir / f"textured_{glb_filename}"
+            
+            # Step 7: Start background polling (NON-BLOCKING)
+            from . import runcomfy_polling
+            
+            # Create completion callback
+            def on_uv_texture_complete(success, result=None, error=None, workflow_type=None):
+                """Called when UV texture generation completes (runs in background)"""
+                print(f"[UV Texture] ============================================")
+                print(f"[UV Texture] GENERATION COMPLETE")
+                print(f"[UV Texture] ============================================")
+                
+                if not success:
+                    print(f"[UV Texture] ❌ Generation failed: {error}")
+                    return
+                
+                try:
+                    # Step 8: Download textured mesh
+                    print(f"[UV Texture] Step 8: Downloading textured mesh...")
+                    
+                    # Find output GLB in history
+                    outputs = result.get('outputs', {})
+                    output_filename = None
+                    
+                    # Look for GLB output
+                    for node_id, node_output in outputs.items():
+                        # Check if this node has file outputs
+                        if isinstance(node_output, dict):
+                            if 'gltf' in node_output or 'filename' in node_output:
+                                files = node_output.get('gltf', node_output.get('filename', []))
+                                if files and isinstance(files, list) and len(files) > 0:
+                                    output_filename = files[0].get('filename') if isinstance(files[0], dict) else files[0]
+                                    if output_filename:
+                                        print(f"[UV Texture] Found output in node {node_id}: {output_filename}")
+                                        break
+                    
+                    if not output_filename:
+                        # Fallback: construct expected filename (use captured variable)
+                        output_filename = f"{output_name}_00001_.glb"
+                        print(f"[UV Texture] Using constructed filename: {output_filename}")
+                    
+                    # Download (use captured download_path)
+                    download_success = server_client.download_mesh(
+                        output_filename, 
+                        str(download_path),
+                        file_type="output"
+                    )
+                    
+                    if not download_success:
+                        print(f"[UV Texture] ❌ Download failed")
+                        return
+                    
+                    print(f"[UV Texture] ✓ Downloaded: {download_path.name}")
+                    
+                    # Step 9: Import textured mesh back into Blender
+                    print(f"[UV Texture] Step 9: Importing textured mesh into scene...")
+                    
+                    # Store original selection
+                    original_selected = list(bpy.context.selected_objects)
+                    
+                    # Import GLB
+                    bpy.ops.import_scene.gltf(filepath=str(download_path))
+                    
+                    # Get newly imported objects
+                    newly_imported = [o for o in bpy.context.selected_objects if o not in original_selected]
+                    
+                    if newly_imported:
+                        new_obj = newly_imported[0]
+                        new_obj.name = f"{obj_name}_Textured"  # Use captured name
+                        
+                        # Position next to original (use captured location)
+                        new_obj.location = obj_location
+                        new_obj.location.x += 2.0  # Offset to the right
+                        
+                        print(f"[UV Texture] ✓ Imported: {new_obj.name}")
+                        print(f"[UV Texture] ✅ UV textured mesh created: {new_obj.name}")
+                    else:
+                        print(f"[UV Texture] ⚠️ Mesh imported but not found in scene")
+                    
+                    print(f"[UV Texture] ============================================")
+                    print(f"[UV Texture] UV TEXTURE GENERATION COMPLETE")
+                    print(f"[UV Texture] ============================================")
+                    
+                except Exception as e:
+                    print(f"[UV Texture] ❌ Error during download/import: {e}")
+                    import traceback
+                    traceback.print_exc()
+            
+            # Register for background polling
+            runcomfy_polling.RunComfyPoller.start_polling(
+                deployment_id='server',  # Server mode
+                request_id=prompt_id,
+                callback=on_uv_texture_complete,
+                workflow_type='uv_texture'
+            )
+            
+            print(f"[UV Texture] ✅ Submitted! Processing in background...")
+            print(f"[UV Texture] Blender will remain responsive")
+            print(f"[UV Texture] ============================================")
+            
+            return {'FINISHED'}
+            
+        except Exception as e:
+            self.report({'ERROR'}, f"UV Texture failed: {e}")
+            print(f"[UV Texture] ❌ Error: {e}")
+            import traceback
+            traceback.print_exc()
+            return {'CANCELLED'}
 
 
 class WM_OT_CreateObject(Operator):
@@ -344,6 +587,48 @@ class STYLEENGINE_MT_pie_main(Menu):
             quality_col.label(text="Workbench - Quick iterations", icon='INFO')
         else:
             quality_col.label(text="EEVEE - Better for img2img", icon='INFO')
+        
+        col.separator()
+        
+        # LoRa Configuration
+        lora_box = col.box()
+        lora_col = lora_box.column(align=True)
+        lora_col.label(text="LoRa", icon='MODIFIER')
+        
+        # Enable checkbox
+        lora_col.prop(style_props, "lora_enabled", 
+                      text="Use LoRa", 
+                      toggle=True)
+        
+        # Only show controls if enabled
+        if style_props.lora_enabled:
+            lora_col.separator(factor=0.5)
+            
+            # LoRa dropdown with refresh button
+            lora_col.label(text="Model:", icon='FILE')
+            refresh_row = lora_col.row(align=True)
+            refresh_row.prop(style_props, "lora_name", text="")
+            refresh_row.operator("style_engine.refresh_lora_list", text="", icon='FILE_REFRESH')
+            
+            lora_col.separator(factor=0.5)
+            
+            # Strength slider
+            lora_col.label(text="Strength:", icon='FORCE_FORCE')
+            lora_col.prop(style_props, "lora_strength_model", 
+                          text="", 
+                          slider=True)
+            
+            lora_col.separator(factor=0.3)
+            
+            # Show active LoRa
+            if style_props.lora_name != 'NONE':
+                info_row = lora_col.row()
+                info_row.scale_y = 0.7
+                # Truncate long names
+                display_name = style_props.lora_name.replace('.safetensors', '')
+                if len(display_name) > 20:
+                    display_name = display_name[:17] + "..."
+                info_row.label(text=f"Active: {display_name}", icon='CHECKMARK')
         
         # ═══════════════════════════════════════════════════
         # Position 3: RIGHT (EAST) - Visualization Type

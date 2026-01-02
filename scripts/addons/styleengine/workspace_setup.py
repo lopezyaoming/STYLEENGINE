@@ -512,6 +512,12 @@ def write_session_json(context):
                 "weight_type": props.ipadapter_weight_type if hasattr(props, 'ipadapter_weight_type') else "style transfer",
                 "strength": round(props.ipadapter_strength, 2) if hasattr(props, 'ipadapter_strength') else 0.75
             },
+            "lora": {
+                "enabled": props.lora_enabled if hasattr(props, 'lora_enabled') else False,
+                "name": props.lora_name if hasattr(props, 'lora_name') else "NONE",
+                "strength_model": round(props.lora_strength_model, 3) if hasattr(props, 'lora_strength_model') else 0.8,
+                "strength_clip": round(props.lora_strength_model, 3) if hasattr(props, 'lora_strength_model') else 0.8
+            },
             "reference_images": {
                 # Global strengths
                 "style_transfer_strength": round(props.style_transfer_strength, 3),
@@ -2253,6 +2259,22 @@ def generate_ai_image_cloud(context):
             influence_value = session_data.get('texture_influence', 1.0)  # Default 1.0 (keep render)
             denoise_value = 1.0 - influence_value  # Flip for workflow
             workflow_json["135"]["inputs"]["value"] = denoise_value
+            
+            # ============================================================
+            # LORA (Node 34 - LoraLoader)
+            # ============================================================
+            lora_config = session_data.get('lora', {})
+            if lora_config.get('enabled', False) and lora_config.get('name') != 'NONE':
+                workflow_json["34"]["inputs"]["lora_name"] = lora_config['name']
+                workflow_json["34"]["inputs"]["strength_model"] = lora_config.get('strength_model', 0.8)
+                workflow_json["34"]["inputs"]["strength_clip"] = lora_config.get('strength_clip', 0.8)
+                print(f"[GCS] 🎨 LoRa enabled: {lora_config['name']}")
+                print(f"[GCS]    Strength: {lora_config.get('strength_model', 0.8):.2f}")
+            else:
+                # Disable LoRa by setting strength to 0
+                workflow_json["34"]["inputs"]["strength_model"] = 0.0
+                workflow_json["34"]["inputs"]["strength_clip"] = 0.0
+                print(f"[GCS] LoRa disabled")
             
             # ============================================================
             # RESOLUTION (Node 5 - EmptyLatentImage)

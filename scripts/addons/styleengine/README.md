@@ -92,6 +92,12 @@ Think of it as a split-screen workflow: on the left, you have your normal Blende
   - Each group can have custom keywords to guide AI generation
   - Click groups to select them, edit their keywords directly in the UI
 - **Influence Sliders**: Control how much depth and silhouette affect the generation
+- **LoRa Models**: Apply LoRa models to modify generation style
+  - Dynamic discovery from ComfyUI server
+  - Dropdown selector with all available LoRas
+  - Adjustable strength (0.0 to 1.0)
+  - 5-minute cache for performance
+  - Manual refresh button
 
 ---
 

@@ -13,6 +13,96 @@ from . import workspace_setup
 # This persists across draw calls to avoid loading images repeatedly
 preview_collections = {}
 
+# Global cache for LoRa list to avoid repeated API calls
+_lora_cache = {
+    'items': [],
+    'timestamp': 0,
+    'cache_duration': 300  # 5 minutes
+}
+
+
+def get_lora_items(self, context):
+    """
+    Dynamic callback to fetch available LoRa models from ComfyUI server.
+    Caches results for 5 minutes to avoid excessive API calls.
+    """
+    import time
+    from . import runcomfy_deployment
+    
+    # Check cache validity
+    current_time = time.time()
+    cache_age = current_time - _lora_cache['timestamp']
+    
+    # Default fallback items
+    default_items = [
+        ('NONE', "None", "No LoRa"),
+        ('xl_more_art-full_v1.safetensors', "More Art Full", "Default LoRa"),
+    ]
+    
+    # Return cached if valid
+    if _lora_cache['items'] and cache_age < _lora_cache['cache_duration']:
+        return _lora_cache['items']
+    
+    # Check if in GCS mode (self-hosted ComfyUI)
+    try:
+        prefs = context.preferences.addons['styleengine'].preferences
+        
+        if hasattr(prefs, 'api_backend') and prefs.api_backend == 'GCS':
+            # Try to fetch from server
+            try:
+                server_client = runcomfy_deployment.get_server_client()
+                
+                # Fetch /object_info from ComfyUI server
+                print("[Style Engine] Fetching LoRa list from ComfyUI server...")
+                object_info = server_client._request('GET', '/object_info', timeout=5)
+                
+                if 'LoraLoader' in object_info:
+                    lora_loader = object_info['LoraLoader']
+                    
+                    # Extract lora_name options: input.required.lora_name[0]
+                    if 'input' in lora_loader and 'required' in lora_loader['input']:
+                        lora_name_input = lora_loader['input']['required'].get('lora_name')
+                        
+                        if lora_name_input and isinstance(lora_name_input, list) and len(lora_name_input) > 0:
+                            lora_list = lora_name_input[0]
+                            
+                            if isinstance(lora_list, list) and lora_list:
+                                # Build items from server response
+                                items = [('NONE', "None", "No LoRa")]
+                                
+                                for lora_file in lora_list:
+                                    # Create readable display name
+                                    display_name = lora_file.replace('.safetensors', '').replace('_', ' ').replace('-', ' ')
+                                    display_name = ' '.join(word.capitalize() for word in display_name.split())
+                                    
+                                    # Truncate long names
+                                    if len(display_name) > 35:
+                                        display_name = display_name[:32] + "..."
+                                    
+                                    items.append((
+                                        lora_file,           # Value: exact filename
+                                        display_name,        # Display: readable name
+                                        f"LoRa: {lora_file}" # Tooltip
+                                    ))
+                                
+                                # Cache the results
+                                _lora_cache['items'] = items
+                                _lora_cache['timestamp'] = current_time
+                                
+                                print(f"[Style Engine] ✓ Found {len(items)-1} LoRa models on server")
+                                return items
+                
+            except Exception as e:
+                print(f"[Style Engine] ⚠️ Failed to fetch LoRas from server: {e}")
+        
+        # Fallback to default list
+        print("[Style Engine] Using default LoRa list")
+        return default_items
+        
+    except Exception as e:
+        print(f"[Style Engine] Error in LoRa callback: {e}")
+        return default_items
+
 # ----------------------------------------------------------------
 # 1. PROPERTY GROUP
 # ----------------------------------------------------------------
@@ -726,6 +816,35 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         min=0.0,
         max=5.0,
         step=5,
+        precision=2,
+        update=update_session_json
+    )
+    
+    # ================================================================
+    # LORA CONFIGURATION
+    # ================================================================
+    
+    lora_enabled: bpy.props.BoolProperty(
+        name="Use LoRa",
+        description="Enable LoRa model for generation",
+        default=False,
+        update=update_session_json
+    )
+    
+    lora_name: bpy.props.EnumProperty(
+        name="LoRa Model",
+        description="Select LoRa model to use (fetched from ComfyUI server in GCS mode)",
+        items=get_lora_items,  # Dynamic callback - fetches from server
+        update=update_session_json
+    )
+    
+    lora_strength_model: bpy.props.FloatProperty(
+        name="LoRa Strength",
+        description="LoRa influence on the model (0.0 to 1.0)",
+        default=0.8,
+        min=0.0,
+        max=1.0,
+        step=1,
         precision=2,
         update=update_session_json
     )
@@ -1609,6 +1728,32 @@ class WM_OT_CancelGeneration(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class WM_OT_RefreshLoraList(bpy.types.Operator):
+    """Refresh LoRa list from ComfyUI server"""
+    bl_idname = "style_engine.refresh_lora_list"
+    bl_label = "Refresh LoRa List"
+    bl_description = "Fetch latest LoRa models from ComfyUI server (clears 5-min cache)"
+    
+    def execute(self, context):
+        # Clear cache
+        global _lora_cache
+        _lora_cache['items'] = []
+        _lora_cache['timestamp'] = 0
+        
+        # Trigger refresh by accessing the property
+        props = context.scene.style_engine_props
+        current = props.lora_name
+        
+        # Force UI update
+        for area in context.screen.areas:
+            area.tag_redraw()
+        
+        self.report({'INFO'}, "LoRa list refreshed from server")
+        print("[Style Engine] LoRa cache cleared - will refresh on next dropdown open")
+        
+        return {'FINISHED'}
+
+
 class WM_OT_TestCloudGeneration(bpy.types.Operator):
     """Test workflow with current settings (dev tool)"""
     bl_idname = "style_engine.test_cloud_generation"
@@ -2204,6 +2349,7 @@ classes = (
     WM_OT_ClearReferenceImage,
     WM_OT_ReloadReferenceImage,
     WM_OT_CancelGeneration,
+    WM_OT_RefreshLoraList,
     WM_OT_TestCloudGeneration,
     WM_OT_LoadTemplates,
     WM_OT_SavePromptAsTemplate,

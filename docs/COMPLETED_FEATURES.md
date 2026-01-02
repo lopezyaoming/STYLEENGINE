@@ -229,9 +229,56 @@ For more details, see:
 
 ---
 
-**Status**: All features implemented and tested  
-**Version**: 0.0.2  
-**Date**: Current session  
+## 4. ✅ LoRa Model Selection (v0.3.2)
 
-✨ **Enjoy your automatic AI vision workspace!** ✨
+### Feature
+> "Add LoRa support with dynamic server discovery"
+
+### ✨ Solution
+**Real-time LoRa model selection with server discovery!**
+
+**How It Works**:
+1. **Dynamic Discovery**: Fetches available LoRas from ComfyUI server
+2. **Smart Caching**: Caches results for 5 minutes
+3. **Easy Selection**: Dropdown menu in pie menu
+4. **Adjustable Strength**: Slider from 0.0 to 1.0
+5. **Manual Refresh**: Button to update list on demand
+
+**UI Location**:
+```
+Pie Menu (Shift+E) → Generate Image → LoRa Section
+┌─────────────────────────┐
+│ LoRa                    │
+│ ☑ Use LoRa              │
+│ Model: [Dropdown ▼] [🔄]│
+│ Strength: [====|====]   │
+│ ✓ Active: Your LoRa     │
+└─────────────────────────┘
+```
+
+**The addon now**:
+- ✅ Queries `/object_info` from ComfyUI server
+- ✅ Extracts available LoRa models automatically
+- ✅ Converts filenames to readable names
+- ✅ Caches for 5 minutes to reduce server load
+- ✅ Applies to Node 34 (LoraLoader) in workflow
+- ✅ Stores in session.json for persistence
+
+**Console Output**:
+```
+[Style Engine] Fetching LoRa list from ComfyUI server...
+[Style Engine] ✓ Found 15 LoRa models on server
+[GCS] 🎨 LoRa enabled: xl_more_art-full_v1.safetensors
+[GCS]    Strength: 0.80
+```
+
+**Documentation**: See `docs/LORA_FEATURE_IMPLEMENTATION.md` for complete technical details.
+
+---
+
+**Status**: All features implemented and tested  
+**Version**: 0.3.2  
+**Date**: December 29, 2025  
+
+✨ **Enjoy your automatic AI vision workspace with LoRa support!** ✨
 

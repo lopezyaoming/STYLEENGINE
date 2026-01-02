@@ -283,6 +283,78 @@ class ComfyUIServerClient:
         
         return self._request('POST', '/upload/image', data=request_body, headers=headers)
     
+    def upload_mesh(self, mesh_path, subfolder="", overwrite=False):
+        """
+        Upload 3D mesh file to ComfyUI server.
+        
+        Args:
+            mesh_path: Path to mesh file (.glb, .obj, etc.)
+            subfolder: Optional subfolder in input directory
+            overwrite: Whether to overwrite existing file
+        
+        Returns:
+            dict: Upload response with filename
+                {
+                    "name": "uploaded_filename.glb",
+                    "subfolder": "",
+                    "type": "input"
+                }
+        """
+        # Read mesh file
+        with open(mesh_path, 'rb') as f:
+            mesh_data = f.read()
+        
+        # Get filename
+        filename = Path(mesh_path).name
+        
+        # Determine content type based on extension
+        ext = Path(mesh_path).suffix.lower()
+        content_types = {
+            '.glb': 'model/gltf-binary',
+            '.gltf': 'model/gltf+json',
+            '.obj': 'text/plain',
+            '.fbx': 'application/octet-stream',
+            '.stl': 'application/octet-stream',
+        }
+        content_type = content_types.get(ext, 'application/octet-stream')
+        
+        # Create multipart form data
+        boundary = f"----WebKitFormBoundary{uuid.uuid4().hex}"
+        
+        body = []
+        
+        # Add mesh file
+        body.append(f'--{boundary}'.encode())
+        body.append(f'Content-Disposition: form-data; name="image"; filename="{filename}"'.encode())
+        body.append(f'Content-Type: {content_type}'.encode())
+        body.append(b'')
+        body.append(mesh_data)
+        
+        # Add subfolder if specified
+        if subfolder:
+            body.append(f'--{boundary}'.encode())
+            body.append(b'Content-Disposition: form-data; name="subfolder"')
+            body.append(b'')
+            body.append(subfolder.encode())
+        
+        # Add overwrite flag
+        body.append(f'--{boundary}'.encode())
+        body.append(b'Content-Disposition: form-data; name="overwrite"')
+        body.append(b'')
+        body.append(str(overwrite).lower().encode())
+        
+        body.append(f'--{boundary}--'.encode())
+        body.append(b'')
+        
+        request_body = b'\r\n'.join(body)
+        
+        headers = {
+            'Content-Type': f'multipart/form-data; boundary={boundary}'
+        }
+        
+        print(f"[Server API] Uploading mesh: {filename} ({len(mesh_data)/1024:.1f} KB)")
+        return self._request('POST', '/upload/image', data=request_body, headers=headers)
+    
     def download_image(self, filename, save_path, subfolder="", image_type="output"):
         """
         Download image from ComfyUI server.
@@ -321,6 +393,47 @@ class ComfyUIServerClient:
             return True
         except Exception as e:
             print(f"[Server API] Download failed: {e}")
+            return False
+    
+    def download_mesh(self, filename, save_path, subfolder="", file_type="output"):
+        """
+        Download 3D mesh file from ComfyUI server.
+        
+        Args:
+            filename: Mesh filename on server (e.g., "Hy21_Mesh_00001_.glb")
+            save_path: Local path to save mesh
+            subfolder: Optional subfolder path
+            file_type: Type of file ("output", "input", "temp")
+        
+        Returns:
+            bool: True if successful
+        """
+        try:
+            # Build URL with query parameters
+            params = {
+                'filename': filename,
+                'type': file_type
+            }
+            if subfolder:
+                params['subfolder'] = subfolder
+            
+            query_string = '&'.join(f'{k}={v}' for k, v in params.items())
+            endpoint = f'/view?{query_string}'
+            
+            # Download mesh file
+            mesh_data = self._request('GET', endpoint)
+            
+            # Ensure parent directory exists
+            Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+            
+            # Write to file
+            with open(save_path, 'wb') as f:
+                f.write(mesh_data)
+            
+            print(f"[Server API] Downloaded mesh: {filename} ({len(mesh_data)/1024:.1f} KB)")
+            return True
+        except Exception as e:
+            print(f"[Server API] Mesh download failed: {e}")
             return False
     
     # ================================================================
