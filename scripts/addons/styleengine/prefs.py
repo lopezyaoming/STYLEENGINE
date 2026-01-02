@@ -339,13 +339,13 @@ class StyleEnginePreferences(AddonPreferences):
         # ================================================================
         # ADVANCED SETTINGS (collapsible, hidden by default)
         # ================================================================
-        layout.separator()
+            layout.separator()
         advanced_box = layout.box()
         header_row = advanced_box.row(align=True)
         icon = 'TRIA_DOWN' if self.show_advanced_settings else 'TRIA_RIGHT'
         header_row.prop(self, "show_advanced_settings", text="Advanced Settings", 
                            icon=icon, emboss=False, toggle=True)
-        
+            
         if self.show_advanced_settings:
             
             # GCS: Preview images option
