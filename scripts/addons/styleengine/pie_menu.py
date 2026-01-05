@@ -777,6 +777,95 @@ class WM_OT_CreateTexturedObject(Operator):
             return {'CANCELLED'}
 
 
+class WM_OT_OpenGenerationSettings(Operator):
+    """Open generation settings in persistent floating window"""
+    bl_idname = "style_engine.open_generation_settings"
+    bl_label = "Generation Settings"
+    bl_description = "Open persistent settings panel (stays open for tweaking parameters)"
+    bl_options = {'REGISTER'}
+    
+    def execute(self, context):
+        return {'FINISHED'}
+    
+    def invoke(self, context, event):
+        # Open as floating window (stays until closed)
+        return context.window_manager.invoke_popup(self, width=420)
+    
+    def draw(self, context):
+        layout = self.layout
+        style_props = context.scene.style_engine_props
+        
+        layout.label(text="AI Generation Settings", icon='SETTINGS')
+        layout.separator()
+        
+        # Influence sliders
+        influence_box = layout.box()
+        influence_box.label(text="Influences", icon='SMOOTHCURVE')
+        influence_col = influence_box.column(align=True)
+        influence_col.prop(style_props, "silhouette_influence", text="Silhouette", slider=True)
+        influence_col.prop(style_props, "depth_influence", text="Depth", slider=True)
+        influence_col.prop(style_props, "texture_influence", text="Influence", slider=True)
+        
+        layout.separator()
+        
+        # Steps
+        layout.label(text="Steps", icon='SORTTIME')
+        layout.prop(style_props, "steps", text="", slider=True)
+        
+        layout.separator()
+        
+        # Render Quality
+        quality_box = layout.box()
+        quality_box.label(text="Render Quality", icon='SHADING_RENDERED')
+        quality_box.prop(style_props, "render_quality", expand=True)
+        
+        layout.separator()
+        
+        # LoRa Configuration
+        lora_box = layout.box()
+        lora_box.label(text="LoRa", icon='MODIFIER')
+        lora_box.prop(style_props, "lora_enabled", text="Use LoRa", toggle=True)
+        
+        if style_props.lora_enabled:
+            lora_box.separator()
+            lora_box.label(text="LoRa 1:", icon='FILE')
+            lora_box.prop(style_props, "lora_name", text="")
+            lora_box.separator()
+            lora_box.label(text="Strength 1:", icon='FORCE_FORCE')
+            lora_box.prop(style_props, "lora_strength_model", text="", slider=True)
+            
+            lora_box.separator()
+            lora_box.prop(style_props, "lora2_enabled", text="Use LoRa 2", toggle=True)
+            
+            if style_props.lora2_enabled:
+                lora_box.separator()
+                lora_box.label(text="LoRa 2:", icon='FILE')
+                lora_box.prop(style_props, "lora2_name", text="")
+                lora_box.separator()
+                lora_box.label(text="Strength 2:", icon='FORCE_FORCE')
+                lora_box.prop(style_props, "lora2_strength_model", text="", slider=True)
+            
+            # Show active summary
+            if style_props.lora_name != 'NONE' or (style_props.lora2_enabled and style_props.lora2_name != 'NONE'):
+                lora_box.separator()
+                active_loras = []
+                if style_props.lora_name != 'NONE':
+                    active_loras.append(f"L1: {style_props.lora_name.replace('.safetensors', '')[:15]}")
+                if style_props.lora2_enabled and style_props.lora2_name != 'NONE':
+                    active_loras.append(f"L2: {style_props.lora2_name.replace('.safetensors', '')[:15]}")
+                
+                info_row = lora_box.row()
+                info_row.scale_y = 0.8
+                info_row.label(text=" + ".join(active_loras), icon='CHECKMARK')
+        
+        layout.separator()
+        
+        # Autogenerate toggle
+        row = layout.row()
+        row.scale_y = 1.5
+        row.prop(style_props, "auto_generate", text="Autogenerate", toggle=True, icon='FILE_REFRESH')
+
+
 class WM_OT_SetVisualization(Operator):
     """Switch camera background visualization type"""
     bl_idname = "style_engine.set_visualization"
@@ -1086,31 +1175,59 @@ class STYLEENGINE_MT_pie_main(Menu):
         if style_props.lora_enabled:
             lora_col.separator(factor=0.5)
             
-            # LoRa dropdown with refresh button
-            lora_col.label(text="Model:", icon='FILE')
+            # LoRa 1
+            lora_col.label(text="LoRa 1:", icon='FILE')
             refresh_row = lora_col.row(align=True)
             refresh_row.prop(style_props, "lora_name", text="")
             refresh_row.operator("style_engine.refresh_lora_list", text="", icon='FILE_REFRESH')
             
+            lora_col.separator(factor=0.3)
+            
+            # LoRa 1 Strength
+            lora_col.label(text="Strength 1:", icon='FORCE_FORCE')
+            lora_col.prop(style_props, "lora_strength_model", text="", slider=True)
+            
             lora_col.separator(factor=0.5)
             
-            # Strength slider
-            lora_col.label(text="Strength:", icon='FORCE_FORCE')
-            lora_col.prop(style_props, "lora_strength_model", 
-                          text="", 
-                          slider=True)
+            # LoRa 2 Enable
+            lora_col.prop(style_props, "lora2_enabled", text="Use LoRa 2", toggle=True)
+            
+            # Show LoRa 2 controls if enabled
+            if style_props.lora2_enabled:
+                lora_col.separator(factor=0.3)
+                
+                # LoRa 2 dropdown
+                lora_col.label(text="LoRa 2:", icon='FILE')
+                lora_col.prop(style_props, "lora2_name", text="")
+                
+                lora_col.separator(factor=0.3)
+                
+                # LoRa 2 Strength
+                lora_col.label(text="Strength 2:", icon='FORCE_FORCE')
+                lora_col.prop(style_props, "lora2_strength_model", text="", slider=True)
             
             lora_col.separator(factor=0.3)
             
-            # Show active LoRa
+            # Show active LoRas summary
+            active_loras = []
             if style_props.lora_name != 'NONE':
+                active_loras.append(f"L1: {style_props.lora_name.replace('.safetensors', '')[:12]}")
+            if style_props.lora2_enabled and style_props.lora2_name != 'NONE':
+                active_loras.append(f"L2: {style_props.lora2_name.replace('.safetensors', '')[:12]}")
+            
+            if active_loras:
                 info_row = lora_col.row()
                 info_row.scale_y = 0.7
-                # Truncate long names
-                display_name = style_props.lora_name.replace('.safetensors', '')
-                if len(display_name) > 20:
-                    display_name = display_name[:17] + "..."
-                info_row.label(text=f"Active: {display_name}", icon='CHECKMARK')
+                info_row.label(text=" + ".join(active_loras), icon='CHECKMARK')
+        
+        col.separator()
+        
+        # Pin Settings button
+        row = col.row()
+        row.scale_y = 1.3
+        row.operator("style_engine.open_generation_settings", 
+                     text="📌 Pin Settings", 
+                     icon='PINNED')
         
         # ═══════════════════════════════════════════════════
         # Position 3: RIGHT (EAST) - Visualization Type
@@ -1229,6 +1346,7 @@ classes = (
     WM_OT_UVTexture,
     WM_OT_CreateObject,
     WM_OT_CreateTexturedObject,
+    WM_OT_OpenGenerationSettings,
     WM_OT_SetVisualization,
     WM_OT_SetRenderQuality,
     WM_OT_PrevGeneration,

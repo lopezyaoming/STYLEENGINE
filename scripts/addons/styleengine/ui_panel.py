@@ -877,6 +877,32 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         update=update_session_json
     )
     
+    # LoRa 2 (second LoRa slot for stacking)
+    lora2_enabled: bpy.props.BoolProperty(
+        name="Use LoRa 2",
+        description="Enable second LoRa model for stacking effects",
+        default=False,
+        update=update_session_json
+    )
+    
+    lora2_name: bpy.props.EnumProperty(
+        name="LoRa 2 Model",
+        description="Select second LoRa model (fetched from ComfyUI server in GCS mode)",
+        items=get_lora_items,  # Uses same callback as lora_name
+        update=update_session_json
+    )
+    
+    lora2_strength_model: bpy.props.FloatProperty(
+        name="LoRa 2 Strength",
+        description="Second LoRa influence on the model (0.0 to 1.0)",
+        default=0.8,
+        min=0.0,
+        max=1.0,
+        step=1,
+        precision=2,
+        update=update_session_json
+    )
+    
     # ================================================================
     # 3D OBJECT GENERATION QUALITY
     # ================================================================
