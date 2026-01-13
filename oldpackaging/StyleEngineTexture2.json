@@ -180,6 +180,20 @@
       "title": "Load LoRA"
     }
   },
+  "36": {
+    "inputs": {
+      "low_threshold": 0.4,
+      "high_threshold": 0.8,
+      "image": [
+        "15",
+        0
+      ]
+    },
+    "class_type": "Canny",
+    "_meta": {
+      "title": "Canny"
+    }
+  },
   "37": {
     "inputs": {
       "strength": [
@@ -201,7 +215,7 @@
         0
       ],
       "image": [
-        "137",
+        "36",
         0
       ],
       "vae": [
@@ -1381,7 +1395,7 @@
     "inputs": {
       "filename_prefix": "canny",
       "images": [
-        "137",
+        "36",
         0
       ]
     },
@@ -1429,20 +1443,6 @@
     "class_type": "LoraLoader",
     "_meta": {
       "title": "Load LoRA"
-    }
-  },
-  "137": {
-    "inputs": {
-      "coarse": "disable",
-      "resolution": 512,
-      "image": [
-        "15",
-        0
-      ]
-    },
-    "class_type": "LineArtPreprocessor",
-    "_meta": {
-      "title": "Realistic Lineart"
     }
   }
 }

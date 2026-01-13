@@ -327,7 +327,7 @@ class StyleEnginePreferences(AddonPreferences):
         
             # Manual credentials (compact)
             basic_box.prop(self, "show_api_keys", text="Show Credentials", toggle=True)
-            if self.show_api_keys:
+        if self.show_api_keys:
                 basic_box.prop(self, "runcomfy_api_token", text="API Token")
                 basic_box.prop(self, "runcomfy_user_id", text="User ID")
             

@@ -7,58 +7,6 @@ import bpy
 from bpy.types import Menu, Operator
 
 
-def get_quality_params(quality_preset):
-    """
-    Get workflow parameters for quality preset.
-    
-    Args:
-        quality_preset: 'SKETCH', 'FAST', 'BALANCED', or 'DETAILED'
-    
-    Returns:
-        dict: Parameters for workflow nodes
-    """
-    presets = {
-        'SKETCH': {
-            'mesh_steps': 10,
-            'octree_resolution': 96,
-            'num_chunks': 32000,
-            'max_faces': 20000,
-            'view_size': 512,
-            'texture_steps': 4,
-            'texture_size': 512,
-        },
-        'FAST': {
-            'mesh_steps': 15,
-            'octree_resolution': 128,
-            'num_chunks': 32000,
-            'max_faces': 50000,
-            'view_size': 512,
-            'texture_steps': 6,
-            'texture_size': 512,
-        },
-        'BALANCED': {
-            'mesh_steps': 25,
-            'octree_resolution': 256,
-            'num_chunks': 64000,
-            'max_faces': 200000,
-            'view_size': 768,
-            'texture_steps': 10,
-            'texture_size': 1024,
-        },
-        'DETAILED': {
-            'mesh_steps': 50,
-            'octree_resolution': 512,
-            'num_chunks': 64000,
-            'max_faces': 500000,
-            'view_size': 1024,
-            'texture_steps': 30,
-            'texture_size': 2048,
-        },
-    }
-    
-    return presets.get(quality_preset, presets['BALANCED'])
-
-
 # ----------------------------------------------------------------
 # PLACEHOLDER OPERATORS (To be implemented later)
 # ----------------------------------------------------------------
@@ -179,36 +127,23 @@ class WM_OT_UVTexture(Operator):
             
             print(f"[UV Texture] ✓ Loaded workflow: {workflow_path.name}")
             
-            # Step 5: Override nodes with quality parameters
+            # Step 5: Override nodes
             print(f"[UV Texture] Step 5: Configuring workflow nodes...")
-            
-            # Get quality parameters
-            style_props = context.scene.style_engine_props
-            quality = style_props.object_quality if hasattr(style_props, 'object_quality') else 'BALANCED'
-            params = get_quality_params(quality)
-            
-            # Apply quality parameters (texture only, mesh is from user)
-            workflow_json["20"]["inputs"]["view_size"] = params['view_size']
-            workflow_json["20"]["inputs"]["steps"] = params['texture_steps']
-            workflow_json["20"]["inputs"]["texture_size"] = params['texture_size']
-            
-            print(f"[UV Texture] ✓ Quality: {quality}")
-            print(f"[UV Texture] ✓ Texture: view={params['view_size']}, steps={params['texture_steps']}, size={params['texture_size']}")
             
             # Get ComfyUI path from preferences
             prefs = context.preferences.addons['styleengine'].preferences
             comfy_base_path = prefs.comfy_path if prefs.comfy_path else ""
             
-            # If not set, detect from GCS server URL (servers are usually Linux)
+            # If not set, try to detect from server or use common defaults
             if not comfy_base_path:
-                # GCS servers are typically Linux, use Linux default
-                comfy_base_path = "/home/Juan/ComfyUI"
-                print(f"[UV Texture] ℹ️ ComfyUI path not set in preferences")
-                print(f"[UV Texture] Using GCS default: {comfy_base_path}")
-                print(f"[UV Texture] To customize: Edit → Preferences → Style Engine → Advanced → ComfyUI Path")
-            
-            # Ensure forward slashes (Linux/Unix style)
-            comfy_base_path = comfy_base_path.replace('\\', '/')
+                # Try common paths based on OS
+                import platform
+                if platform.system() == 'Windows':
+                    comfy_base_path = "C:/ComfyUI"
+                else:
+                    comfy_base_path = "/home/Juan/ComfyUI"  # Linux/GCS default
+                print(f"[UV Texture] ⚠️ ComfyUI path not set in preferences, using default: {comfy_base_path}")
+                print(f"[UV Texture] Set in: Edit → Preferences → Style Engine → Advanced → ComfyUI Path")
             
             # Construct full server path for mesh (uploads go to input/ directory)
             mesh_server_path = f"{comfy_base_path}/input/{uploaded_mesh_name}"
@@ -254,58 +189,31 @@ class WM_OT_UVTexture(Operator):
                     # Step 8: Download textured mesh
                     print(f"[UV Texture] Step 8: Downloading textured mesh...")
                     
-                    # DEBUG: Print full result structure
-                    import json
-                    print(f"[UV Texture] DEBUG: Full result keys: {list(result.keys())}")
-                    
+                    # Find output GLB in history
                     outputs = result.get('outputs', {})
-                    print(f"[UV Texture] DEBUG: Output nodes: {list(outputs.keys())}")
-                    
-                    # Print each node's output structure
-                    for node_id, node_output in outputs.items():
-                        print(f"[UV Texture] DEBUG: Node {node_id} output keys: {list(node_output.keys()) if isinstance(node_output, dict) else type(node_output)}")
-                        if isinstance(node_output, dict):
-                            print(f"[UV Texture] DEBUG: Node {node_id} full output: {json.dumps(node_output, indent=2)}")
-                    
                     output_filename = None
-                    subfolder = ""
                     
-                    # Node 49 (Hy3DInPaint) saves the textured GLB automatically
-                    # Node 62 (Preview3D) displays it and shows filename in result[0]
-                    print(f"[UV Texture] Looking for saved textured GLB...")
-                    
-                    # Get filename from Node 62's result (the file Node 49 saved)
-                    if '62' in outputs:
-                        node_62_output = outputs['62']
-                        print(f"[UV Texture] DEBUG: Node 62 output: {json.dumps(node_62_output, indent=2)}")
-                        
-                        if isinstance(node_62_output, dict) and 'result' in node_62_output:
-                            result_data = node_62_output['result']
-                            if isinstance(result_data, list) and len(result_data) > 0:
-                                full_path = result_data[0]  # e.g., "3D/Hy3D_00005_.glb"
-                                
-                                if full_path and isinstance(full_path, str) and full_path.endswith('.glb'):
-                                    # Parse subfolder if present
-                                    if '/' in full_path:
-                                        subfolder, output_filename = full_path.rsplit('/', 1)
-                                        print(f"[UV Texture] ✓ Found textured GLB: {subfolder}/{output_filename}")
-                                    else:
-                                        output_filename = full_path
-                                        print(f"[UV Texture] ✓ Found textured GLB: {output_filename}")
+                    # Look for GLB output
+                    for node_id, node_output in outputs.items():
+                        # Check if this node has file outputs
+                        if isinstance(node_output, dict):
+                            if 'gltf' in node_output or 'filename' in node_output:
+                                files = node_output.get('gltf', node_output.get('filename', []))
+                                if files and isinstance(files, list) and len(files) > 0:
+                                    output_filename = files[0].get('filename') if isinstance(files[0], dict) else files[0]
+                                    if output_filename:
+                                        print(f"[UV Texture] Found output in node {node_id}: {output_filename}")
+                                        break
                     
                     if not output_filename:
-                        print(f"[UV Texture] ❌ No textured GLB found in Node 62!")
-                        print(f"[UV Texture] Node 49 may not have saved the file")
-                        print(f"[UV Texture] Available nodes: {list(outputs.keys())}")
-                        return
+                        # Fallback: construct expected filename (use captured variable)
+                        output_filename = f"{output_name}_00001_.glb"
+                        print(f"[UV Texture] Using constructed filename: {output_filename}")
                     
-                    # Download (use captured download_path and subfolder)
-                    print(f"[UV Texture] Downloading from: output/{subfolder}/{output_filename}" if subfolder else f"[UV Texture] Downloading: {output_filename}")
-                    
+                    # Download (use captured download_path)
                     download_success = server_client.download_mesh(
                         output_filename, 
                         str(download_path),
-                        subfolder=subfolder,
                         file_type="output"
                     )
                     
@@ -372,498 +280,27 @@ class WM_OT_UVTexture(Operator):
 
 
 class WM_OT_CreateObject(Operator):
-    """Create 3D mesh object from current_ai.png using Hunyuan 3D 2.1"""
+    """Create 3D object from AI generation"""
     bl_idname = "style_engine.create_object"
     bl_label = "Create Object"
-    bl_description = "Generate a new 3D mesh (no texture) from current_ai.png using AI"
+    bl_description = "Generate a new 3D mesh object using AI (Coming Soon)"
     bl_options = {'REGISTER', 'UNDO'}
     
     def execute(self, context):
-        from . import workspace_setup
-        from . import runcomfy_deployment
-        from pathlib import Path
-        import tempfile
-        import time
-        
-        # Check if in GCS mode
-        if not runcomfy_deployment.is_server_mode():
-            self.report({'ERROR'}, "Create Object requires GCS mode (Self-Hosted ComfyUI)")
-            print("[Create Object] ❌ Feature requires GCS backend mode")
-            return {'CANCELLED'}
-        
-        print(f"[Create Object] ============================================")
-        print(f"[Create Object] STARTING 3D MESH GENERATION")
-        print(f"[Create Object] ============================================")
-        
-        try:
-            # Step 1: Get current_ai.png
-            print(f"[Create Object] Step 1: Getting reference image...")
-            temp_img_dir = workspace_setup.get_temp_directory(context)
-            current_ai_path = temp_img_dir / "current_ai.png"
-            
-            if not current_ai_path.exists():
-                self.report({'ERROR'}, "current_ai.png not found. Generate an image first.")
-                print(f"[Create Object] ❌ current_ai.png not found at {current_ai_path}")
-                return {'CANCELLED'}
-            
-            print(f"[Create Object] ✓ Found: {current_ai_path.name}")
-            
-            # Step 2: Upload image to server
-            print(f"[Create Object] Step 2: Uploading image to server...")
-            server_client = runcomfy_deployment.get_server_client()
-            img_upload = server_client.upload_image(str(current_ai_path), overwrite=True)
-            uploaded_img_name = img_upload['name']
-            print(f"[Create Object] ✓ Uploaded as: {uploaded_img_name}")
-            
-            # Step 3: Load workflow
-            print(f"[Create Object] Step 3: Loading workflow...")
-            addon_dir = Path(__file__).parent
-            workflow_path = addon_dir / "workflows" / "objectCreateObject.json"
-            
-            if not workflow_path.exists():
-                self.report({'ERROR'}, f"Workflow not found: {workflow_path.name}")
-                print(f"[Create Object] ❌ Workflow missing: {workflow_path}")
-                return {'CANCELLED'}
-            
-            import json
-            with open(workflow_path, 'r') as f:
-                workflow_json = json.load(f)
-            
-            print(f"[Create Object] ✓ Loaded workflow: {workflow_path.name}")
-            
-            # Step 4: Override nodes with quality parameters
-            print(f"[Create Object] Step 4: Configuring workflow nodes...")
-            
-            # Get quality parameters
-            style_props = context.scene.style_engine_props
-            quality = style_props.object_quality if hasattr(style_props, 'object_quality') else 'BALANCED'
-            params = get_quality_params(quality)
-            
-            workflow_json["14"]["inputs"]["image"] = uploaded_img_name
-            workflow_json["32"]["inputs"]["string"] = f"StyleEngine_Mesh_{int(time.time())}"
-            workflow_json["37"]["inputs"]["seed"] = int(time.time() * 1000) % 999999999999
-            
-            # Apply quality parameters
-            workflow_json["37"]["inputs"]["steps"] = params['mesh_steps']
-            workflow_json["9"]["inputs"]["octree_resolution"] = params['octree_resolution']
-            workflow_json["9"]["inputs"]["num_chunks"] = params['num_chunks']
-            workflow_json["30"]["inputs"]["value"] = params['max_faces']
-            
-            output_name = workflow_json["32"]["inputs"]["string"]
-            print(f"[Create Object] ✓ Quality: {quality}")
-            print(f"[Create Object] ✓ Mesh steps: {params['mesh_steps']}, Octree: {params['octree_resolution']}, Max faces: {params['max_faces']}")
-            print(f"[Create Object] ✓ Node 14 (image): {uploaded_img_name}")
-            print(f"[Create Object] ✓ Node 32 (output): {output_name}")
-            
-            # Step 5: Submit workflow (NON-BLOCKING)
-            print(f"[Create Object] Step 5: Submitting workflow to server...")
-            self.report({'INFO'}, f"Generating 3D mesh from current_ai.png... (check console)")
-            
-            result = server_client.queue_prompt(workflow_json)
-            prompt_id = result['prompt_id']
-            print(f"[Create Object] ✓ Queued: {prompt_id}")
-            print(f"[Create Object] ⏳ Processing in background (1-2 minutes)...")
-            
-            # Capture variables for callback
-            temp_dir = Path(tempfile.gettempdir()) / "styleengine_create"
-            temp_dir.mkdir(parents=True, exist_ok=True)
-            download_path = temp_dir / f"{output_name}.glb"
-            
-            # Step 6: Start background polling
-            from . import runcomfy_polling
-            
-            def on_create_object_complete(success, result=None, error=None, workflow_type=None):
-                """Called when mesh generation completes"""
-                print(f"[Create Object] ============================================")
-                print(f"[Create Object] GENERATION COMPLETE")
-                print(f"[Create Object] ============================================")
-                
-                if not success:
-                    print(f"[Create Object] ❌ Generation failed: {error}")
-                    return
-                
-                try:
-                    # Find output GLB from Node 44 (saves untextured mesh)
-                    print(f"[Create Object] Step 6: Downloading mesh...")
-                    outputs = result.get('outputs', {})
-                    print(f"[Create Object] DEBUG: Available nodes: {list(outputs.keys())}")
-                    
-                    output_filename = None
-                    subfolder = ""
-                    
-                    # Node 44 (Hy3D21ExportMesh) saves the mesh
-                    # Check if it appears in outputs with 'gltf' key
-                    if '44' in outputs:
-                        node_44_output = outputs['44']
-                        print(f"[Create Object] DEBUG: Node 44 output: {json.dumps(node_44_output, indent=2)}")
-                        
-                        if isinstance(node_44_output, dict) and 'gltf' in node_44_output:
-                            files = node_44_output['gltf']
-                            if files and isinstance(files, list) and len(files) > 0:
-                                file_info = files[0]
-                                output_filename = file_info.get('filename') if isinstance(file_info, dict) else file_info
-                                subfolder = file_info.get('subfolder', '') if isinstance(file_info, dict) else ''
-                                print(f"[Create Object] ✓ Found GLB: {output_filename}")
-                    
-                    if not output_filename:
-                        # Fallback: construct from Node 32
-                        output_filename = f"{output_name}_00001_.glb"
-                        print(f"[Create Object] ⚠️ Using constructed filename: {output_filename}")
-                    
-                    # Download
-                    download_success = server_client.download_mesh(
-                        output_filename,
-                        str(download_path),
-                        subfolder=subfolder,
-                        file_type="output"
-                    )
-                    
-                    if not download_success:
-                        print(f"[Create Object] ❌ Download failed")
-                        return
-                    
-                    print(f"[Create Object] ✓ Downloaded: {download_path.name}")
-                    
-                    # Step 7: Import into Blender
-                    print(f"[Create Object] Step 7: Importing mesh into scene...")
-                    
-                    original_selected = list(bpy.context.selected_objects)
-                    
-                    # Import GLB
-                    bpy.ops.import_scene.gltf(filepath=str(download_path))
-                    
-                    # Get newly imported
-                    newly_imported = [o for o in bpy.context.selected_objects if o not in original_selected]
-                    
-                    if newly_imported:
-                        new_obj = newly_imported[0]
-                        new_obj.name = f"AI_Mesh_{int(time.time())}"
-                        
-                        # Position at world origin
-                        new_obj.location = (0, 0, 0)
-                        
-                        print(f"[Create Object] ✓ Imported: {new_obj.name}")
-                        print(f"[Create Object] ✅ 3D mesh created from AI!")
-                    else:
-                        print(f"[Create Object] ⚠️ Mesh imported but not found")
-                    
-                    print(f"[Create Object] ============================================")
-                    print(f"[Create Object] MESH GENERATION COMPLETE")
-                    print(f"[Create Object] ============================================")
-                    
-                except Exception as e:
-                    print(f"[Create Object] ❌ Error: {e}")
-                    import traceback
-                    traceback.print_exc()
-            
-            # Register for polling
-            runcomfy_polling.RunComfyPoller.start_polling(
-                deployment_id='server',
-                request_id=prompt_id,
-                callback=on_create_object_complete,
-                workflow_type='create_object'
-            )
-            
-            print(f"[Create Object] ✅ Submitted! Processing in background...")
-            print(f"[Create Object] ============================================")
-            
-            return {'FINISHED'}
-            
-        except Exception as e:
-            self.report({'ERROR'}, f"Create Object failed: {e}")
-            print(f"[Create Object] ❌ Error: {e}")
-            import traceback
-            traceback.print_exc()
-            return {'CANCELLED'}
+        self.report({'INFO'}, "Create Object - Coming Soon")
+        return {'FINISHED'}
 
 
 class WM_OT_CreateTexturedObject(Operator):
-    """Create textured 3D mesh from current_ai.png using Hunyuan 3D 2.1"""
+    """Create textured 3D object from AI generation"""
     bl_idname = "style_engine.create_textured_object"
     bl_label = "Create Textured Object"
-    bl_description = "Generate a new 3D mesh WITH UV-mapped textures from current_ai.png"
+    bl_description = "Generate a new 3D mesh with textures using AI (Coming Soon)"
     bl_options = {'REGISTER', 'UNDO'}
     
     def execute(self, context):
-        from . import workspace_setup
-        from . import runcomfy_deployment
-        from pathlib import Path
-        import tempfile
-        import time
-        
-        # Check if in GCS mode
-        if not runcomfy_deployment.is_server_mode():
-            self.report({'ERROR'}, "Create Textured Object requires GCS mode")
-            print("[Create Textured] ❌ Feature requires GCS backend mode")
-            return {'CANCELLED'}
-        
-        print(f"[Create Textured] ============================================")
-        print(f"[Create Textured] STARTING TEXTURED MESH GENERATION")
-        print(f"[Create Textured] ============================================")
-        
-        try:
-            # Step 1: Get current_ai.png
-            print(f"[Create Textured] Step 1: Getting reference image...")
-            temp_img_dir = workspace_setup.get_temp_directory(context)
-            current_ai_path = temp_img_dir / "current_ai.png"
-            
-            if not current_ai_path.exists():
-                self.report({'ERROR'}, "current_ai.png not found. Generate an image first.")
-                print(f"[Create Textured] ❌ current_ai.png not found")
-                return {'CANCELLED'}
-            
-            print(f"[Create Textured] ✓ Found: {current_ai_path.name}")
-            
-            # Step 2: Upload image
-            print(f"[Create Textured] Step 2: Uploading image to server...")
-            server_client = runcomfy_deployment.get_server_client()
-            img_upload = server_client.upload_image(str(current_ai_path), overwrite=True)
-            uploaded_img_name = img_upload['name']
-            print(f"[Create Textured] ✓ Uploaded as: {uploaded_img_name}")
-            
-            # Step 3: Load workflow
-            print(f"[Create Textured] Step 3: Loading workflow...")
-            addon_dir = Path(__file__).parent
-            workflow_path = addon_dir / "workflows" / "objectCreateTexturedObject.json"
-            
-            if not workflow_path.exists():
-                self.report({'ERROR'}, f"Workflow not found: {workflow_path.name}")
-                print(f"[Create Textured] ❌ Workflow missing")
-                return {'CANCELLED'}
-            
-            import json
-            with open(workflow_path, 'r') as f:
-                workflow_json = json.load(f)
-            
-            print(f"[Create Textured] ✓ Loaded workflow: {workflow_path.name}")
-            
-            # Step 4: Override nodes with quality parameters
-            print(f"[Create Textured] Step 4: Configuring workflow...")
-            
-            # Get quality parameters
-            style_props = context.scene.style_engine_props
-            quality = style_props.object_quality if hasattr(style_props, 'object_quality') else 'BALANCED'
-            params = get_quality_params(quality)
-            
-            workflow_json["14"]["inputs"]["image"] = uploaded_img_name
-            workflow_json["32"]["inputs"]["string"] = f"StyleEngine_Textured_{int(time.time())}"
-            workflow_json["37"]["inputs"]["seed"] = int(time.time() * 1000) % 999999999999
-            
-            # Apply quality parameters (mesh + texture)
-            workflow_json["37"]["inputs"]["steps"] = params['mesh_steps']
-            workflow_json["9"]["inputs"]["octree_resolution"] = params['octree_resolution']
-            workflow_json["9"]["inputs"]["num_chunks"] = params['num_chunks']
-            workflow_json["30"]["inputs"]["value"] = params['max_faces']
-            workflow_json["20"]["inputs"]["view_size"] = params['view_size']
-            workflow_json["20"]["inputs"]["steps"] = params['texture_steps']
-            workflow_json["20"]["inputs"]["texture_size"] = params['texture_size']
-            
-            output_name = workflow_json["32"]["inputs"]["string"]
-            print(f"[Create Textured] ✓ Quality: {quality}")
-            print(f"[Create Textured] ✓ Mesh: steps={params['mesh_steps']}, octree={params['octree_resolution']}, faces={params['max_faces']}")
-            print(f"[Create Textured] ✓ Texture: view={params['view_size']}, steps={params['texture_steps']}, size={params['texture_size']}")
-            print(f"[Create Textured] ✓ Node 14 (image): {uploaded_img_name}")
-            print(f"[Create Textured] ✓ Node 32 (output): {output_name}")
-            
-            # Step 5: Submit
-            print(f"[Create Textured] Step 5: Submitting workflow...")
-            self.report({'INFO'}, f"Generating textured 3D mesh... (2-3 minutes)")
-            
-            result = server_client.queue_prompt(workflow_json)
-            prompt_id = result['prompt_id']
-            print(f"[Create Textured] ✓ Queued: {prompt_id}")
-            print(f"[Create Textured] ⏳ Processing (includes mesh + texture generation)...")
-            
-            # Capture variables
-            temp_dir = Path(tempfile.gettempdir()) / "styleengine_create"
-            temp_dir.mkdir(parents=True, exist_ok=True)
-            download_path = temp_dir / f"{output_name}.glb"
-            
-            # Step 6: Start polling
-            from . import runcomfy_polling
-            
-            def on_create_textured_complete(success, result=None, error=None, workflow_type=None):
-                """Called when textured mesh generation completes - schedules heavy import work"""
-                if not success:
-                    print(f"[Create Textured] ❌ Generation failed: {error}")
-                    return
-                
-                print(f"[Create Textured] ✓ Generation complete! Scheduling download/import...")
-                
-                # Schedule heavy operations separately (keeps callback fast!)
-                def do_download_and_import():
-                    """Heavy operations - download and import GLB"""
-                    try:
-                        print(f"[Create Textured] ============================================")
-                        print(f"[Create Textured] Starting download & import...")
-                        print(f"[Create Textured] ============================================")
-                        
-                        outputs = result.get('outputs', {})
-                        output_filename = None
-                        subfolder = ""
-                        
-                        # Get filename from Node 62
-                        if '62' in outputs:
-                            node_62_output = outputs['62']
-                            if isinstance(node_62_output, dict) and 'result' in node_62_output:
-                                result_data = node_62_output['result']
-                                if isinstance(result_data, list) and len(result_data) > 0:
-                                    full_path = result_data[0]
-                                    if full_path and full_path.endswith('.glb'):
-                                        if '/' in full_path:
-                                            subfolder, output_filename = full_path.rsplit('/', 1)
-                                        else:
-                                            output_filename = full_path
-                                        print(f"[Create Textured] ✓ Found: {subfolder}/{output_filename}" if subfolder else f"✓ Found: {output_filename}")
-                        
-                        if not output_filename:
-                            print(f"[Create Textured] ❌ No GLB found!")
-                            return None
-                        
-                        # Download
-                        print(f"[Create Textured] Downloading...")
-                        download_success = server_client.download_mesh(output_filename, str(download_path), subfolder=subfolder, file_type="output")
-                        
-                        if not download_success:
-                            print(f"[Create Textured] ❌ Download failed")
-                            return None
-                        
-                        print(f"[Create Textured] ✓ Downloaded ({download_path.stat().st_size / 1024:.1f} KB)")
-                        
-                        # Import (heavy operation)
-                        print(f"[Create Textured] Importing...")
-                        original_selected = list(bpy.context.selected_objects)
-                        bpy.ops.import_scene.gltf(filepath=str(download_path))
-                        newly_imported = [o for o in bpy.context.selected_objects if o not in original_selected]
-                        
-                        if newly_imported:
-                            new_obj = newly_imported[0]
-                            new_obj.name = f"AI_Textured_{int(time.time())}"
-                            new_obj.location = (0, 0, 0)
-                            print(f"[Create Textured] ✅ Textured 3D mesh created: {new_obj.name}")
-                        
-                        print(f"[Create Textured] ============================================")
-                        print(f"[Create Textured] COMPLETE!")
-                        print(f"[Create Textured] ============================================")
-                        
-                    except Exception as e:
-                        print(f"[Create Textured] ❌ Error: {e}")
-                        import traceback
-                        traceback.print_exc()
-                    
-                    return None  # Don't repeat timer
-                
-                # Schedule heavy work separately (keeps polling callback fast!)
-                bpy.app.timers.register(do_download_and_import, first_interval=0.1)
-            
-            # Register polling
-            runcomfy_polling.RunComfyPoller.start_polling(
-                deployment_id='server',
-                request_id=prompt_id,
-                callback=on_create_textured_complete,
-                workflow_type='create_textured'
-            )
-            
-            print(f"[Create Textured] ✅ Submitted! Processing in background...")
-            print(f"[Create Textured] ============================================")
-            
-            return {'FINISHED'}
-            
-        except Exception as e:
-            self.report({'ERROR'}, f"Create Textured Object failed: {e}")
-            print(f"[Create Textured] ❌ Error: {e}")
-            import traceback
-            traceback.print_exc()
-            return {'CANCELLED'}
-
-
-class WM_OT_OpenGenerationSettings(Operator):
-    """Open generation settings in persistent floating window"""
-    bl_idname = "style_engine.open_generation_settings"
-    bl_label = "Generation Settings"
-    bl_description = "Open persistent settings panel (stays open for tweaking parameters)"
-    bl_options = {'REGISTER'}
-    
-    def execute(self, context):
+        self.report({'INFO'}, "Create Textured Object - Coming Soon")
         return {'FINISHED'}
-    
-    def invoke(self, context, event):
-        # Open as floating window (stays until closed)
-        return context.window_manager.invoke_popup(self, width=420)
-    
-    def draw(self, context):
-        layout = self.layout
-        style_props = context.scene.style_engine_props
-        
-        layout.label(text="AI Generation Settings", icon='SETTINGS')
-        layout.separator()
-        
-        # Influence sliders
-        influence_box = layout.box()
-        influence_box.label(text="Influences", icon='SMOOTHCURVE')
-        influence_col = influence_box.column(align=True)
-        influence_col.prop(style_props, "silhouette_influence", text="Silhouette", slider=True)
-        influence_col.prop(style_props, "depth_influence", text="Depth", slider=True)
-        influence_col.prop(style_props, "texture_influence", text="Influence", slider=True)
-        
-        layout.separator()
-        
-        # Steps
-        layout.label(text="Steps", icon='SORTTIME')
-        layout.prop(style_props, "steps", text="", slider=True)
-        
-        layout.separator()
-        
-        # Render Quality
-        quality_box = layout.box()
-        quality_box.label(text="Render Quality", icon='SHADING_RENDERED')
-        quality_box.prop(style_props, "render_quality", expand=True)
-        
-        layout.separator()
-        
-        # LoRa Configuration
-        lora_box = layout.box()
-        lora_box.label(text="LoRa", icon='MODIFIER')
-        lora_box.prop(style_props, "lora_enabled", text="Use LoRa", toggle=True)
-        
-        if style_props.lora_enabled:
-            lora_box.separator()
-            lora_box.label(text="LoRa 1:", icon='FILE')
-            lora_box.prop(style_props, "lora_name", text="")
-            lora_box.separator()
-            lora_box.label(text="Strength 1:", icon='FORCE_FORCE')
-            lora_box.prop(style_props, "lora_strength_model", text="", slider=True)
-            
-            lora_box.separator()
-            lora_box.prop(style_props, "lora2_enabled", text="Use LoRa 2", toggle=True)
-            
-            if style_props.lora2_enabled:
-                lora_box.separator()
-                lora_box.label(text="LoRa 2:", icon='FILE')
-                lora_box.prop(style_props, "lora2_name", text="")
-                lora_box.separator()
-                lora_box.label(text="Strength 2:", icon='FORCE_FORCE')
-                lora_box.prop(style_props, "lora2_strength_model", text="", slider=True)
-            
-            # Show active summary
-            if style_props.lora_name != 'NONE' or (style_props.lora2_enabled and style_props.lora2_name != 'NONE'):
-                lora_box.separator()
-                active_loras = []
-                if style_props.lora_name != 'NONE':
-                    active_loras.append(f"L1: {style_props.lora_name.replace('.safetensors', '')[:15]}")
-                if style_props.lora2_enabled and style_props.lora2_name != 'NONE':
-                    active_loras.append(f"L2: {style_props.lora2_name.replace('.safetensors', '')[:15]}")
-                
-                info_row = lora_box.row()
-                info_row.scale_y = 0.8
-                info_row.label(text=" + ".join(active_loras), icon='CHECKMARK')
-        
-        layout.separator()
-        
-        # Autogenerate toggle
-        row = layout.row()
-        row.scale_y = 1.5
-        row.prop(style_props, "auto_generate", text="Autogenerate", toggle=True, icon='FILE_REFRESH')
 
 
 class WM_OT_SetVisualization(Operator):
@@ -1046,14 +483,6 @@ class STYLEENGINE_MT_pie_main(Menu):
                      text="Create Textured Object", 
                      icon='SHADING_TEXTURE')
         
-        col.separator()
-        
-        # 3D Quality selector
-        quality_box = col.box()
-        quality_col = quality_box.column(align=True)
-        quality_col.label(text="3D Quality", icon='MODIFIER')
-        quality_col.prop(style_props, "object_quality", text="")
-        
         # ═══════════════════════════════════════════════════
         # Position 1: LEFT (WEST) - Setup Workspace
         # ═══════════════════════════════════════════════════
@@ -1175,59 +604,31 @@ class STYLEENGINE_MT_pie_main(Menu):
         if style_props.lora_enabled:
             lora_col.separator(factor=0.5)
             
-            # LoRa 1
-            lora_col.label(text="LoRa 1:", icon='FILE')
+            # LoRa dropdown with refresh button
+            lora_col.label(text="Model:", icon='FILE')
             refresh_row = lora_col.row(align=True)
             refresh_row.prop(style_props, "lora_name", text="")
             refresh_row.operator("style_engine.refresh_lora_list", text="", icon='FILE_REFRESH')
             
-            lora_col.separator(factor=0.3)
-            
-            # LoRa 1 Strength
-            lora_col.label(text="Strength 1:", icon='FORCE_FORCE')
-            lora_col.prop(style_props, "lora_strength_model", text="", slider=True)
-            
             lora_col.separator(factor=0.5)
             
-            # LoRa 2 Enable
-            lora_col.prop(style_props, "lora2_enabled", text="Use LoRa 2", toggle=True)
-            
-            # Show LoRa 2 controls if enabled
-            if style_props.lora2_enabled:
-                lora_col.separator(factor=0.3)
-                
-                # LoRa 2 dropdown
-                lora_col.label(text="LoRa 2:", icon='FILE')
-                lora_col.prop(style_props, "lora2_name", text="")
-                
-                lora_col.separator(factor=0.3)
-                
-                # LoRa 2 Strength
-                lora_col.label(text="Strength 2:", icon='FORCE_FORCE')
-                lora_col.prop(style_props, "lora2_strength_model", text="", slider=True)
+            # Strength slider
+            lora_col.label(text="Strength:", icon='FORCE_FORCE')
+            lora_col.prop(style_props, "lora_strength_model", 
+                          text="", 
+                          slider=True)
             
             lora_col.separator(factor=0.3)
             
-            # Show active LoRas summary
-            active_loras = []
+            # Show active LoRa
             if style_props.lora_name != 'NONE':
-                active_loras.append(f"L1: {style_props.lora_name.replace('.safetensors', '')[:12]}")
-            if style_props.lora2_enabled and style_props.lora2_name != 'NONE':
-                active_loras.append(f"L2: {style_props.lora2_name.replace('.safetensors', '')[:12]}")
-            
-            if active_loras:
                 info_row = lora_col.row()
                 info_row.scale_y = 0.7
-                info_row.label(text=" + ".join(active_loras), icon='CHECKMARK')
-        
-        col.separator()
-        
-        # Pin Settings button
-        row = col.row()
-        row.scale_y = 1.3
-        row.operator("style_engine.open_generation_settings", 
-                     text="📌 Pin Settings", 
-                     icon='PINNED')
+                # Truncate long names
+                display_name = style_props.lora_name.replace('.safetensors', '')
+                if len(display_name) > 20:
+                    display_name = display_name[:17] + "..."
+                info_row.label(text=f"Active: {display_name}", icon='CHECKMARK')
         
         # ═══════════════════════════════════════════════════
         # Position 3: RIGHT (EAST) - Visualization Type
@@ -1346,7 +747,6 @@ classes = (
     WM_OT_UVTexture,
     WM_OT_CreateObject,
     WM_OT_CreateTexturedObject,
-    WM_OT_OpenGenerationSettings,
     WM_OT_SetVisualization,
     WM_OT_SetRenderQuality,
     WM_OT_PrevGeneration,
