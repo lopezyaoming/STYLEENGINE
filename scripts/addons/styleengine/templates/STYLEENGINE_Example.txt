@@ -1,0 +1,6 @@
+# Keywords
+<k>cinematic illustration, concept art, matte painting, highly detailed, 8k</k>
+# Prompt
+<p>futuristic cyberpunk city at night with neon lights reflecting off wet streets, towering skyscrapers with holographic advertisements, flying vehicles in the distance</p>
+# Negative Prompt
+<n>blurry, low quality, watermark, deformed, oversaturated, amateur, cluttered</n>

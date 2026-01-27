@@ -196,7 +196,7 @@ def parse_credentials_file(file_path=None):
 
 def get_or_create_prompt_text():
     """
-    Get or create the Style Engine prompt text block.
+    Get or create the Style Engine prompt text block with default template.
     This allows users to write long, multi-line prompts in Blender's text editor.
     
     Returns:
@@ -208,8 +208,13 @@ def get_or_create_prompt_text():
         # Create new text block
         text = bpy.data.texts.new(text_name)
         
-        # Start with blank prompt - user writes their own
-        # Prompt auto-syncs on generation
+        # Write default template with HTML-style tags
+        text.write("# Keywords\n")
+        text.write("<k></k>\n")
+        text.write("# Prompt\n")
+        text.write("<p></p>\n")
+        text.write("# Negative Prompt\n")
+        text.write("<n></n>\n")
         
         print(f"[Style Engine] Created prompt text block: {text_name}")
     else:
@@ -428,160 +433,97 @@ def build_reference_workflow(context, base_image_path, prompt):
 
 
 # ================================================================
-#    Prompt Builder - Template-Based Prompt System
+#    Prompt Builder - HTML-Style Tag System
 # ================================================================
 
 def parse_prompt_tags(text):
     """
-    Parse structured prompt tags from text using comment-style format.
+    Parse HTML-style tags from text.
     
     Expected format:
-        # Tag Name:
-        content here
-        
-    Example:
-        # Subject:
-        futuristic city
-        
-        # Style:
-        cinematic illustration
-        
-        # Negative Prompt:
-        blurry, low quality
+        <k>keywords here</k>
+        <p>main prompt here</p>
+        <n>negative prompt here</n>
     
-    Supported tags:
-    - subject: Main subject or focal point
-    - details: Specific details or actions
-    - environment: Background setting
-    - mood: Mood or atmosphere
-    - style: Art style and medium
-    - camera: Camera angle/perspective
-    - lighting: Lighting conditions
-    - negative_prompt: Things to avoid (can be written as "Negative Prompt" with space)
+    Tags:
+    - <k></k>: Keywords (optional, prepended to prompt)
+    - <p></p>: Main prompt (required)
+    - <n></n>: Negative prompt (optional)
     
     Args:
-        text (str): Text containing comment-style tags
+        text (str): Text containing HTML-style tags
     
     Returns:
-        dict: Parsed values for each tag
+        dict: {'keywords': str, 'prompt': str, 'negative': str}
     """
     import re
     
     # Default empty values
     parsed = {
-        'subject': '',
-        'details': '',
-        'environment': '',
-        'mood': '',
-        'style': '',
-        'camera': '',
-        'lighting': '',
-        'negative_prompt': ''
+        'keywords': '',
+        'prompt': '',
+        'negative': ''
     }
     
-    # Pattern: # Tag Name:\n content (until next # or end)
-    # Matches:
-    #   # Subject:
-    #   content here
-    # Captures: ("Subject", "content here")
-    # (?=\n#|\Z) is a lookahead for next header or end of string
-    # \s* allows flexible spacing around the colon
-    pattern = r'#\s*([A-Za-z]+(?:\s+[A-Za-z]+)*)\s*:\s*\n(.*?)(?=\n#|\Z)'
+    # Pattern: <tag>content</tag> (case-insensitive, multi-line)
     
-    matches = re.findall(pattern, text, re.DOTALL | re.IGNORECASE)
+    # Extract keywords (<k>...</k>)
+    k_match = re.search(r'<k>(.*?)</k>', text, re.DOTALL | re.IGNORECASE)
+    if k_match:
+        # Clean up: strip whitespace, normalize spaces
+        parsed['keywords'] = ' '.join(k_match.group(1).strip().split())
     
-    for tag_name, content in matches:
-        # Convert "Negative Prompt" -> "negative_prompt"
-        tag_lower = tag_name.lower().replace(' ', '_')
-        
-        if tag_lower in parsed:
-            # Clean up content: strip whitespace, normalize spaces
-            cleaned = ' '.join(content.strip().split())
-            parsed[tag_lower] = cleaned
+    # Extract prompt (<p>...</p>)
+    p_match = re.search(r'<p>(.*?)</p>', text, re.DOTALL | re.IGNORECASE)
+    if p_match:
+        # Clean up: strip whitespace, normalize spaces
+        parsed['prompt'] = ' '.join(p_match.group(1).strip().split())
+    
+    # Extract negative (<n>...</n>)
+    n_match = re.search(r'<n>(.*?)</n>', text, re.DOTALL | re.IGNORECASE)
+    if n_match:
+        # Clean up: strip whitespace, normalize spaces
+        parsed['negative'] = ' '.join(n_match.group(1).strip().split())
     
     return parsed
 
 
 def build_prompt_from_template(parsed_tags):
     """
-    Build a coherent prompt from parsed tags using simple connectors.
+    Build final prompt from parsed tags.
     
-    This is a SIMPLE, PREDICTABLE function with NO external dependencies.
-    Just plain string concatenation with basic logic.
-    
-    Template structure:
-    [Style] of [Subject] [Details], [Environment]. [Mood]. [Camera]; [Lighting].
+    Logic: Keywords + Prompt = Final Positive Prompt
     
     Args:
-        parsed_tags (dict): Dictionary with parsed tag values
+        parsed_tags (dict): Dictionary with 'keywords', 'prompt', 'negative'
     
     Returns:
         tuple: (positive_prompt: str, negative_prompt: str)
     """
-    # Extract values
-    subject = parsed_tags.get('subject', '').strip()
-    details = parsed_tags.get('details', '').strip()
-    environment = parsed_tags.get('environment', '').strip()
-    mood = parsed_tags.get('mood', '').strip()
-    style = parsed_tags.get('style', '').strip()
-    camera = parsed_tags.get('camera', '').strip()
-    lighting = parsed_tags.get('lighting', '').strip()
-    negative = parsed_tags.get('negative_prompt', '').strip()
+    keywords = parsed_tags.get('keywords', '').strip()
+    prompt = parsed_tags.get('prompt', '').strip()
+    negative = parsed_tags.get('negative', '').strip()
     
-    # Build prompt parts
+    # Concatenate keywords + prompt (with comma separator if both exist)
     parts = []
+    if keywords:
+        parts.append(keywords)
+    if prompt:
+        parts.append(prompt)
     
-    # 1. Style + Subject (core)
-    if style and subject:
-        parts.append(f"{style} of {subject}")
-    elif subject:
-        parts.append(subject)
-    elif style:
-        parts.append(style)
+    # Join with comma + space
+    final_prompt = ', '.join(parts) if parts else ''
     
-    # 2. Add details if present
-    if details:
-        if parts:
-            parts[-1] += f" with {details}"
-        else:
-            parts.append(details)
-    
-    # 3. Add environment
-    if environment:
-        if parts:
-            parts[-1] += f", in {environment}"
-        else:
-            parts.append(environment)
-    
-    # Join main description
-    description = parts[0] if parts else ""
-    
-    # 4. Add mood as separate sentence
-    if mood:
-        description += f". {mood.capitalize()} atmosphere"
-    
-    # 5. Add camera perspective
-    if camera:
-        description += f". {camera.capitalize()} perspective"
-    
-    # 6. Add lighting
-    if lighting:
-        description += f"; lit by {lighting}"
-    
-    # Final cleanup: ensure ends with period
-    if description and not description.endswith('.'):
-        description += '.'
-    
-    return (description, negative)
+    return (final_prompt, negative)
 
 
 def process_prompt_builder(text):
     """
     Main entry point for prompt builder.
-    Parses tags and builds prompt.
+    Parses HTML-style tags and builds prompt.
     
     Args:
-        text (str): Raw text from text editor (with tags)
+        text (str): Raw text from text editor (with HTML tags)
     
     Returns:
         tuple: (positive_prompt: str, negative_prompt: str)
@@ -590,17 +532,20 @@ def process_prompt_builder(text):
     if not text or not text.strip():
         return ("", "")
     
-    # Check if text contains tags
-    if '<' not in text or '>' not in text:
-        # No tags found, return as-is (fallback to normal mode)
+    # Check if text contains HTML-style tags
+    text_lower = text.lower()
+    has_tags = ('<k>' in text_lower or '<p>' in text_lower or '<n>' in text_lower)
+    
+    if not has_tags:
+        # No tags found, return as-is (fallback to raw text)
         return (text.strip(), "")
     
     # Parse tags
     parsed = parse_prompt_tags(text)
     
     # Check if we parsed anything meaningful
-    if not any(parsed.values()):
-        # No tags matched, return original text
+    if not parsed['keywords'] and not parsed['prompt']:
+        # No content in tags, return original text
         return (text.strip(), "")
     
     # Build prompt

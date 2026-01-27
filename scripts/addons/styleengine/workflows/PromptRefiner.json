@@ -1,0 +1,205 @@
+{
+  "1": {
+    "inputs": {
+      "STRING": "You are a Prompt Agent specialized in generating high-quality image prompts. You accept any level of user input — from single words to detailed descriptions — and consistently transform it into a structured, coherent, and visually rich prompt of approximately 50–100 words. You always clarify subject, medium, style, composition, lighting, palette, material detail, and atmosphere in natural language. You output a single polished prompt suitable for immediate image generation.",
+      "max_subtasks": 3,
+      "config": [
+        "3",
+        0
+      ],
+      "rulesets": [
+        "6",
+        0
+      ],
+      "input_string": [
+        "7",
+        0
+      ]
+    },
+    "class_type": "Griptape Create: Agent",
+    "_meta": {
+      "title": "Griptape Create: Agent"
+    }
+  },
+  "3": {
+    "inputs": {
+      "base_url": "http://127.0.0.1",
+      "port": "11434",
+      "model": "gemma3:4b",
+      "max_attempts_on_fail": 2,
+      "temperature": 0.25,
+      "seed": 2048,
+      "use_native_tools": true,
+      "max_tokens": -1,
+      "min_p": 0.1,
+      "top_k": 40,
+      "keep_alive": 240,
+      "embedding_model": "",
+      "Download Ollama": null
+    },
+    "class_type": "Griptape Agent Config: Ollama Drivers",
+    "_meta": {
+      "title": "Griptape Agent Config: Ollama Drivers"
+    }
+  },
+  "4": {
+    "inputs": {
+      "name": "STATE THE SUBJECT FIRST",
+      "rules": "Start your prompt by clearly stating the main subject, and if it helps, what the subject is doing or what situation it is in. This gives the model a stable first anchor and tells it what must exist in the image. Keeping this first clause literal and unambiguous pays off enormously.\n\nEXAMPLES:\na teenage girl reading under a streetlamp\na folding cardboard lounge chair\na flooded coastal highway at dawn"
+    },
+    "class_type": "Griptape Create: Rules",
+    "_meta": {
+      "title": "Griptape Create: Rules"
+    }
+  },
+  "6": {
+    "inputs": {
+      "rules_1": [
+        "4",
+        0
+      ],
+      "rules_2": [
+        "8",
+        0
+      ],
+      "rules_3": [
+        "9",
+        0
+      ],
+      "rules_4": [
+        "10",
+        0
+      ],
+      "rules_5": [
+        "11",
+        0
+      ],
+      "rules_6": [
+        "12",
+        0
+      ],
+      "rules_7": [
+        "13",
+        0
+      ],
+      "rules_8": [
+        "18",
+        0
+      ]
+    },
+    "class_type": "Griptape Combine: Rules List",
+    "_meta": {
+      "title": "Griptape Combine: Rules List"
+    }
+  },
+  "7": {
+    "inputs": {
+      "text": "frodo baggins entering mordor"
+    },
+    "class_type": "Text Multiline",
+    "_meta": {
+      "title": "Input String"
+    }
+  },
+  "8": {
+    "inputs": {
+      "name": "DEFINE MEDIUM + STYLE IMMEDIATELY AFTER",
+      "rules": "After naming the subject, describe the medium and style lane you want the model to operate in. This invites SDXL to make high-quality assumptions about texture, lighting conventions, edge treatment, color treatment, and photographic vs. illustrative choices.\n\nEXAMPLES:\n\nproduct photo, ikea catalog style\nAnime cel-shaded, ghibli-inspired\n3D render, octane style\nfood photography, editorial magazine style"
+    },
+    "class_type": "Griptape Create: Rules",
+    "_meta": {
+      "title": "Griptape Create: Rules"
+    }
+  },
+  "9": {
+    "inputs": {
+      "name": "Specify how the scene is framed and viewed",
+      "rules": "Provide camera or composition information so the model knows how to frame the subject in space. Information about shot type, viewing angle, or lens length guides the image model toward a spatial arrangement that feels intentional and coherent.\n\nEXAMPLES:\n\n… isometric view, centered composition\n\n… close-up portrait, 3/4 view, 50mm lens\n\n… wide shot, eye-level camera\n\n… bird's-eye view over the city\n\n… top-down shot of the table"
+    },
+    "class_type": "Griptape Create: Rules",
+    "_meta": {
+      "title": "Griptape Create: Rules"
+    }
+  },
+  "10": {
+    "inputs": {
+      "name": "Describe how the scene is lit and what atmosphere it inhabits",
+      "rules": "Lighting and color palette radically shape the mood and realism of the image. Stating these explicitly allows the model to fill in the rest with high consistency.\n\nThink in terms of time of day, type of artificial or natural light, and overall color temperature.\n\noft diffused daylight, warm neutral palette\n\n… rim lighting from neon signage, cool magenta-blue palette\n\n… golden hour sunlight across the landscape\n\n… overcast sky, muted concrete tones\n\n… studio flash lighting, high saturation"
+    },
+    "class_type": "Griptape Create: Rules",
+    "_meta": {
+      "title": "Griptape Create: Rules"
+    }
+  },
+  "11": {
+    "inputs": {
+      "name": "Add concrete material and detail descriptors",
+      "rules": "Describe the physical character of materials, surfaces, and small details. Nouns and specific textures give the model something to chew on — they are powerful levers for realism and specificity.Good descriptors often relate to material science, fabrication, or tactility.\nExamples:\n\n… corrugated cardboard texture, polished metal fasteners\n\n… wool sweater texture, messy hair, freckles\n\n… exposed steel beams, glass reflections\n\n… glossy noodles, sesame seeds, steam rising\n\n… smooth stone, fractured cliffs, drifting snow"
+    },
+    "class_type": "Griptape Create: Rules",
+    "_meta": {
+      "title": "Griptape Create: Rules"
+    }
+  },
+  "12": {
+    "inputs": {
+      "name": "Keep the overall prompt medium in length",
+      "rules": "Aim for a comfortable band where you’re giving enough structure for SDXL to make a clear decision, but not so much that the model starts blending many ideas at once. A length around 20–60 words tends to produce strong, legible images.\n\nThink of it as writing one richly descriptive sentence, not a paragraph and not a fragment."
+    },
+    "class_type": "Griptape Create: Rules",
+    "_meta": {
+      "title": "Griptape Create: Rules"
+    }
+  },
+  "13": {
+    "inputs": {
+      "name": "Keep the overall prompt medium in length",
+      "rules": "When you want to evoke a mood or emotional tone, describe the physical circumstances that would communicate that mood in the real world. Diffusion models are excellent at reconstructing mood from clues in lighting, emptiness, weather, palette, gesture, and spatial arrangement.\nExamples:\n\n“lonely city” → empty wide streets, overcast sky, muted palette\n\n“cozy bedroom” → warm lamp light, soft blankets, cluttered desk, golden palette\n\n“ominous marsh” → thick fog, stagnant water, dark reeds, cool desaturated palette"
+    },
+    "class_type": "Griptape Create: Rules",
+    "_meta": {
+      "title": "Griptape Create: Rules"
+    }
+  },
+  "17": {
+    "inputs": {
+      "STRING": "",
+      "max_subtasks": 3,
+      "agent": [
+        "1",
+        1
+      ],
+      "input_string": [
+        "7",
+        0
+      ]
+    },
+    "class_type": "Griptape Run: Agent",
+    "_meta": {
+      "title": "Griptape Run: Agent"
+    }
+  },
+  "18": {
+    "inputs": {
+      "name": "Keep the overall prompt medium in length",
+      "rules": "Always output exclusively the text prompt as a single, continuous string. Never add any conversational elements, markdown formatting or titles."
+    },
+    "class_type": "Griptape Create: Rules",
+    "_meta": {
+      "title": "Griptape Create: Rules"
+    }
+  },
+  "19": {
+    "inputs": {
+      "STRING": "",
+      "INPUT": [
+        "17",
+        0
+      ]
+    },
+    "class_type": "Griptape Display: Text",
+    "_meta": {
+      "title": "Griptape Display: Text"
+    }
+  }
+}

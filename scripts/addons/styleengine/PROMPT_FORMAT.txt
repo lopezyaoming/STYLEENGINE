@@ -1,0 +1,118 @@
+╔════════════════════════════════════════════════════════════╗
+║         STYLE ENGINE - PROMPT FORMAT REFERENCE             ║
+╚════════════════════════════════════════════════════════════╝
+
+NEW HTML-STYLE TAG FORMAT
+─────────────────────────────────────────────────────────────
+
+Use these tags in your STYLEENGINE_Prompt text editor:
+
+  <k>keywords</k>          Keywords (optional)
+  <p>main prompt</p>       Main prompt (required)
+  <n>negative prompt</n>   Negative (optional)
+
+
+EXAMPLE
+─────────────────────────────────────────────────────────────
+
+<k>
+concept art, matte painting, highly detailed, 8k, masterpiece
+</k>
+
+<p>
+futuristic cyberpunk city at night with neon lights reflecting 
+off wet streets, towering skyscrapers with holographic 
+advertisements, flying vehicles in the distance
+</p>
+
+<n>
+blurry, low quality, watermark, deformed, oversaturated, 
+amateur, cluttered composition
+</n>
+
+
+RESULT
+─────────────────────────────────────────────────────────────
+
+Positive Prompt:
+  "concept art, matte painting, highly detailed, 8k, masterpiece,
+   futuristic cyberpunk city at night with neon lights..."
+
+Negative Prompt:
+  "blurry, low quality, watermark, deformed..."
+
+
+TIPS
+─────────────────────────────────────────────────────────────
+
+✓ Keywords are prepended to the prompt
+✓ Use <k> for quality tags and style descriptors
+✓ Use <p> for the main subject and scene description
+✓ Use <n> for things you want to avoid
+✓ Tags are case-insensitive (<K>, <k>, <P>, <p> all work)
+✓ Multi-line content is automatically normalized
+✓ You can omit <k> or <n> if not needed
+✓ Without tags, raw text is used as-is
+
+
+QUICK EXAMPLES
+─────────────────────────────────────────────────────────────
+
+Minimal (prompt only):
+  <p>a majestic dragon perched on a mountain</p>
+
+With keywords:
+  <k>cinematic illustration, 8k</k>
+  <p>a majestic dragon perched on a mountain</p>
+
+Full format:
+  <k>cinematic illustration, 8k</k>
+  <p>a majestic dragon perched on a mountain</p>
+  <n>blurry, low quality, cartoon</n>
+
+
+COMMON KEYWORDS
+─────────────────────────────────────────────────────────────
+
+Quality:
+  highly detailed, 8k, 4k, masterpiece, best quality,
+  professional, sharp focus, crisp details
+
+Styles:
+  concept art, matte painting, digital art, photorealistic,
+  illustration, oil painting, watercolor, sketch
+
+Mood:
+  cinematic, dramatic, atmospheric, moody, ethereal,
+  vibrant, dark, bright, warm, cool
+
+Technical:
+  depth of field, bokeh, volumetric lighting, ray tracing,
+  HDR, unreal engine, octane render
+
+
+TROUBLESHOOTING
+─────────────────────────────────────────────────────────────
+
+❌ Prompt not working?
+   → Enable "Prompt Builder" toggle in UI
+   → Check tags are spelled correctly
+   → Ensure <p> tag exists
+
+❌ Getting raw text instead?
+   → Add at least <p> tag
+   → Check for typos in tag names
+
+❌ Negative not applying?
+   → Verify <n> tag is closed properly
+   → Check spelling of tag name
+
+
+VERSION
+─────────────────────────────────────────────────────────────
+
+Format Version: 2.0 (HTML Tags)
+Date: 2026-01-27
+Previous Format: # Tag Name: (deprecated)
+
+═══════════════════════════════════════════════════════════════
