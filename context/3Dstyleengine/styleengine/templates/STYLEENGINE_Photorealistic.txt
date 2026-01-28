@@ -1,0 +1,24 @@
+# Subject:
+professional product photography, architectural photography
+
+# Style:
+photorealistic, professional photography, 8k resolution, sharp focus, highly detailed
+
+# Details:
+crisp details, accurate materials, realistic textures, proper depth of field
+
+# Environment:
+studio lighting setup, controlled environment
+
+# Mood:
+clean, professional, commercial quality
+
+# Camera:
+professional camera, proper focal length, correct perspective
+
+# Lighting:
+professional studio lighting, three-point lighting, soft shadows, proper exposure
+
+# Negative Prompt:
+painting, illustration, sketch, drawing, artistic, stylized, cartoon, anime, low resolution, blurry, grainy, overexposed, underexposed
+

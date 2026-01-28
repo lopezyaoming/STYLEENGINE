@@ -1,0 +1,3659 @@
+================================================================================
+                       STYLE ENGINE - COMPLETE UX FLOW
+                    Comprehensive User Experience Documentation
+================================================================================
+
+Version: 0.3.7
+Date: January 27, 2026
+Purpose: Complete walkthrough of every UI element, feature, and workflow
+Audience: Designers, Developers, QA, Documentation Writers
+
+================================================================================
+⚠️  IMPORTANT: CURRENT UI STATE
+================================================================================
+
+This document describes the COMPLETE feature set of Style Engine, including
+both VISIBLE and HIDDEN features.
+
+CURRENT UI PHILOSOPHY (v0.3.7):
+The N-panel has been intentionally SIMPLIFIED to focus on core workflow.
+Many advanced features exist in the codebase but are commented out in the UI.
+
+VISIBLE IN N-PANEL:
+✓ Output Path
+✓ Generation Status (when active)
+✓ Prompt Settings (help text + Refine button)
+✓ Reference Images (Style/Composition/Transfer with 15 slots)
+
+HIDDEN IN N-PANEL (Exist but UI commented out):
+✗ Resolution selector (default: 1024x1024)
+✗ Steps slider (default: 15)
+✗ Influence slider (default: 0.25)
+✗ LoRa dropdown (disabled by default)
+✗ Render quality selector (default: Fast)
+✗ Auto-generate toggle
+✗ Groups system
+✗ Camera controls
+✗ Workspace setup button (moved to Pie Menu only)
+
+DESIGN RATIONALE:
+Prioritize simplicity and reduce cognitive load. Most users don't need
+fine-grained control over steps, influence, or LoRa. The defaults work
+well for 90% of use cases. Power users can re-enable features in code.
+
+PRIMARY WORKFLOW:
+Alt+W → Setup Workspace → Write Prompt → Alt+W → Generate → Done
+
+================================================================================
+TABLE OF CONTENTS
+================================================================================
+
+PART 1: OVERVIEW & INSTALLATION
+    1.1  What is Style Engine
+    1.2  Core Concept
+    1.3  Installation Process
+    1.4  Initial Configuration
+
+PART 2: USER INTERFACE ANATOMY
+    2.1  Interface Overview
+    2.2  N-Panel (Style Engine Tab)
+    2.3  Pie Menu (Alt+W)
+    2.4  Text Editor (STYLEENGINE_Prompt)
+    2.5  Workspace Layout
+    2.6  Addon Preferences
+
+PART 3: BASIC WORKFLOW (FIRST-TIME USER)
+    3.1  Setting Up Backend
+    3.2  Creating AI Vision Workspace
+    3.3  Writing Your First Prompt
+    3.4  Generating Your First Image
+    3.5  Understanding the Output
+
+PART 3B: CURRENT ACTUAL UX (v0.3.7 SIMPLIFIED)
+    3B.1  What You Actually See Today
+    3B.2  The Minimal Workflow
+    3B.3  Missing UI Elements (By Design)
+    3B.4  Comparison: Full vs Minimal UI
+
+PART 4: PROMPT SYSTEM (DETAILED)
+    4.1  HTML-Style Tag Format
+    4.2  Keywords (<k> tag)
+    4.3  Main Prompt (<p> tag)
+    4.4  Negative Prompt (<n> tag)
+    4.5  LLM Prompt Refinement
+    4.6  Template System
+
+PART 5: GENERATION CONTROLS
+    5.1  Output Path (VISIBLE)
+    5.2  Generation Status Display (VISIBLE when active)
+    5.3  Resolution Settings (HIDDEN - uses default)
+    5.4  Steps Control (HIDDEN - uses default)
+    5.5  Influence/Denoise Control (HIDDEN - uses default)
+    5.6  LoRa Integration (HIDDEN - disabled by default)
+
+PART 6: REFERENCE IMAGES (IPADAPTER)
+    6.1  Overview of Reference System
+    6.2  Style Transfer (5 slots)
+    6.3  Composition (5 slots)
+    6.4  Transfer/Force (5 slots)
+    6.5  Global Strength Sliders
+    6.6  Individual Image Weights
+    6.7  Loading, Clearing, Reloading Images
+    6.8  Thumbnail Display System
+
+PART 7: ADVANCED FEATURES
+    7.1  Texture Projection
+    7.2  UV Texture Generation
+    7.3  Generation Browser
+    7.4  Visualization Modes
+    7.5  Preview Images (Canny/Depth)
+    7.6  Session Management
+    7.7  Per-Project Libraries
+
+PART 8: PIE MENU DEEP DIVE
+    8.1  Alt+W Activation
+    8.2  LEFT: Setup Workspace
+    8.3  BOTTOM: Generate Image
+    8.4  TOP: UV Texture
+    8.5  RIGHT: Visualization Switch
+    8.6  BOTTOM-LEFT: Project Texture
+    8.7  BOTTOM-RIGHT: Render Passes
+    8.8  Context Sensitivity
+
+PART 9: BACKEND MODES
+    9.1  GCS (Self-Hosted ComfyUI)
+    9.2  RunComfy Cloud (Serverless)
+    9.3  Backend Comparison
+    9.4  Switching Backends
+
+PART 10: FILE ORGANIZATION
+    10.1  Temp Directory Structure
+    10.2  Project Library System
+    10.3  Generation Files
+    10.4  Preview Files
+    10.5  Iteration System
+
+PART 11: ERROR STATES & FEEDBACK
+    11.1  Status Messages (INFO/WARNING/ERROR)
+    11.2  Console Logging
+    11.3  Common Error Messages
+    11.4  Progress Indicators
+    11.5  Timeout Handling
+
+PART 12: KEYBOARD SHORTCUTS
+    12.1  Alt+W (Pie Menu)
+    12.2  Future Shortcuts
+
+PART 13: POWER USER WORKFLOWS
+    13.1  Iterative Refinement Loop
+    13.2  Multi-Object Texturing
+    13.3  Generation Remixing
+    13.4  Style Exploration
+    13.5  Batch Operations
+
+PART 14: ACCESSIBILITY & UX POLISH
+    14.1  Icon Usage
+    14.2  Visual Hierarchy
+    14.3  Button Sizing
+    14.4  Collapsible Sections
+    14.5  Loading States
+
+PART 15: TECHNICAL UX DETAILS
+    15.1  Blender Property System
+    15.2  UI Refresh Strategy
+    15.3  Non-Blocking Operations
+    15.4  Polling Timers
+    15.5  Modal Operators
+
+================================================================================
+PART 1: OVERVIEW & INSTALLATION
+================================================================================
+
+1.1 WHAT IS STYLE ENGINE
+-------------------------
+
+Style Engine is a Blender addon that bridges 3D modeling and AI image generation.
+It allows artists to:
+
+• Generate AI images from Blender renders in real-time
+• Project AI textures onto 3D objects
+• Use reference images to guide AI generation (IPAdapter)
+• Refine prompts using local LLM
+• Navigate through generation history
+• Create UV-mapped textures directly from 3D meshes
+
+CORE VALUE PROPOSITION:
+Instead of switching between Blender and external AI tools, Style Engine
+integrates the entire workflow inside Blender's viewport, enabling rapid
+iteration and creative exploration.
+
+
+1.2 CORE CONCEPT
+----------------
+
+THE PIPELINE:
+1. Model your scene in Blender (any geometry)
+2. Position camera view
+3. Write AI prompt in text editor
+4. Generate AI image (uses render as base + ControlNet)
+5. AI appears as camera background
+6. Project onto objects or export
+7. Iterate and refine
+
+KEY INNOVATION:
+The addon renders your scene (Workbench engine, fast), sends it to ComfyUI
+with your prompt, and uses ControlNet (Canny + Depth) to maintain composition
+while applying AI styling. The result appears as a camera background image
+that you can view, project, or export.
+
+
+1.3 INSTALLATION PROCESS
+------------------------
+
+STEP 1: Download/Clone Repository
+→ User obtains the styleengine addon folder
+
+STEP 2: Installation Methods
+
+METHOD A: Development Mode (Symlink)
+• Run `create_dev_link.ps1` (Windows, as Administrator)
+• Creates symbolic link to addon folder
+• Changes to source code reflect immediately in Blender
+
+METHOD B: Manual Install
+• Copy `scripts/addons/styleengine` folder
+• Paste into Blender addons directory:
+  Windows: C:\Users\<USER>\AppData\Roaming\Blender Foundation\Blender\<VERSION>\scripts\addons\
+  macOS: ~/Library/Application Support/Blender/<VERSION>/scripts/addons/
+  Linux: ~/.config/blender/<VERSION>/scripts/addons/
+
+METHOD C: ZIP Install
+• Package addon as styleengine.zip
+• Blender → Edit → Preferences → Add-ons
+• Click "Install..." → Select ZIP
+• Enable addon checkbox
+
+STEP 3: Enable Addon
+• Open Blender
+• Edit → Preferences → Add-ons
+• Search: "Style Engine"
+• Check the box to enable
+• "Style Engine" tab appears in N-panel (3D Viewport sidebar)
+
+
+1.4 INITIAL CONFIGURATION
+--------------------------
+
+FIRST RUN CHECKLIST:
+
+1. Open Addon Preferences
+   Edit → Preferences → Add-ons → Style Engine → Expand
+
+2. Choose Backend
+   • GCS (Self-Hosted): Enter ComfyUI server URL
+   • RunComfy Cloud: Import credentials from file
+
+3. Test Connection
+   • Click "Test Connection" button
+   • Verify green checkmark appears
+
+4. Advanced Settings (Optional)
+   • Set ComfyUI path (for UV texture feature)
+   • Enable debug mode (for troubleshooting)
+   • Configure download preferences
+
+USER IS NOW READY TO USE THE ADDON
+
+
+================================================================================
+PART 2: USER INTERFACE ANATOMY
+================================================================================
+
+2.1 INTERFACE OVERVIEW
+----------------------
+
+Style Engine has THREE main UI surfaces:
+
+A) N-PANEL (Primary Interface)
+   Location: 3D Viewport → Press 'N' → "Style Engine" tab
+   Contains: All generation controls, settings, reference images
+   
+B) PIE MENU (Quick Access)
+   Location: 3D Viewport → Press 'Alt+W'
+   Contains: 6 common operations (setup, generate, project, visualize)
+   
+C) TEXT EDITOR (Prompt Input)
+   Location: Workspace layout (bottom-right area after setup)
+   Contains: STYLEENGINE_Prompt text block with HTML-style tags
+
+D) PREFERENCES (Configuration)
+   Location: Edit → Preferences → Add-ons → Style Engine
+   Contains: Backend settings, API credentials, advanced options
+
+
+2.2 N-PANEL (Style Engine Tab)
+-------------------------------
+
+CURRENT UI (MINIMAL/SIMPLIFIED VERSION):
+
+The N-panel has been intentionally simplified to focus on core workflow.
+Many advanced features exist in the code but are hidden to reduce clutter.
+
+VISIBLE LAYOUT (Top to Bottom):
+
+┌─────────────────────────────────────┐
+│   📁 OUTPUT PATH                     │ ← Where generations save
+│   [Browse...]                        │
+├─────────────────────────────────────┤
+│   STATUS (if generating)             │ ← Optional, only during/after generation
+│   🔄 Generating: 5s                  │
+│   ⏱️ Previous: 12s                   │
+├─────────────────────────────────────┤
+│   📝 PROMPT SETTINGS                 │
+│   ┌───────────────────────────────┐ │
+│   │ Use HTML-style tags:          │ │
+│   │ <k>keywords</k> (optional)    │ │
+│   │ <p>main prompt</p> (required) │ │
+│   │ <n>negative</n> (optional)    │ │
+│   │ Without tags, raw text used   │ │
+│   └───────────────────────────────┘ │
+│   [Refine Prompt (LLM)] 🔤          │ ← AI prompt enhancement
+├─────────────────────────────────────┤
+│   🖼️ REFERENCE IMAGES               │
+│   ▼ Style (5 slots)                 │ ← Collapsible sections
+│   ▶ Composition (5 slots)           │
+│   ▶ Transfer (5 slots)              │
+└─────────────────────────────────────┘
+
+HIDDEN/COMMENTED UI (Exists in code, not shown):
+
+The following features exist and are functional but currently
+have no UI exposed in the N-panel:
+
+• Resolution selector (uses default 1024x1024)
+• Steps slider (uses default 15)
+• Influence/denoise slider (uses default 0.25)
+• LoRa dropdown and strength (LoRa disabled)
+• Render quality selector (uses Fast/Workbench)
+• Auto-generate toggle
+• Groups system
+• Camera repositioning buttons
+• Background opacity slider
+
+DESIGN PHILOSOPHY:
+The addon prioritizes SIMPLICITY over FEATURE EXPOSURE.
+All generation controls exist internally and can be re-enabled
+in future updates, but for now the UX is:
+
+WRITE PROMPT → GENERATE → SEE RESULT
+
+This reduces cognitive load and makes the addon accessible
+to non-technical artists.
+
+SECTION BREAKDOWN:
+
+1. OUTPUT PATH
+   • Single text field with folder browser icon
+   • Default: Project's generated/ folder
+   • Click folder icon to browse filesystem
+   • Path persists across sessions
+
+2. GENERATION STATUS (Dynamic)
+   • Only appears during generation or after completion
+   • Shows: Current status, elapsed time
+   • Shows: Last generation time (after completion)
+   • Auto-hides when idle and no previous generation
+
+3. PROMPT SETTINGS
+   • Help box explaining HTML tag format
+   • Always visible (no toggle)
+   • Shows 4 lines of instruction text
+   • "Refine Prompt (LLM)" button below
+   • Button uses local LLM to enhance <p> tag content
+
+4. REFERENCE IMAGES
+   • Three collapsible sections (Style, Composition, Transfer)
+   • Each section has:
+     - Global strength slider (affects all 5 slots)
+     - 3-column grid of image slots (5 total per section)
+   • Each image slot shows:
+     - Thumbnail preview (if loaded)
+     - Filename
+     - Individual weight slider (0.0-2.0)
+     - Load button (folder icon)
+     - Clear button (X icon)
+     - Reload button (refresh icon, if image loaded)
+
+
+2.3 PIE MENU (Alt+W)
+--------------------
+
+LAYOUT (6 directions):
+
+          TOP
+     [UV Texture]
+           |
+           |
+LEFT ------+------ RIGHT
+[Setup]    |    [Visualize]
+           |
+           |
+      [Generate]
+        BOTTOM
+
+   BOTTOM-LEFT        BOTTOM-RIGHT
+  [Project Texture]  [Render Passes]
+
+DETAILED BREAKDOWN:
+
+LEFT: Setup Workspace
+• Creates AI Vision dual-viewport layout
+• Configures text editor with prompt template
+• Sets up camera and placeholder image
+• One-time operation per .blend file
+
+BOTTOM: Generate AI Quick
+• Main generation button
+• Renders scene, sends to ComfyUI
+• Uses current prompt from text editor
+• Non-blocking (runs in background)
+
+TOP: UV Texture
+• Generates UV-mapped textures for selected mesh
+• Requires .blend file to be saved
+• Uses current_ai.png as reference
+• Exports mesh, submits to ComfyUI, re-imports
+
+RIGHT: Visualization
+• Cycles between: Combined (Final), Canny (Edges), Depth (Map)
+• Switches camera background image
+• Helps understand ControlNet input
+
+BOTTOM-LEFT: Project Texture
+• Projects current_ai.png onto selected objects
+• Uses camera perspective
+• Creates UV unwrap + material setup
+• Archival materials option
+
+BOTTOM-RIGHT: Render AI Passes Quick
+• Re-renders Workbench passes
+• Useful after camera/geometry changes
+• Quick refresh of combined.jpg, canny, depth
+
+
+2.4 TEXT EDITOR (STYLEENGINE_Prompt)
+-------------------------------------
+
+LOCATION:
+After running "Setup Workspace", a text editor area appears in the
+workspace layout (typically bottom-right quadrant).
+
+CONTENT:
+The text editor shows the "STYLEENGINE_Prompt" text block with this default:
+
+```
+# Keywords
+<k></k>
+# Prompt
+<p></p>
+# Negative Prompt
+<n></n>
+```
+
+USER INTERACTION:
+• Type inside the <k></k> tags for keywords (optional)
+• Type inside the <p></p> tags for main prompt (required)
+• Type inside the <n></n> tags for negative prompt (optional)
+• Comment lines (starting with #) are ignored
+• Text is auto-synced during generation (no save button needed)
+
+VISUAL FEATURES:
+• Syntax highlighting enabled
+• Word wrap enabled
+• Line numbers disabled (cleaner view)
+• Standard Blender text editor controls (zoom, search, etc.)
+
+
+2.5 WORKSPACE LAYOUT
+--------------------
+
+AFTER RUNNING "SETUP WORKSPACE":
+
+┌─────────────────────────────────────────────────────────────┐
+│ Topbar: [AI] workspace tab                                   │
+├──────────────────┬──────────────────────────────────────────┤
+│                  │                                           │
+│  3D VIEWPORT     │  3D VIEWPORT (CAMERA)                    │
+│  (Modeling)      │  - Shows ai_camera view                  │
+│                  │  - Background: current_ai.png            │
+│  - Edit Mode     │  - Overlay: Geometry visible             │
+│  - Object Mode   │                                          │
+│                  │                                          │
+│                  ├──────────────────────────────────────────┤
+│                  │  TEXT EDITOR                             │
+│                  │  - STYLEENGINE_Prompt                    │
+│                  │  - HTML tag template                     │
+├──────────────────┴──────────────────────────────────────────┤
+│ PROPERTIES PANEL │ OUTLINER                                 │
+│ - Scene          │ - ai_camera (camera object)              │
+│ - Object         │ - Objects list                           │
+│ - Material       │                                          │
+└──────────────────┴──────────────────────────────────────────┘
+
+LAYOUT CHARACTERISTICS:
+• 6 areas total
+• Left: Single 3D viewport (modeling workspace)
+• Right: Stacked viewports (camera above, text editor below)
+• Bottom: Properties + Outliner
+• Saved as "Style_Engine_Template" workspace
+• Loads from template.blend file
+
+
+2.6 ADDON PREFERENCES
+---------------------
+
+LOCATION: Edit → Preferences → Add-ons → Style Engine
+
+SECTIONS:
+
+1. BASIC SETTINGS (Always Visible)
+   
+   Backend: [Dropdown]
+   • GCS (Self-Hosted ComfyUI)
+   • RunComfy Cloud
+   
+   IF GCS MODE:
+   Server URL: [http://127.0.0.1:8188]
+   [Test Connection] (large button)
+   
+   IF RUNCOMFY MODE:
+   Credentials File: [Browse...]
+   [Import Credentials] (large button)
+   ☐ Show Credentials (toggle)
+     → API Token: [********]
+     → User ID: [********]
+   [Test Connection] (large button)
+
+2. ADVANCED SETTINGS (Collapsible, Hidden by Default)
+   
+   ▶ Advanced Settings
+   
+   When expanded:
+   
+   • Request Timeout: [30] seconds
+   • Enable Workspace Creation: ☑
+   • Enable Viewport Splitting: ☑
+   • Debug Mode: ☐
+   • ComfyUI Path: [Browse...] (for UV texture feature)
+   • Use Environment Variables: ☐
+   • Download Preview Images: ☑ (Canny/Depth)
+   • Show API Keys: ☐ (toggle credential visibility)
+
+3. VISUAL DESIGN
+   • Blue icons for backend mode
+   • Green checkmarks for successful tests
+   • Red error messages for failures
+   • Collapsible sections to reduce clutter
+   • Large test buttons (1.3x scale)
+
+
+================================================================================
+PART 3: BASIC WORKFLOW (FIRST-TIME USER)
+================================================================================
+
+3.1 SETTING UP BACKEND
+----------------------
+
+SCENARIO: User has just installed and enabled the addon.
+
+STEP-BY-STEP:
+
+1. Open Preferences
+   Menu: Edit → Preferences
+   Tab: Add-ons
+   Search: "Style Engine"
+   
+2. Expand Addon
+   Click disclosure triangle next to addon name
+   Preferences panel appears
+
+3. Choose Backend
+   
+   OPTION A: Self-Hosted ComfyUI (GCS)
+   • Select "GCS" from Backend dropdown
+   • Enter server URL (e.g., http://34.145.107.158:8188)
+   • Click "Test Connection"
+   • Wait for green checkmark or error message
+   
+   OPTION B: RunComfy Cloud
+   • Select "RunComfy Cloud" from dropdown
+   • Click "Browse" next to Credentials File
+   • Navigate to CREDENTIALS.txt file
+   • Click "Import Credentials"
+   • Credentials auto-populate
+   • Click "Test Connection"
+   • Wait for confirmation
+
+4. Verify Success
+   • Green checkmark icon appears
+   • Status text: "Connected" or "Test Passed"
+   • If error: Red message explains issue
+
+USER NOW HAS WORKING BACKEND CONNECTION
+
+
+3.2 CREATING AI VISION WORKSPACE
+---------------------------------
+
+SCENARIO: Backend is configured. User wants to start generating.
+
+STEP-BY-STEP:
+
+1. Open Any .blend File
+   (Can be empty scene or existing project)
+
+2. Position Your View
+   • Navigate in 3D viewport to desired camera angle
+   • This will become the AI camera view
+   • Look at your geometry from interesting angle
+
+3. Open Style Engine Panel
+   • Press 'N' in 3D viewport (if sidebar not visible)
+   • Click "Style Engine" tab
+
+4. Click "Setup Workspace"
+   EITHER:
+   • Use button in N-panel (if visible)
+   OR:
+   • Press Alt+W → Click LEFT (Setup Workspace)
+
+5. Wait 1-2 Seconds
+   • Workspace transforms
+   • Console shows progress messages
+
+WHAT HAPPENS:
+• New "AI" workspace tab appears at top
+• Left viewport: Stays as-is (modeling)
+• Right viewport: Splits into camera view (top) + text editor (bottom)
+• Camera: "ai_camera" created and aligned to previous view
+• Text editor: Shows STYLEENGINE_Prompt with template
+• Background: Black placeholder image (current_ai.png)
+• Temp directory: Created with session ID
+• Console: Logs each step with ✓ checkmarks
+
+USER NOW SEES DUAL-VIEWPORT LAYOUT
+
+
+3.3 WRITING YOUR FIRST PROMPT
+------------------------------
+
+SCENARIO: Workspace is set up. User wants to write a prompt.
+
+STEP-BY-STEP:
+
+1. Locate Text Editor
+   • Look at bottom-right area (below camera viewport)
+   • Should show "STYLEENGINE_Prompt" text block
+   • Default template visible:
+     # Keywords
+     <k></k>
+     # Prompt
+     <p></p>
+     # Negative Prompt
+     <n></n>
+
+2. Add Keywords (Optional)
+   • Click between <k> and </k>
+   • Type comma-separated keywords
+   • Example: <k>8k, concept art, detailed</k>
+
+3. Write Main Prompt (Required)
+   • Click between <p> and </p>
+   • Type your image description
+   • Example: <p>a medieval castle on a hill at sunset</p>
+
+4. Add Negative Prompt (Optional)
+   • Click between <n> and </n>
+   • Type what you DON'T want
+   • Example: <n>blurry, ugly, low quality</n>
+
+5. (Optional) Refine with LLM
+   • Focus on <p> tag content
+   • Press Alt+W or open N-panel
+   • Click "Refine Prompt (LLM)" button
+   • Wait 3-10 seconds
+   • Watch text editor update with enhanced prompt
+
+EXAMPLE COMPLETE PROMPT:
+```
+# Keywords
+<k>photorealistic, 8k, professional photography</k>
+# Prompt
+<p>a medieval stone castle perched on a hill at sunset, dramatic clouds, 
+golden hour lighting, detailed stonework, surrounded by forest, 
+cinematic composition</p>
+# Negative Prompt
+<n>blurry, low quality, ugly, deformed, cartoon, anime</n>
+```
+
+USER NOW HAS A COMPLETE PROMPT READY
+
+
+3.4 GENERATING YOUR FIRST IMAGE
+--------------------------------
+
+SCENARIO: Prompt is written. User wants to generate.
+
+STEP-BY-STEP:
+
+1. Trigger Generation
+   EITHER:
+   • Press Alt+W → Click BOTTOM (Generate AI Quick)
+   OR:
+   • Use quick operator if registered (Shift+Alt+G)
+
+2. Watch Console (Optional)
+   • Window → Toggle System Console (Windows)
+   • See real-time progress logs:
+     [Style Engine] Rendering combined pass...
+     [Style Engine] Using prompt: medieval stone castle...
+     [GCS] Uploading combined.jpg...
+     [GCS] ✓ Workflow submitted
+     [Server API] Started polling...
+
+3. Observe Status (in N-panel)
+   • Status box appears (if in GCS mode)
+   • Shows: "Generating: 3s" (updates every second)
+   • Icon: Spinning animation (RENDER_ANIMATION)
+
+4. Wait for Completion (5-30 seconds typical)
+   • Server processes workflow
+   • Polling checks every 2 seconds
+   • Console shows:
+     [GCS] Downloading final image...
+     [GCS] ✓ Saved: current_ai.png
+     [Style Engine] ✓ Image reloaded
+     [GCS] ✓ Camera background updated
+
+5. See Result
+   • Camera viewport (right-top) updates automatically
+   • AI image appears as camera background
+   • Status changes to: "Ready" or "Idle"
+   • Last generation time shown: "Previous: 12s"
+
+WHAT JUST HAPPENED:
+1. Addon rendered your scene (Workbench, fast)
+2. Sent render + prompt to ComfyUI server
+3. ComfyUI generated AI image using:
+   - Your prompt
+   - Canny edges (for composition)
+   - Depth map (for 3D structure)
+   - SDXL model
+4. Downloaded result as current_ai.png
+5. Updated camera background automatically
+6. Saved generation to library with timestamp
+
+USER NOW SEES THEIR FIRST AI GENERATION
+
+
+================================================================================
+PART 3B: CURRENT ACTUAL UX (v0.3.7 SIMPLIFIED)
+================================================================================
+
+⚠️  READ THIS: What you actually see today vs what exists in code
+
+3B.1 WHAT YOU ACTUALLY SEE TODAY
+---------------------------------
+
+THE REAL N-PANEL (Current Version):
+
+┌─────────────────────────────────────┐
+│ STYLE ENGINE                         │
+├─────────────────────────────────────┤
+│ 📁 Output Path:                     │
+│ [C:\...\MyProject_styleengine\...]  │
+│ [📁]                                 │
+├─────────────────────────────────────┤
+│ 📝 Prompt Settings:                 │
+│ ┌───────────────────────────────┐  │
+│ │ ℹ️ Use HTML-style tags:        │  │
+│ │ <k>keywords</k> (optional)     │  │
+│ │ <p>main prompt</p> (required)  │  │
+│ │ <n>negative</n> (optional)     │  │
+│ │ ➡️ Without tags, raw text used │  │
+│ └───────────────────────────────┘  │
+│ [Refine Prompt (LLM)] 🔤            │
+├─────────────────────────────────────┤
+│ 🖼️ Reference Images                 │
+│ ▼ Style                             │
+│   Global Strength: [████---] 0.5   │
+│   ┌────┐ ┌────┐ ┌────┐            │
+│   │ST1 │ │ST2 │ │ST3 │            │
+│   └────┘ └────┘ └────┘            │
+│   ┌────┐ ┌────┐                    │
+│   │ST4 │ │ST5 │                    │
+│   └────┘ └────┘                    │
+│ ▶ Composition                       │
+│ ▶ Transfer                          │
+└─────────────────────────────────────┘
+
+THAT'S IT. NOTHING ELSE IN N-PANEL.
+
+Main actions come from PIE MENU (Alt+W):
+• Setup Workspace
+• Generate AI
+• UV Texture
+• Visualize
+• Project Texture
+• Render Passes
+
+
+3B.2 THE MINIMAL WORKFLOW
+--------------------------
+
+REAL STEP-BY-STEP (No Extra UI):
+
+1. SETUP (One-Time)
+   • Edit → Preferences → Style Engine
+   • Choose Backend: GCS or RunComfy
+   • Enter credentials/URL
+   • Test Connection
+   • Close preferences
+
+2. WORKSPACE
+   • Open any .blend file
+   • Position your view
+   • Press Alt+W → LEFT (Setup Workspace)
+   • Wait 1 second
+   • Workspace appears
+
+3. PROMPT
+   • Look at text editor (bottom-right)
+   • See template with <k>, <p>, <n> tags
+   • Fill in <p> tag with your description
+   • Example: <p>dragon flying over mountain</p>
+
+4. GENERATE
+   • Press Alt+W → BOTTOM (Generate AI)
+   • Wait 10-30 seconds
+   • Image appears in camera view
+
+5. ITERATE
+   • Edit prompt in text editor
+   • Press Alt+W → BOTTOM again
+   • Repeat until satisfied
+
+6. PROJECT (Optional)
+   • Select objects
+   • Press Alt+W → BOTTOM-LEFT (Project)
+   • Texture applied to objects
+
+7. DONE
+   • Save .blend file
+   • Export or render final scene
+
+NO NEED TO:
+• Adjust steps (uses default 15)
+• Adjust influence (uses default 0.25)
+• Choose resolution (uses default 1024x1024)
+• Enable/disable features
+• Configure advanced settings
+
+EVERYTHING JUST WORKS WITH GOOD DEFAULTS.
+
+
+3B.3 MISSING UI ELEMENTS (BY DESIGN)
+-------------------------------------
+
+The following controls exist in properties but have NO UI:
+
+1. RESOLUTION DROPDOWN
+   Why hidden: 1024x1024 works for 95% of cases
+   Access: Python console if needed
+   Default: 1024x1024
+
+2. STEPS SLIDER
+   Why hidden: 15 steps is optimal for most uses
+   Access: Python console if needed
+   Default: 15
+   Range: 15-30 (min enforced to prevent quality issues)
+
+3. INFLUENCE SLIDER
+   Why hidden: 0.25 is the sweet spot
+   Access: Python console if needed
+   Default: 0.25 (75% denoise)
+   Range: 0.0-0.7 (max enforced to prevent "no AI" results)
+
+4. LORA SELECTOR
+   Why hidden: Most users don't have custom LoRas
+   Access: Can be re-enabled in code
+   Status: Functional but disabled in workflow
+
+5. RENDER QUALITY TOGGLE
+   Why hidden: Workbench (Fast) is sufficient for img2img
+   Access: Python console if needed
+   Default: FAST (Workbench)
+
+6. AUTO-GENERATE TOGGLE
+   Why hidden: Wastes API calls, user should control generation
+   Status: Exists but strongly discouraged
+
+7. GROUPS SYSTEM
+   Why hidden: Complex feature, rarely needed
+   Status: Fully functional but UI completely hidden
+
+8. CAMERA CONTROLS
+   Why hidden: Camera positioned during setup, rarely adjusted
+   Actions: Reposition, bring forward, send back
+   Access: Python operators exist
+
+9. BACKGROUND OPACITY
+   Why hidden: Fixed at 100% is clearest
+   Status: Property exists but not used
+
+PHILOSOPHY:
+"Make the common case easy, the advanced case possible."
+
+The UI shows only what 90% of users need 90% of the time.
+Advanced features remain accessible via:
+• Python console (for properties)
+• Code editing (to re-enable UI)
+• Future "Power User Mode" toggle
+
+
+3B.4 COMPARISON: FULL vs MINIMAL UI
+------------------------------------
+
+IMAGINE IF ALL FEATURES WERE VISIBLE:
+
+FULL UI (Hypothetical):
+┌─────────────────────────────────────┐
+│ Output Path                          │
+│ ▼ Workspace Setup                   │ ← Collapsible
+│   • Setup button                     │
+│   • Camera controls (3 buttons)     │
+│   • Resolution dropdown              │
+│   • Background opacity slider        │
+├─────────────────────────────────────┤
+│ ▼ Image Generation                  │ ← Collapsible
+│   • Steps slider                     │
+│   • Influence sliders (3)            │
+│   • LoRa dropdown + strength         │
+│   • Render quality toggle            │
+│   • Generate button (HUGE)           │
+│   • Auto-generate toggle             │
+│   ▶ Groups (5+ rows)                │ ← Sub-collapsible
+├─────────────────────────────────────┤
+│ ▼ Reference Images                  │ ← Collapsible
+│   ▼ Style (5 slots)                 │ ← Sub-collapsible
+│   ▶ Composition (5 slots)           │
+│   ▶ Transfer (5 slots)              │
+├─────────────────────────────────────┤
+│ ▼ Settings                          │ ← Collapsible
+│   • Test workflow button             │
+│   • Advanced link                    │
+└─────────────────────────────────────┘
+
+Result: OVERWHELMING, CLUTTERED, CONFUSING
+
+MINIMAL UI (Current):
+┌─────────────────────────────────────┐
+│ Output Path                          │
+│ Prompt Settings                      │
+│ Reference Images                     │
+│   ▼ Style (5 slots)                 │
+│   ▶ Composition (5 slots)           │
+│   ▶ Transfer (5 slots)              │
+└─────────────────────────────────────┘
+
+Result: CLEAN, FOCUSED, INTUITIVE
+
+USER TESTING INSIGHT:
+When all features were exposed, users felt overwhelmed and
+didn't know where to start. The minimal UI guides them:
+1. Write prompt (obvious text editor)
+2. Generate (obvious pie menu action)
+3. Optionally add references (if needed)
+4. Done
+
+Advanced users who want control can:
+• Read documentation to find Python property names
+• Use console: bpy.context.scene.style_engine_props.steps = 25
+• Or submit feature request to re-enable specific UI
+
+
+3.5 UNDERSTANDING THE OUTPUT
+-----------------------------
+
+SCENARIO: First generation complete. User wants to understand results.
+
+VISUAL FEEDBACK:
+
+1. Camera Viewport (Right-Top)
+   • Shows final AI image as background
+   • Geometry overlay visible (if any)
+   • Background opacity: Adjustable (future feature)
+
+2. Files Created
+   TEMP DIRECTORY:
+   C:\Users\<USER>\AppData\Local\Temp\blender_styleengine\ai_vision\
+   
+   Files:
+   • current_ai.png (final generation, displayed)
+   • combined.jpg (your render, sent to AI)
+   • canny.png (edge map preview, if enabled)
+   • depth.png (depth map preview, if enabled)
+   
+   PROJECT LIBRARY (if .blend is saved):
+   <ProjectName>_styleengine/generations/
+   
+   File:
+   • 20260127_123456_789_gcs.png (timestamped copy)
+
+3. Console Messages
+   • Detailed log of each step
+   • Useful for debugging
+   • Shows timing information
+
+NEXT STEPS FOR USER:
+• Iterate on prompt
+• Adjust parameters (influence, steps)
+• Add reference images
+• Project onto objects
+• Export results
+
+
+================================================================================
+PART 4: PROMPT SYSTEM (DETAILED)
+================================================================================
+
+4.1 HTML-STYLE TAG FORMAT
+--------------------------
+
+DESIGN RATIONALE:
+• Simple, readable syntax
+• Separates concerns (keywords, prompt, negative)
+• Easy to parse with regex
+• Graceful degradation (raw text works too)
+
+SCHEMA DEFINITION:
+
+```
+# Keywords
+<k>keyword1, keyword2, keyword3</k>
+
+# Prompt  
+<p>main image description here</p>
+
+# Negative Prompt
+<n>things to avoid</n>
+```
+
+PARSING RULES:
+1. Lines starting with # are comments (ignored)
+2. Empty lines are ignored
+3. Tags are case-insensitive (<K>, <k>, <P>, <p>, etc.)
+4. Content inside tags is extracted and trimmed
+5. If no tags found, entire text used as prompt
+6. Final positive prompt = keywords + ", " + prompt
+7. Negative prompt sent separately to ComfyUI workflow
+
+PROCESSING FLOW:
+Text Editor → parse_prompt_tags() → build_prompt_from_template() 
+→ process_prompt_builder() → workspace_setup.generate_ai_image_cloud()
+→ ComfyUI Workflow (Node 25: positive, Node 7: negative)
+
+
+4.2 KEYWORDS (<k> TAG)
+----------------------
+
+PURPOSE:
+High-level modifiers that affect overall image style/quality.
+
+EXAMPLES:
+• Quality: 8k, 4k, high resolution, detailed, professional
+• Medium: oil painting, photograph, 3D render, digital art
+• Style: photorealistic, anime, concept art, impressionist
+• Technical: sharp focus, bokeh, HDR, ray tracing
+
+USAGE PATTERN:
+<k>8k, photorealistic, professional photography, sharp focus</k>
+
+BEHAVIOR:
+• Prepended to main prompt with comma separator
+• Optional (can be empty)
+• Affects overall image quality/style
+• Processed first by AI model
+
+BEST PRACTICES:
+• 3-7 keywords optimal
+• Start with quality/resolution
+• Add medium/style
+• Include technical modifiers
+• Avoid contradictions (e.g., "photorealistic, anime")
+
+
+4.3 MAIN PROMPT (<p> TAG)
+--------------------------
+
+PURPOSE:
+Describes the specific subject, scene, and details of the image.
+
+STRUCTURE:
+Subject + Action/State + Environment + Details + Composition/Lighting
+
+EXAMPLES:
+
+Simple:
+<p>a dragon flying over a mountain</p>
+
+Detailed:
+<p>a majestic red dragon with spread wings flying over a snow-capped 
+mountain range at sunset, golden hour lighting, volumetric clouds, 
+cinematic wide shot, depth of field</p>
+
+Complex:
+<p>a medieval stone castle perched atop a cliff overlooking a misty 
+valley, warm sunset light illuminating the towers, gothic architecture 
+with detailed stonework, surrounded by dark forest, dramatic sky with 
+storm clouds parting, wide-angle view from below, atmospheric perspective, 
+rich color palette of oranges and blues</p>
+
+ELEMENTS TO INCLUDE:
+1. Subject: What is the main focus?
+2. Description: Colors, materials, characteristics
+3. Action/State: What is happening?
+4. Environment: Where is it located?
+5. Lighting: Time of day, quality of light
+6. Mood/Atmosphere: Emotional tone
+7. Composition: Camera angle, framing
+8. Style Details: Specific artistic choices
+
+BEHAVIOR:
+• Required for generation
+• Concatenated with keywords
+• Sent to ComfyUI positive prompt
+• Most important for AI model
+
+
+4.4 NEGATIVE PROMPT (<n> TAG)
+------------------------------
+
+PURPOSE:
+Specifies what to AVOID in the generation.
+
+COMMON NEGATIVE PROMPTS:
+
+Quality Issues:
+blurry, low quality, low resolution, pixelated, noisy
+
+Unwanted Elements:
+text, watermark, signature, logo, UI elements
+
+Deformations:
+ugly, deformed, disfigured, bad anatomy, extra limbs
+
+Style Conflicts:
+cartoon (when wanting photorealism)
+photorealistic (when wanting illustration)
+
+Artifacts:
+jpeg artifacts, compression, grain, chromatic aberration
+
+USAGE PATTERN:
+<n>blurry, low quality, watermark, text, deformed, ugly, bad anatomy</n>
+
+BEHAVIOR:
+• Optional (can be empty or omitted)
+• Sent separately to ComfyUI negative prompt node
+• NOT concatenated with positive prompt
+• If empty, default negative used (configurable)
+
+DEFAULT NEGATIVE (when tag empty):
+"text, watermark, blurry, deformed, ugly, bad anatomy, worst quality, low quality"
+
+
+4.5 LLM PROMPT REFINEMENT
+--------------------------
+
+FEATURE: "Refine Prompt (LLM)" button
+
+PURPOSE:
+Uses local LLM (via Ollama + ComfyUI) to enhance the main prompt (<p> tag).
+
+REQUIREMENTS:
+• GCS backend mode (not RunComfy)
+• ComfyUI running with Griptape nodes
+• Ollama installed with gemma3:4b model
+• PromptRefiner.json workflow in workflows/ folder
+
+USER FLOW:
+
+1. Write basic prompt in <p> tag
+   Example: <p>bilbo baggins in hobbiton</p>
+
+2. Click "Refine Prompt (LLM)" button
+   • UI freezes briefly (3-10 seconds typical)
+   • Console shows progress
+
+3. Wait for LLM processing
+   • Workflow submitted to ComfyUI
+   • LLM applies 8 prompt engineering rules
+   • Enhanced prompt generated
+
+4. Text editor updates automatically
+   • <p> content replaced with refined version
+   • <k> and <n> tags unchanged
+   
+   Example Result:
+   <p>Bilbo Baggins, a middle-aged hobbit with curly brown hair and 
+   a green waistcoat, sitting comfortably in his cozy hobbit hole in 
+   Hobbiton, warm golden hour sunlight streaming through round windows, 
+   detailed wood furnishings and patterned rugs, peaceful domestic 
+   atmosphere, medium shot at eye level, 50mm lens, soft natural lighting, 
+   earthy color palette of greens and browns</p>
+
+5. User reviews and generates
+   • Can edit further if desired
+   • Or generate immediately with enhanced prompt
+
+LLM PROMPT ENGINEERING RULES (8 total):
+1. State subject first and clearly
+2. Define medium and style
+3. Specify framing and camera angle
+4. Describe lighting and atmosphere
+5. Add material and texture details
+6. Keep prompt medium length (20-60 words)
+7. Show mood through physical details
+8. Output clean text only
+
+TECHNICAL DETAILS:
+• Blocking operation (UI freezes)
+• 60 second timeout
+• Polls ComfyUI every 2 seconds
+• Extracts text from Node 17 or 19 output
+• Handles character-array output format (Griptape quirk)
+• Preserves <k> and <n> tags unchanged
+
+OUTPUT PARSING BUG FIX:
+The Griptape Display: Text node returns output as a list of individual
+characters instead of a single string:
+
+WRONG OUTPUT FORMAT:
+{'INPUT': ['A', ' ', 'd', 'e', 't', 'a', 'i', 'l', 'e', 'd', ...]}
+
+INITIAL BUG:
+Code did value[0] which only got first character 'A'.
+Result: Prompt became single letter!
+
+FIX APPLIED:
+Code now detects character arrays and joins them:
+• Check if list items are single-character strings
+• If yes: ''.join(value) to reconstruct full text
+• If no: Use first element (normal behavior)
+
+This handles both:
+• Normal string output: "refined prompt text"
+• Character array output: ['r','e','f','i','n','e','d',...] → "refined prompt text"
+
+
+4.6 TEMPLATE SYSTEM
+-------------------
+
+TEMPLATES:
+Pre-written example prompts showing HTML tag usage.
+
+LOCATION:
+scripts/addons/styleengine/templates/
+
+FILES:
+• STYLEENGINE_Empty.txt (blank template)
+• STYLEENGINE_Example.txt (basic example)
+• STYLEENGINE_Minimal.txt (minimal example)
+• STYLEENGINE_ConceptArt.txt (concept art style)
+• STYLEENGINE_Photorealistic.txt (photo style)
+• STYLEENGINE_Vizdev.txt (visualization dev)
+• STYLEENGINE_LoRas.txt (LoRa example)
+
+BEHAVIOR:
+• Templates auto-load as text blocks when Prompt Builder was enabled
+• User can switch between template text blocks
+• Templates provide examples and starting points
+• No template UI in current version (deprecated)
+
+CREATING CUSTOM TEMPLATES:
+1. Create .txt file in templates/ folder
+2. Name: STYLEENGINE_<YourName>.txt
+3. Content: Use HTML tag format
+4. Restart Blender or reload addon
+5. Template appears as text block
+
+
+================================================================================
+PART 5: GENERATION CONTROLS
+================================================================================
+
+5.1 OUTPUT PATH
+---------------
+
+LOCATION: N-panel, top section
+
+UI ELEMENT:
+┌───────────────────────────────┐
+│ 📁 Output Path:                │
+│ [C:\Projects\MyBlend_styleengine\generations] │
+│ [Browse...]                    │
+└───────────────────────────────┘
+
+BEHAVIOR:
+• Text field displays current output path
+• Folder icon button opens file browser
+• Path persists across Blender sessions
+• Default: <BlendName>_styleengine/generations/
+
+PURPOSE:
+Specifies where timestamped generation copies are saved.
+
+FILE NAMING:
+Format: YYYYMMDD_HHMMSS_mmm_<backend>.png
+Example: 20260127_143022_582_gcs.png
+
+Breakdown:
+• YYYYMMDD: Date (20260127 = Jan 27, 2026)
+• HHMMSS: Time (143022 = 2:30:22 PM)
+• mmm: Milliseconds (582)
+• backend: "gcs" or "runcomfy"
+• Extension: .png (always PNG format)
+
+
+5.2 GENERATION STATUS DISPLAY
+------------------------------
+
+LOCATION: N-panel, below Output Path (dynamic visibility)
+
+UI WHEN GENERATING:
+┌───────────────────────────────┐
+│ 🔄 Generating: 7s              │
+│ ⏱️ Previous: 12s               │
+└───────────────────────────────┘
+
+UI WHEN IDLE (after generation):
+┌───────────────────────────────┐
+│ ✓ Ready                        │
+│ ⏱️ Previous: 12s               │
+└───────────────────────────────┘
+
+BEHAVIOR:
+• Only visible in GCS backend mode
+• Appears when generation starts
+• Updates every ~1 second during generation
+• Shows elapsed time
+• Shows last generation time after completion
+• Auto-hides if idle with no previous generation
+
+VISUAL STATES:
+1. Hidden (no generations yet, idle)
+2. Generating (spinning icon, counting up)
+3. Ready (checkmark, showing last time)
+
+
+5.3 RESOLUTION SETTINGS
+-----------------------
+
+LOCATION: Scene properties (stored with scene)
+UI VISIBILITY: NOT currently visible in N-panel (UI simplified)
+ACCESS: Via Blender scene properties or console
+
+VALUES:
+• 512x512
+• 768x768
+• 1024x1024 (default, optimal)
+• 1536x1536
+• 2048x2048
+
+BEHAVIOR:
+• Stored in scene.style_engine_props.ai_resolution
+• Applied to workflow JSON before submission
+• Affects both render resolution and AI output
+• Higher = better quality but slower generation
+• Live update: Immediately updates Blender render settings
+
+RECOMMENDATION:
+• Start with 1024x1024 for speed
+• Use 1536+ for final renders
+• 512/768 for rapid iteration
+
+CURRENT UX:
+Resolution setting is currently not exposed in N-panel UI.
+Users work with default 1024x1024. This keeps UI minimal.
+Advanced users can access via Python console if needed.
+
+
+5.4 STEPS CONTROL
+-----------------
+
+LOCATION: Scene properties
+UI VISIBILITY: NOT currently visible in N-panel (UI simplified)
+
+PURPOSE:
+Controls AI denoising steps (quality vs speed tradeoff).
+
+RANGE: 15-30 steps (enforced minimum for quality)
+DEFAULT: 15 steps
+RECOMMENDED: 15-30 steps
+
+BEHAVIOR:
+• Higher = more refined image, longer generation
+• Lower = faster but potentially less detailed
+• Diminishing returns above 30 steps
+• Sent to ComfyUI workflow (KSampler node)
+
+TYPICAL VALUES:
+• 15 steps: Default balance
+• 20-25 steps: High quality
+• 30 steps: Maximum quality
+
+CURRENT UX:
+Steps setting not exposed in N-panel. Uses default of 15.
+Keeps interface simple and prevents quality issues from
+users setting steps too low (<15).
+
+
+5.5 INFLUENCE/DENOISE CONTROL
+------------------------------
+
+PROPERTY NAME: texture_influence
+LEGACY NAMES: depth_influence (old property, still exists)
+
+LOCATION: Scene properties
+UI VISIBILITY: NOT currently visible in N-panel (UI simplified)
+
+RANGE: 0.0 to 0.7 (enforced maximum to prevent over-adherence)
+DEFAULT: 0.25
+
+INTERPRETATION:
+• 0.0 = Full AI generation (100% denoise, ignore render)
+• 0.25 = Balanced (75% denoise, use render for structure) ← DEFAULT
+• 0.50 = Half influence (50% denoise)
+• 0.70 = Maximum allowed (30% denoise, keeps render mostly intact)
+
+BEHAVIOR:
+• Inverted when sent to workflow: denoise = 1.0 - influence
+• Controls how much AI deviates from your render
+• Lower influence = more creative freedom
+• Higher influence = closer to original render
+• Max clamped at 0.7 to prevent "no AI" results
+
+USE CASES:
+• 0.0-0.2: Stylistic transformation, loose interpretation
+• 0.2-0.4: Balanced AI + render structure (default range) ← RECOMMENDED
+• 0.4-0.7: Strong adherence to render
+
+CURRENT UX:
+Influence not exposed in N-panel. Uses default 0.25.
+This is a power-user feature that most users don't need to adjust.
+Keeps interface focused on core workflow: prompt → generate → result.
+
+
+5.6 LORA INTEGRATION
+--------------------
+
+LORA = "Low-Rank Adaptation" (AI model fine-tuning)
+
+LOCATION: Scene properties
+UI VISIBILITY: NOT currently visible in N-panel (UI simplified)
+
+UI ELEMENT (when exposed):
+LoRa: [Dropdown with available LoRas]
+Strength: [Slider 0.0-1.0]
+
+BEHAVIOR:
+• Dropdown fetches available LoRas from ComfyUI server
+• List cached for 5 minutes
+• "Refresh LoRa List" button clears cache
+• "None" option to disable LoRa
+• Strength controls how strongly LoRa affects generation
+
+LORA FILES:
+• Stored on ComfyUI server
+• Format: .safetensors files
+• Located in ComfyUI/models/loras/
+• Fetched via /object_info API endpoint
+
+TYPICAL LORAS:
+• Style-specific (anime, oil painting, pixel art)
+• Character-specific (specific person/creature)
+• Quality enhancers (detail, sharpness)
+• Lighting/mood (noir, neon, cinematic)
+
+USAGE (when UI exposed):
+1. Select LoRa from dropdown
+2. Set strength (0.5-1.0 typical)
+3. Generate
+4. Result blends base model + LoRa style
+
+CURRENT UX:
+LoRa UI is currently not visible in N-panel.
+LoRa system is functional and ready, but hidden to keep
+interface minimal and focused. Most users don't need LoRa
+for basic workflow. Can be re-enabled in future UI update.
+
+
+================================================================================
+PART 6: REFERENCE IMAGES (IPADAPTER)
+================================================================================
+
+6.1 OVERVIEW OF REFERENCE SYSTEM
+---------------------------------
+
+PURPOSE:
+Allows users to provide reference images that guide AI generation.
+
+TECHNOLOGY:
+IPAdapter (Image Prompt Adapter) nodes in ComfyUI.
+
+CATEGORIES (3 types):
+1. STYLE TRANSFER (ST) - 5 slots
+   • Influences artistic style, color palette, texture
+   • Example: Paint style, photo style, illustration style
+
+2. COMPOSITION (COMP) - 5 slots
+   • Influences layout, subject placement, framing
+   • Example: Pose reference, scene layout, object arrangement
+
+3. TRANSFER (SST = Strong Style Transfer) - 5 slots
+   • Strong influence on both style and composition
+   • Example: Direct style mimicry, heavy influence
+
+TOTAL: 15 reference image slots
+
+WORKFLOW INTEGRATION:
+• Images loaded into Blender as bpy.data.images
+• File paths stored in scene properties
+• During generation, images encoded to Base64
+• Sent to ComfyUI workflow as IPAdapter inputs
+• Each category has separate workflow nodes
+
+
+6.2 STYLE TRANSFER (5 SLOTS)
+-----------------------------
+
+SECTION UI:
+
+┌────────────────────────────────────┐
+│ ▼ Style                             │ ← Collapsible header
+│                                     │
+│ Global Strength: [█████-----] 0.50 │ ← Master slider
+│                                     │
+│ ┌────┐ ┌────┐ ┌────┐              │
+│ │ST1 │ │ST2 │ │ST3 │              │ ← 3-column grid
+│ │img │ │img │ │img │              │
+│ └────┘ └────┘ └────┘              │
+│ ┌────┐ ┌────┐                      │
+│ │ST4 │ │ST5 │                      │
+│ │img │ │img │                      │
+│ └────┘ └────┘                      │
+└────────────────────────────────────┘
+
+EACH SLOT CARD:
+
+┌──────────────┐
+│ ST1          │ ← Label
+│ ┌──────────┐ │
+│ │          │ │ ← Thumbnail preview
+│ │ [IMAGE]  │ │
+│ │          │ │
+│ └──────────┘ │
+│ sunset.jpg   │ ← Filename
+│ Weight: 0.8  │ ← Individual weight slider
+│ [📁] [X] [↻] │ ← Load, Clear, Reload buttons
+└──────────────┘
+
+BEHAVIOR:
+
+1. Click Load Button (📁)
+   • File browser opens
+   • User selects image file (PNG, JPG, etc.)
+   • Image loaded into Blender
+   • Thumbnail generated and displayed
+   • Filename shown below thumbnail
+
+2. Weight Slider
+   • Range: 0.0 to 2.0
+   • Default: 1.0
+   • Controls per-image influence
+   • Multiplied with global strength
+
+3. Clear Button (X)
+   • Removes image from slot
+   • Resets weight to 1.0
+   • Slot shows "Empty" placeholder
+
+4. Reload Button (↻)
+   • Only visible if image loaded
+   • Reloads image from disk
+   • Useful if file changed externally
+
+GLOBAL STRENGTH:
+• Range: 0.0 to 2.0
+• Default: 0.5
+• Affects ALL 5 slots proportionally
+• Final influence = global_strength × individual_weight
+
+
+6.3 COMPOSITION (5 SLOTS)
+--------------------------
+
+IDENTICAL UI TO STYLE TRANSFER, but:
+
+PURPOSE:
+Controls layout, subject placement, and spatial arrangement.
+
+USE CASES:
+• Reference a pose (human/creature)
+• Reference a scene layout (buildings, landscape)
+• Reference object placement (still life, product)
+
+DIFFERENCE FROM STYLE:
+• Focuses on WHERE things are, not HOW they look
+• Preserves shapes and positions
+• Less influence on colors/textures
+
+SLOTS: COMP1, COMP2, COMP3, COMP4, COMP5
+
+
+6.4 TRANSFER/FORCE (5 SLOTS)
+-----------------------------
+
+IDENTICAL UI TO STYLE TRANSFER, but:
+
+PURPOSE:
+Strong influence on both style AND composition.
+
+WHEN TO USE:
+• Want to closely match a reference image
+• Need heavy guidance from reference
+• Combining multiple strong influences
+
+WARNING:
+• Can overpower prompt if strength too high
+• May produce results too similar to reference
+• Use lower global strength (0.2-0.4) typically
+
+SLOTS: SST1, SST2, SST3, SST4, SST5
+
+
+6.5 GLOBAL STRENGTH SLIDERS
+----------------------------
+
+THREE SLIDERS (one per category):
+
+1. style_transfer_strength
+   • Scene property
+   • Range: 0.0 to 2.0
+   • Default: 0.5
+   • Affects ST1-ST5
+
+2. composition_strength
+   • Scene property
+   • Range: 0.0 to 2.0
+   • Default: 0.5
+   • Affects COMP1-COMP5
+
+3. force_transfer_strength
+   • Scene property
+   • Range: 0.0 to 2.0
+   • Default: 0.5
+   • Affects SST1-SST5
+
+INTERACTION:
+Global strength × Individual weight = Final IPAdapter strength
+
+EXAMPLE:
+• Global: 0.5
+• Individual: 0.8
+• Final: 0.5 × 0.8 = 0.4 sent to workflow
+
+
+6.6 INDIVIDUAL IMAGE WEIGHTS
+-----------------------------
+
+EACH SLOT HAS WEIGHT SLIDER:
+
+UI:
+┌─────────────────┐
+│ Weight: [█----] 0.8 │
+└─────────────────┘
+
+RANGE: 0.0 to 2.0
+DEFAULT: 1.0
+
+PURPOSE:
+Fine-tune influence of specific images within category.
+
+USE CASES:
+• Emphasize one reference over others
+• Subtle influence from one, strong from another
+• Blend multiple styles with different ratios
+
+PROPERTY NAMES:
+st1_weight, st2_weight, ..., sst5_weight
+
+
+6.7 LOADING, CLEARING, RELOADING IMAGES
+----------------------------------------
+
+LOAD OPERATION:
+
+1. User clicks Load button (📁)
+2. Blender file browser opens
+3. User navigates to image file
+4. User clicks "Accept"
+5. Image loaded via bpy.data.images.load()
+6. File path stored in scene property
+7. Thumbnail generated via preview collection
+8. UI updates to show image
+
+SUPPORTED FORMATS:
+• PNG, JPG, JPEG
+• TGA, BMP, TIFF
+• EXR (high dynamic range)
+
+CLEAR OPERATION:
+
+1. User clicks Clear button (X icon)
+2. Confirmation dialog (optional, not currently implemented)
+3. Image property set to None
+4. Weight reset to 1.0
+5. Thumbnail removed
+6. UI shows "Empty" placeholder
+
+RELOAD OPERATION:
+
+1. User clicks Reload button (↻ icon)
+2. Image reloaded from file path
+3. Thumbnail regenerated
+4. Useful if:
+   • File was edited externally
+   • Image appears outdated
+   • Thumbnail corruption
+
+
+6.8 THUMBNAIL DISPLAY SYSTEM
+-----------------------------
+
+TECHNOLOGY:
+Blender's bpy.utils.previews system (persistent across redraws).
+
+IMPLEMENTATION:
+• Preview collection: preview_collections["ref_images"]
+• Unique keys per image: "<slot_id>_<image_name>"
+• Loaded once, cached until cleared
+• Displayed via template_icon() in UI
+
+THUMBNAIL GENERATION:
+1. Image loaded into Blender
+2. Absolute path resolved: bpy.path.abspath(img.filepath)
+3. Preview loaded: pcoll.load(key, path, 'IMAGE')
+4. Icon ID retrieved: pcoll[key].icon_id
+5. Displayed in UI: template_icon(icon_value=icon_id)
+
+FALLBACK BEHAVIOR:
+• If preview fails to load: Show [Preview] text label
+• If image not found: Show [Missing] text label
+• If no image: Show "Empty" label with ADD icon
+
+VISUAL QUALITY:
+• Thumbnails automatically scaled to UI size
+• Aspect ratio preserved
+• High-quality rendering in UI
+
+
+================================================================================
+PART 7: ADVANCED FEATURES
+================================================================================
+
+7.1 TEXTURE PROJECTION
+----------------------
+
+FEATURE: Project AI image onto 3D objects from camera perspective.
+
+LOCATION: Pie Menu → BOTTOM-LEFT (Project Texture)
+
+REQUIREMENTS:
+• AI image generated (current_ai.png exists)
+• Objects selected in 3D viewport
+• Camera set up (ai_camera)
+
+USER FLOW:
+
+1. Generate AI image
+2. Select objects to receive texture
+3. Press Alt+W → Click BOTTOM-LEFT
+4. Watch console for progress
+
+WHAT HAPPENS:
+
+1. Duplicate current_ai.png → iteration file
+   • Saves timestamped copy (avoids overwrite)
+   • Format: Iteration_###.png
+
+2. For each selected object:
+   • Check if has material
+   • Create new material if needed
+   • Add Image Texture node
+   • Load iteration image
+   • UV unwrap (Smart UV or existing UVs)
+   • Connect to shader
+
+3. Camera Projection Setup:
+   • Image mapped from camera view
+   • Locked to perspective at generation time
+   • Moving camera doesn't affect projection
+
+OPTIONS:
+
+Archival Materials (future):
+• "Freeze" texture to iteration file
+• Prevents updates when generating new images
+• Allows mixing multiple generations on different objects
+
+TYPICAL WORKFLOW:
+1. Model building facades
+2. Generate brick texture AI
+3. Project onto buildings
+4. Move camera, generate windows
+5. Project onto window objects
+6. Iterate across entire scene
+
+
+7.2 UV TEXTURE GENERATION
+--------------------------
+
+FEATURE: Generate UV-mapped textures directly from 3D mesh.
+
+LOCATION: Pie Menu → TOP (UV Texture)
+
+TECHNOLOGY: Hunyuan 3D 2.1 (text-to-3D model in ComfyUI)
+
+REQUIREMENTS:
+• GCS backend mode (not RunComfy)
+• .blend file saved (exports mesh)
+• Selected object is MESH type
+• current_ai.png exists (used as reference)
+
+USER FLOW:
+
+1. Model your 3D object
+2. Select it (single object)
+3. Generate AI reference image (any prompt)
+4. Press Alt+W → Click TOP
+5. Wait 1-2 minutes (background processing)
+
+WHAT HAPPENS:
+
+1. Export Phase
+   • Selected mesh exported as .glb file
+   • Format: <ObjectName>_<timestamp>.glb
+   • Temp directory: %TEMP%/styleengine_uv/
+
+2. Upload Phase
+   • Upload .glb to ComfyUI server
+   • Upload current_ai.png as reference
+   • Server stores in input/ directory
+
+3. Workflow Phase
+   • Load objectUVTexture.json workflow
+   • Patch Node 55: mesh file path
+   • Patch Node 14: reference image
+   • Patch Node 32: output name
+   • Submit to ComfyUI queue
+
+4. Processing Phase (1-2 minutes)
+   • Hunyuan 3D 2.1 generates UV texture
+   • Creates PBR material maps:
+     - Base Color
+     - Normal Map
+     - Roughness
+     - Metallic
+   • Packs into single .glb with texture
+
+5. Download Phase
+   • Poll for completion
+   • Download textured .glb
+   • Save to temp directory
+
+6. Import Phase
+   • Import .glb back into Blender
+   • Place at original object location
+   • Material automatically assigned
+   • Original object hidden (not deleted)
+
+RESULT:
+New object with fully textured, UV-unwrapped mesh.
+
+USE CASES:
+• Quick asset creation
+• Texture generation for game assets
+• Concept exploration (multiple variations)
+• Product visualization
+
+
+7.3 GENERATION BROWSER
+-----------------------
+
+FEATURE: Navigate through generation history.
+
+STATUS: Partially implemented (backend ready, UI pending)
+
+CONCEPT:
+• All generations saved with timestamps
+• Metadata JSON tracks each generation:
+  - Timestamp
+  - Prompt used
+  - Settings (steps, influence, etc.)
+  - Reference images used
+  - File path
+• UI provides prev/next navigation
+• Click to load previous generation as current_ai.png
+• "Remix" button to generate from old prompt
+
+FUTURE UI MOCKUP:
+
+┌──────────────────────────────────┐
+│ 📷 Generation Browser             │
+│                                   │
+│ [◀ Prev]  [▶ Next]  [Remix]     │
+│                                   │
+│ ┌──────────────────────────────┐ │
+│ │                              │ │
+│ │    [THUMBNAIL]               │ │
+│ │                              │ │
+│ └──────────────────────────────┘ │
+│                                   │
+│ 20260127_143022_582_gcs.png      │
+│ Prompt: medieval castle...        │
+│ Steps: 20, Influence: 0.25       │
+└──────────────────────────────────┘
+
+
+7.4 VISUALIZATION MODES
+------------------------
+
+FEATURE: Switch between Combined, Canny, Depth views.
+
+LOCATION: Pie Menu → RIGHT (Visualization)
+
+MODES:
+
+1. Combined (Final)
+   • Shows: current_ai.png (final AI generation)
+   • Default view after generation
+   • What user sees as final result
+
+2. Silhouette (Canny)
+   • Shows: canny.png (edge detection)
+   • Black background, white edges
+   • ControlNet input for composition
+   • Helps understand what AI "sees" for structure
+
+3. Depth
+   • Shows: depth.png (depth map)
+   • Grayscale: white=close, black=far
+   • ControlNet input for 3D structure
+   • Helps understand depth perception
+
+USER FLOW:
+
+1. Generate AI image
+2. Press Alt+W → Click RIGHT
+3. Cycles: Combined → Canny → Depth → Combined
+
+BEHAVIOR:
+• Updates camera background image
+• Switches between 3 PNG files in temp dir
+• Console shows: [Visualization] ✓ Switched to: <Mode>
+
+PURPOSE:
+• Debug ControlNet inputs
+• Understand how AI interprets scene
+• Educational (show edge/depth processing)
+
+
+7.5 PREVIEW IMAGES (CANNY/DEPTH)
+---------------------------------
+
+FEATURE: Download and display edge and depth maps.
+
+SETTING: Download Preview Images (Preferences)
+
+FILES:
+• canny.png (edge detection via Canny algorithm)
+• depth.png (depth map from depth estimation)
+
+GENERATION:
+• Created server-side during workflow
+• SaveImage nodes in ComfyUI workflow (nodes 133, 134)
+• Downloaded automatically if enabled
+• Stored in temp directory
+
+USAGE:
+• Visual feedback for ControlNet inputs
+• Debugging composition issues
+• Understanding AI interpretation
+
+VISUALIZATION:
+• Access via Visualization switcher
+• Or view files directly in temp folder
+
+
+7.6 SESSION MANAGEMENT
+-----------------------
+
+CONCEPT: Each Blender session gets unique ID.
+
+SESSION ID FORMAT:
+YYYYMMDD_HHMMSS_<random6>
+
+Example: 20260127_143022_abc123
+
+BEHAVIOR:
+• Generated on first workspace setup
+• Persists for entire Blender session
+• Temp directory locked to session
+• Console logs session ID
+
+PURPOSE:
+• Avoid conflicts between multiple Blender instances
+• Unique temp directory per session
+• Debugging (identify which session created files)
+
+
+7.7 PER-PROJECT LIBRARIES
+--------------------------
+
+CONCEPT: Each .blend file gets its own styleengine folder.
+
+DIRECTORY STRUCTURE:
+
+MyProject.blend (saved file)
+MyProject_styleengine/ (auto-created)
+├── generations/         (all timestamped generations)
+│   ├── 20260127_143022_582_gcs.png
+│   ├── 20260127_143156_391_gcs.png
+│   └── ...
+├── iterations/          (projected texture snapshots)
+│   ├── Iteration_000.png
+│   ├── Iteration_001.png
+│   └── ...
+├── preview/             (canny/depth maps)
+│   ├── canny.png
+│   └── depth.png
+├── current_ai.png       (latest generation, symlink)
+└── project_metadata.json (generation history)
+
+BEHAVIOR:
+• Created when .blend file is saved
+• Persists across sessions
+• Moves with .blend file (relative path)
+• Backed up with project
+
+TEMP DIRECTORY (per session):
+C:\Users\<USER>\AppData\Local\Temp\blender_styleengine\ai_vision\
+├── combined.jpg         (render sent to AI)
+├── current_ai.png       (latest generation)
+├── canny.png            (edge map)
+└── depth.png            (depth map)
+
+MIGRATION:
+• On .blend save: Copies temp files to project library
+• On .blend load: Restores from project library
+• Seamless transition between temp and project
+
+
+================================================================================
+PART 8: PIE MENU DEEP DIVE
+================================================================================
+
+8.1 ALT+W ACTIVATION
+--------------------
+
+HOTKEY: Alt + W
+
+REGISTRATION:
+• Registered in __init__.py during addon enable
+• Works in Object, Edit, Sculpt, Pose modes
+• Cross-platform: Windows, macOS, Linux compatible
+
+VISUAL APPEARANCE:
+• 6 pie slices (directions)
+• Text labels on each slice
+• Icons for each operation
+• Radial layout from center
+
+INTERACTION:
+• Press Alt+W
+• Move mouse toward desired direction
+• Release to activate
+• Or click direction
+• ESC to cancel
+
+
+8.2 LEFT: SETUP WORKSPACE
+--------------------------
+
+LABEL: "Setup Workspace"
+ICON: WINDOW
+OPERATOR: style_engine.setup_workspace
+
+PURPOSE:
+Creates the AI Vision dual-viewport workspace.
+
+WHEN TO USE:
+• First time in a new .blend file
+• After accidentally closing workspace
+• When starting new AI project
+
+WHAT IT DOES:
+(See PART 3.2 for detailed breakdown)
+
+CONSOLE OUTPUT:
+[Style Engine] 🆔 Session ID: 20260127_143022_abc123
+[Style Engine] Temp directory: C:\...\ai_vision
+[Style Engine] Created new ai_camera
+[Style Engine] ✓ Loaded workspace template successfully
+[Style Engine] ✓ Configured text editor: STYLEENGINE_Prompt
+Info: AI Vision workspace created successfully!
+
+
+8.3 BOTTOM: GENERATE AI QUICK
+------------------------------
+
+LABEL: "Generate AI Quick"
+ICON: IMAGE_DATA
+OPERATOR: style_engine.generate_ai_quick
+
+PURPOSE:
+Triggers full AI generation pipeline.
+
+WHAT IT DOES:
+1. Reads prompt from text editor
+2. Renders scene (Workbench)
+3. Sends to ComfyUI
+4. Polls for result
+5. Updates camera background
+
+SHORTCUT LOGIC:
+Most common operation, placed at BOTTOM for easy access
+(mouse naturally moves down).
+
+
+8.4 TOP: UV TEXTURE
+-------------------
+
+LABEL: "UV Texture"
+ICON: UV
+OPERATOR: style_engine.uv_texture
+
+PURPOSE:
+Generate UV-mapped textures for selected mesh.
+
+REQUIREMENTS:
+• GCS mode
+• Mesh selected
+• .blend file saved
+
+WHAT IT DOES:
+(See PART 7.2 for detailed breakdown)
+
+
+8.5 RIGHT: VISUALIZATION
+-------------------------
+
+LABEL: "Visualize"
+ICON: IMAGE_PLANE
+OPERATOR: style_engine.cycle_visualization
+
+PURPOSE:
+Cycle between Combined, Canny, Depth views.
+
+BEHAVIOR:
+• No parameters needed
+• Cycles through 3 modes
+• Updates camera background automatically
+
+
+8.6 BOTTOM-LEFT: PROJECT TEXTURE
+---------------------------------
+
+LABEL: "Project Texture"
+ICON: TEXTURE
+OPERATOR: style_engine.project_texture_scene
+
+PURPOSE:
+Project current AI image onto selected objects.
+
+REQUIREMENTS:
+• current_ai.png exists
+• Objects selected
+
+WHAT IT DOES:
+(See PART 7.1 for detailed breakdown)
+
+
+8.7 BOTTOM-RIGHT: RENDER PASSES
+--------------------------------
+
+LABEL: "Render Passes"
+ICON: RENDER_RESULT
+OPERATOR: style_engine.render_ai_passes_quick
+
+PURPOSE:
+Re-render Workbench passes (combined, canny, depth).
+
+WHEN TO USE:
+• After moving camera
+• After changing geometry
+• After adjusting viewport settings
+• Before generating (ensure passes are fresh)
+
+WHAT IT DOES:
+1. Render combined pass (Workbench)
+2. Save as combined.jpg
+3. Optionally generate canny and depth
+4. Console confirms each step
+
+
+8.8 CONTEXT SENSITIVITY
+------------------------
+
+PIE MENU ADAPTS TO CONTEXT:
+
+IF NO WORKSPACE:
+• Setup button enabled
+• Others may show warnings
+
+IF NO AI IMAGE:
+• Visualization grayed out
+• Project Texture grayed out
+
+IF WRONG BACKEND:
+• UV Texture shows error (requires GCS)
+
+IF NO SELECTION:
+• Project Texture shows warning
+
+
+================================================================================
+PART 9: BACKEND MODES
+================================================================================
+
+9.1 GCS (SELF-HOSTED COMFYUI)
+------------------------------
+
+FULL NAME: "GCS (Self-hosted ComfyUI)"
+
+WHAT IT IS:
+Direct connection to a ComfyUI instance running on:
+• Google Cloud Services (GCS)
+• Amazon Web Services (AWS)
+• Local machine (localhost)
+• Any server with HTTP access
+
+CONFIGURATION:
+• Server URL: http://IP:PORT
+  Example: http://34.145.107.158:8188
+  Example: http://127.0.0.1:8188 (local)
+
+CONNECTION METHOD:
+• Direct HTTP requests to ComfyUI Backend API
+• POST /prompt (queue workflows)
+• GET /history/{prompt_id} (check status)
+• POST /upload/image (upload files)
+• GET /view (download results)
+
+ADVANTAGES:
+• Full control over ComfyUI instance
+• Access to all ComfyUI features
+• Custom workflows supported
+• No API usage limits
+• Preview images (canny/depth) available
+• UV texture generation works
+• LLM prompt refinement works
+
+DISADVANTAGES:
+• Must maintain server instance
+• Requires technical setup
+• Costs for cloud hosting
+• Must install dependencies (ControlNet, IPAdapter, etc.)
+
+TYPICAL USE CASE:
+• Studios with dedicated infrastructure
+• Heavy users (many generations per day)
+• Need custom workflows
+• Privacy concerns (keep data on own servers)
+
+
+9.2 RUNCOMFY CLOUD (SERVERLESS)
+--------------------------------
+
+FULL NAME: "RunComfy Cloud"
+
+WHAT IT IS:
+Managed cloud service that runs ComfyUI workflows on-demand.
+
+CONFIGURATION:
+• API Token: Long authentication string
+• User ID: Your RunComfy account identifier
+
+CONNECTION METHOD:
+• RunComfy REST API (not direct ComfyUI)
+• POST /deployments (ensure deployment exists)
+• POST /run (submit workflow)
+• GET /status (poll for results)
+• Base64-encoded images in JSON responses
+
+ADVANTAGES:
+• No server maintenance
+• Pay-per-use pricing
+• Instant scaling
+• Pre-installed ComfyUI dependencies
+• Always latest ComfyUI version
+
+DISADVANTAGES:
+• API usage costs
+• Limited workflow customization
+• No preview images (canny/depth)
+• No UV texture support
+• No LLM refinement
+• Requires internet connection
+• Dependent on third-party service
+
+TYPICAL USE CASE:
+• Individual artists
+• Occasional usage
+• Don't want to manage infrastructure
+• Rapid prototyping
+
+
+9.3 BACKEND COMPARISON
+----------------------
+
+FEATURE                 | GCS (Self-Hosted) | RunComfy Cloud
+------------------------|-------------------|----------------
+Setup Difficulty        | High             | Low
+Maintenance Required    | Yes              | No
+Cost Model              | Fixed (server)   | Pay-per-use
+Image Generation        | ✓                | ✓
+Reference Images        | ✓                | ✓
+LoRa Support            | ✓                | ✓
+Preview Images          | ✓                | ✗
+UV Texture Generation   | ✓                | ✗
+LLM Prompt Refinement   | ✓                | ✗
+Custom Workflows        | ✓                | Limited
+Privacy                 | High             | Medium
+Requires Internet       | Optional*        | Always
+Speed                   | Fast             | Variable
+
+*GCS can run on localhost without internet
+
+
+9.4 SWITCHING BACKENDS
+-----------------------
+
+PROCESS:
+
+1. Open Preferences
+   Edit → Preferences → Add-ons → Style Engine
+
+2. Change Backend Dropdown
+   Select: "GCS" or "RunComfy Cloud"
+
+3. Configure New Backend
+   GCS: Enter server URL → Test Connection
+   RunComfy: Import credentials → Test Connection
+
+4. Verify Success
+   Green checkmark appears
+
+5. Continue Generating
+   Existing workspace and prompts preserved
+   Only backend connection changes
+
+NOTES:
+• Switch anytime, even mid-project
+• All features work in GCS mode
+• Some features limited in RunComfy mode
+• UI adapts based on active backend
+  (e.g., UV Texture button disabled in RunComfy)
+
+
+================================================================================
+PART 10: FILE ORGANIZATION
+================================================================================
+
+10.1 TEMP DIRECTORY STRUCTURE
+------------------------------
+
+LOCATION (Windows):
+C:\Users\<USERNAME>\AppData\Local\Temp\blender_styleengine\ai_vision\
+
+LOCATION (macOS/Linux):
+/tmp/blender_styleengine/ai_vision/
+
+CONTENTS:
+
+current_ai.png
+  • Latest AI generation
+  • Displayed as camera background
+  • Overwritten with each new generation
+  • PNG format, always
+
+combined.jpg
+  • Your Blender render (Workbench)
+  • Sent to ComfyUI as img2img input
+  • Updated before each generation
+  • JPEG format (faster upload)
+
+canny.png
+  • Canny edge detection output
+  • ControlNet input visualization
+  • Optional (if preview downloads enabled)
+  • PNG format
+
+depth.png
+  • Depth map from depth estimation
+  • ControlNet input visualization
+  • Optional (if preview downloads enabled)
+  • PNG format, grayscale
+
+SESSION LOCKING:
+• Directory locked to session ID
+• Multiple Blender instances get separate directories
+• Cleanup on Blender exit
+
+
+10.2 PROJECT LIBRARY SYSTEM
+----------------------------
+
+CREATION:
+Automatically created when .blend file is saved.
+
+LOCATION:
+<BlendFileName>_styleengine/
+
+EXAMPLE:
+MyAwesomeProject.blend
+MyAwesomeProject_styleengine/
+├── generations/
+├── iterations/
+├── preview/
+├── current_ai.png
+└── project_metadata.json
+
+BENEFITS:
+• Portable (moves with .blend file)
+• Version control friendly
+• Persistent across sessions
+• Organized by project
+
+
+10.3 GENERATION FILES
+----------------------
+
+LOCATION:
+<ProjectName>_styleengine/generations/
+
+NAMING:
+YYYYMMDD_HHMMSS_mmm_backend.png
+
+EXAMPLES:
+20260127_143022_582_gcs.png
+20260127_143156_391_gcs.png
+20260127_144512_923_runcomfy.png
+
+METADATA:
+Each generation can have associated metadata in project_metadata.json:
+{
+  "20260127_143022_582_gcs": {
+    "timestamp": "2026-01-27T14:30:22.582Z",
+    "prompt": "medieval castle at sunset",
+    "settings": {
+      "steps": 20,
+      "influence": 0.25,
+      "resolution": "1024x1024"
+    },
+    "reference_images": ["sunset.jpg"],
+    "backend": "gcs"
+  }
+}
+
+
+10.4 PREVIEW FILES
+------------------
+
+LOCATION:
+<ProjectName>_styleengine/preview/
+
+FILES:
+• canny.png (edge detection)
+• depth.png (depth map)
+
+BEHAVIOR:
+• Updated with each generation
+• Overwrite previous versions
+• Optional (controlled by preference)
+
+PURPOSE:
+• Visual feedback
+• Debugging
+• Educational
+
+
+10.5 ITERATION SYSTEM
+----------------------
+
+LOCATION:
+<ProjectName>_styleengine/iterations/
+
+NAMING:
+Iteration_000.png
+Iteration_001.png
+Iteration_002.png
+...
+
+CREATION:
+• Created when using "Project Texture"
+• Snapshots of current_ai.png
+• Prevents overwriting when generating new images
+
+WORKFLOW:
+1. Generate AI image
+2. Project onto object (creates Iteration_000.png)
+3. Generate new AI image
+4. Project onto different object (creates Iteration_001.png)
+5. Both objects keep their textures independently
+
+PURPOSE:
+• Mix multiple generations in one scene
+• Archival (preserve specific generations)
+• Allow iterative workflow
+
+
+================================================================================
+PART 11: ERROR STATES & FEEDBACK
+================================================================================
+
+11.1 STATUS MESSAGES (INFO/WARNING/ERROR)
+------------------------------------------
+
+BLENDER'S INFO AREA:
+• Top-right corner of window
+• Popup messages appear
+• Three severity levels:
+
+INFO (Blue Icon):
+• "AI Vision workspace created successfully!"
+• "Prompt refined successfully!"
+• "Generation complete"
+
+WARNING (Orange Icon):
+• "Request not found or already completed"
+• "Server connection check failed"
+
+ERROR (Red Icon):
+• "STYLEENGINE_Prompt text block not found"
+• "No <p> tag found in prompt text"
+• "Prompt refinement only works in Server mode"
+
+DISPLAY:
+• Auto-disappears after 5-10 seconds
+• Click to dismiss immediately
+• Hover for full text (if truncated)
+
+
+11.2 CONSOLE LOGGING
+--------------------
+
+ACCESS:
+• Windows: Window → Toggle System Console
+• macOS/Linux: Launch Blender from terminal
+
+PREFIX SYSTEM:
+[Style Engine] - General addon messages
+[Refine Prompt] - LLM refinement feature
+[GCS] - GCS backend operations
+[Server API] - ComfyUI server communication
+[RunComfy] - RunComfy cloud operations
+[UV Texture] - UV texture generation
+[Visualization] - View switching
+
+LOG LEVELS:
+
+✓ Success:
+[Style Engine] ✓ Workspace has 6 areas
+
+⚠️ Warning:
+[Style Engine] ⚠️ PIL not available, encoding without resize
+
+❌ Error:
+[Refine Prompt] ❌ No text output found in nodes 17 or 19
+
+ℹ️ Info:
+[Style Engine] ℹ️ HeavyPoly not detected, pie injection skipped
+
+VERBOSITY:
+• Normal: Key events only
+• Debug mode: Detailed step-by-step
+• Enable in Preferences → Advanced Settings
+
+
+11.3 COMMON ERROR MESSAGES
+---------------------------
+
+ERROR: "STYLEENGINE_Prompt text block not found"
+CAUSE: Workspace not set up, or text block deleted
+FIX: Run "Setup Workspace" again
+
+ERROR: "No <p> tag found in prompt text"
+CAUSE: Invalid prompt format in text editor
+FIX: Add <p></p> tags around your prompt
+
+ERROR: "Prompt refinement only works in Server mode (GCS)"
+CAUSE: Using RunComfy backend
+FIX: Switch to GCS backend in preferences
+
+ERROR: "PromptRefiner.json not found"
+CAUSE: Workflow file missing from workflows/ folder
+FIX: Reinstall addon or verify file exists
+
+ERROR: "No object selected. Please select a mesh object."
+CAUSE: Trying to use UV Texture with nothing selected
+FIX: Select a mesh object first
+
+ERROR: "Selected object 'Cube' is not a mesh (type: CAMERA)"
+CAUSE: Selected wrong object type
+FIX: Select a MESH object
+
+ERROR: "current_ai.png not found. Generate an image first."
+CAUSE: No AI generation exists yet
+FIX: Generate an image before projecting/UV texturing
+
+ERROR: "Workflow not found: objectUVTexture.json"
+CAUSE: Missing workflow file
+FIX: Verify workflows/ folder integrity
+
+ERROR: "Server connection check failed"
+CAUSE: ComfyUI server not running or wrong URL
+FIX: Verify server is running, check URL/port
+
+
+11.4 PROGRESS INDICATORS
+-------------------------
+
+GENERATION STATUS:
+• Appears in N-panel during generation
+• Updates every ~1 second
+• Shows: "Generating: 7s"
+• Spinning icon (RENDER_ANIMATION)
+
+CONSOLE PROGRESS:
+• Step-by-step messages
+• Timestamps for each step
+• File sizes for uploads/downloads
+• Timing information
+
+EXAMPLE CONSOLE FLOW:
+[Style Engine] Rendering combined pass...
+[Style Engine] Render took 0.12s
+[Style Engine] ✓ Combined pass: 30.2 KB
+[GCS] Uploading combined.jpg to server...
+[GCS] ✓ Combined image uploaded (0.281s)
+[GCS] ✓ Workflow patched successfully
+[GCS] ⏱️ Submission took 0.202s
+[Server API] Started polling for request...
+[Server API] Request 02683d71: in_queue → success
+[GCS] Downloading final image...
+[GCS] ✅ Saved: current_ai.png
+
+
+11.5 TIMEOUT HANDLING
+----------------------
+
+GENERATION TIMEOUT:
+• No built-in timeout for image generation
+• Polling continues until completion
+• Can be manually cancelled (future feature)
+
+LLM REFINEMENT TIMEOUT:
+• 60 second maximum wait
+• Polls every 2 seconds (30 checks)
+• Shows: "[Refine Prompt] Waiting... (8s/60s)"
+• Error after timeout: "Prompt refinement timed out"
+
+SERVER CONNECTION TIMEOUT:
+• 30 seconds default (configurable in preferences)
+• Applies to initial connection test
+• Error if exceeded: "Connection timeout"
+
+
+================================================================================
+PART 12: KEYBOARD SHORTCUTS
+================================================================================
+
+12.1 ALT+W (PIE MENU)
+---------------------
+
+HOTKEY: Alt + W
+
+FUNCTION: Opens Style Engine pie menu
+
+DIRECTIONS:
+• LEFT: Setup Workspace
+• BOTTOM: Generate AI Quick
+• TOP: UV Texture
+• RIGHT: Visualize
+• BOTTOM-LEFT: Project Texture
+• BOTTOM-RIGHT: Render Passes
+
+USAGE:
+1. Press and hold Alt+W
+2. Move mouse in desired direction
+3. Release to activate
+
+OR:
+1. Press Alt+W
+2. Click desired pie slice
+3. Action executes
+
+
+12.2 FUTURE SHORTCUTS (PLANNED)
+--------------------------------
+
+Not yet implemented, but planned:
+
+Alt+R: Refine Prompt
+• Quick access to LLM refinement
+• Cursor focus in text editor
+
+Shift+Alt+G: Generate AI Quick
+• Alternative to pie menu
+• Direct generation trigger
+
+Ctrl+Alt+P: Project Texture
+• Quick project operation
+• Requires selection
+
+
+================================================================================
+PART 13: POWER USER WORKFLOWS
+================================================================================
+
+13.1 ITERATIVE REFINEMENT LOOP
+-------------------------------
+
+GOAL: Achieve perfect result through iteration.
+
+WORKFLOW:
+
+1. Initial Generation
+   • Write basic prompt
+   • Generate with default settings
+   • Evaluate result
+
+2. Adjust Prompt
+   • Too stylized? Add keywords like "photorealistic"
+   • Too realistic? Add keywords like "concept art, illustration"
+   • Wrong composition? Add camera angle descriptions
+   • Generate again
+
+3. Tune Parameters
+   • Too close to render? Lower influence (0.1-0.2)
+   • Too abstract? Raise influence (0.4-0.6)
+   • Low quality? Increase steps (25-30)
+   • Generate again
+
+4. Add Reference Images
+   • Want specific style? Load style transfer reference
+   • Want specific composition? Load composition reference
+   • Adjust global strength and individual weights
+   • Generate again
+
+5. Refine with LLM
+   • Prompt too vague? Use "Refine Prompt (LLM)"
+   • Review enhanced prompt
+   • Edit if needed
+   • Generate again
+
+6. Project and Archive
+   • Happy with result? Project onto objects
+   • Creates Iteration_###.png
+   • Move on to next element
+
+TIPS:
+• Save often (preserves generation history)
+• Take notes of successful settings
+• Build library of reference images
+
+
+13.2 MULTI-OBJECT TEXTURING
+----------------------------
+
+GOAL: Apply different AI generations to different objects.
+
+WORKFLOW:
+
+1. Model Scene
+   • Create all objects (buildings, ground, props, etc.)
+   • Position everything
+
+2. First Object Set (e.g., Buildings)
+   • Select buildings
+   • Write prompt: "brick facade, weathered stone"
+   • Generate
+   • Project texture → Iteration_000.png
+
+3. Second Object Set (e.g., Ground)
+   • Select ground plane
+   • Write prompt: "cobblestone street, worn, puddles"
+   • Generate (overwrites current_ai.png)
+   • Project texture → Iteration_001.png
+   • Buildings keep Iteration_000.png (unaffected)
+
+4. Third Object Set (e.g., Props)
+   • Select props
+   • Write prompt: "rusty metal, aged wood"
+   • Generate
+   • Project texture → Iteration_002.png
+   • Previous objects unaffected
+
+5. Final Composite
+   • All objects have unique AI textures
+   • Export scene or render final image
+
+KEY ADVANTAGE:
+Iteration system prevents textures from updating when new
+images are generated, allowing complex multi-textured scenes.
+
+
+13.3 GENERATION REMIXING
+-------------------------
+
+GOAL: Reuse and build upon previous generations.
+
+WORKFLOW (FUTURE):
+
+1. Generate Initial Image
+   • Save generation with good settings
+
+2. Load from Browser
+   • Open generation browser
+   • Navigate to previous generation
+   • Load as current_ai.png
+
+3. Remix with New Settings
+   • Adjust prompt slightly
+   • Change reference images
+   • Generate again (uses old generation as base)
+
+4. Compare Results
+   • Toggle between versions
+   • Select best
+
+CURRENT WORKAROUND:
+• Manually load previous generation image
+• Use as reference image in IPAdapter
+• Generate with new prompt
+
+
+13.4 STYLE EXPLORATION
+-----------------------
+
+GOAL: Explore different artistic styles for same scene.
+
+WORKFLOW:
+
+1. Set Up Scene
+   • Model geometry
+   • Position camera
+   • Write base prompt (describe scene objectively)
+
+2. Style Variation 1: Photorealistic
+   • Keywords: <k>8k, photorealistic, DSLR</k>
+   • Generate and save
+
+3. Style Variation 2: Concept Art
+   • Keywords: <k>concept art, digital painting, matte painting</k>
+   • Generate and save
+
+4. Style Variation 3: Anime
+   • Keywords: <k>anime, cel-shaded, Studio Ghibli style</k>
+   • Generate and save
+
+5. Style Variation 4: Oil Painting
+   • Keywords: <k>oil painting, impressionist, brushstrokes</k>
+   • Generate and save
+
+6. Compare and Select
+   • Review all versions
+   • Choose best for project
+
+ADVANCED:
+• Use reference images (same scene, different styles)
+• Adjust LoRa (style-specific models)
+• Mix styles with IPAdapter
+
+
+13.5 BATCH OPERATIONS (FUTURE)
+-------------------------------
+
+CONCEPT: Automate multiple generations.
+
+POTENTIAL FEATURES:
+
+Batch Prompts:
+• Queue multiple prompts
+• Generate all overnight
+• Review results in morning
+
+Variation Generator:
+• Single prompt + random seeds
+• Generate 10 variations
+• Pick best
+
+Parameter Sweep:
+• Test influence: 0.0, 0.1, 0.2, ..., 1.0
+• Test steps: 10, 15, 20, 25, 30
+• Find optimal settings
+
+NOT YET IMPLEMENTED
+
+
+================================================================================
+PART 14: ACCESSIBILITY & UX POLISH
+================================================================================
+
+14.1 ICON USAGE
+---------------
+
+CONSISTENT ICON LANGUAGE:
+
+📁 FILE_FOLDER - Directories, paths, browse operations
+📝 TEXT - Prompts, text editing, templates
+🖼️ IMAGE_DATA - Images, generations, references
+🔄 FILE_REFRESH - Refresh, reload, update operations
+✓ CHECKMARK - Success states, confirmations
+❌ X - Clear, delete, remove operations
+⏱️ SORTTIME - Timing, duration, history
+🔤 SORTALPHA - Text processing, alphabetical
+🎨 BRUSH_DATA - Style, artistic operations
+📷 RENDER_RESULT - Rendering, output
+🔧 SETTINGS - Configuration, preferences
+ℹ️ INFO - Help, information, tips
+⚠️ ERROR - Warnings, errors, issues
+
+
+14.2 VISUAL HIERARCHY
+----------------------
+
+BUTTON SIZES:
+
+Small (scale_y = 0.8):
+• Secondary actions
+• Less important options
+• Help text, labels
+
+Normal (scale_y = 1.0):
+• Standard buttons
+• Most UI elements
+
+Large (scale_y = 1.3-1.5):
+• Important actions (Test Connection)
+• Common operations
+
+Extra Large (scale_y = 2.5):
+• Primary action (Generate Image)
+• Most critical operation
+
+
+14.3 BUTTON SIZING
+------------------
+
+MAIN GENERATION BUTTON (Commented out in current version):
+• Scale: 2.5x (very large)
+• Icon: IMAGE_DATA
+• Text: "Generate Image"
+• Color: Prominent
+
+SECONDARY BUTTONS:
+• Scale: 1.5x (medium-large)
+• Examples: Auto-generate toggle, Project Texture
+
+UTILITY BUTTONS:
+• Scale: 1.0x (normal)
+• Examples: Load, Clear, Reload (reference images)
+
+HELP/INFO BUTTONS:
+• Scale: 0.8x (small)
+• Examples: Labels, hints
+
+
+14.4 COLLAPSIBLE SECTIONS
+--------------------------
+
+IMPLEMENTATION:
+• Header with triangle icon (▶ / ▼)
+• Click to expand/collapse
+• State persists across sessions
+
+SECTIONS:
+
+N-Panel:
+• Reference Images (always shown, but sub-sections collapsible)
+  - Style Transfer (collapsible)
+  - Composition (collapsible)
+  - Transfer (collapsible)
+
+Preferences:
+• Advanced Settings (collapsible, default collapsed)
+
+BENEFITS:
+• Reduces visual clutter
+• Progressive disclosure
+• Faster navigation for experienced users
+
+
+14.5 LOADING STATES
+-------------------
+
+GENERATION IN PROGRESS:
+• Status box appears in N-panel
+• Spinning icon (RENDER_ANIMATION)
+• Elapsed time updates every second
+• Console shows detailed progress
+
+LLM REFINEMENT:
+• UI freezes briefly (blocking operation)
+• Info message: "Refining prompt... (this may take a moment)"
+• Console shows waiting messages
+• Success message on completion
+
+UV TEXTURE GENERATION:
+• Non-blocking (runs in background)
+• Info message: "Generating UV textures... (check console)"
+• Console shows detailed progress
+• Completion message when done
+
+FILE OPERATIONS:
+• Instant for local files
+• Brief pause for network uploads
+• Console logs timing information
+
+
+================================================================================
+PART 15: TECHNICAL UX DETAILS
+================================================================================
+
+15.1 BLENDER PROPERTY SYSTEM
+-----------------------------
+
+PROPERTY TYPES:
+
+StringProperty:
+• Text fields (paths, prompts, URLs)
+• Example: output_path, gcs_server_url
+
+IntProperty:
+• Integer values (steps, resolution)
+• Example: steps (range 1-150)
+
+FloatProperty:
+• Decimal values (strengths, weights)
+• Example: depth_influence (0.0-1.0)
+
+BoolProperty:
+• Checkboxes, toggles
+• Example: auto_generate, use_ipadapter
+
+EnumProperty:
+• Dropdowns with predefined choices
+• Example: api_backend (GCS / RunComfy)
+• Example: ai_resolution (512 / 768 / 1024 / etc.)
+
+PointerProperty:
+• References to other Blender data
+• Example: reference images (bpy.types.Image)
+
+STORAGE:
+• Scene properties: Saved with .blend file
+• Addon preferences: Saved globally (all .blend files)
+
+
+15.2 UI REFRESH STRATEGY
+-------------------------
+
+AUTOMATIC UPDATES:
+• Property changes trigger UI redraw
+• Image loads/changes update thumbnails
+• Status changes refresh display
+
+MANUAL UPDATES:
+• Reload button for reference images
+• Refresh LoRa list button
+• Visualization switcher
+
+PERFORMANCE:
+• Preview collection caches thumbnails
+• LoRa list cached for 5 minutes
+• Minimal redraws (only when necessary)
+
+
+15.3 NON-BLOCKING OPERATIONS
+-----------------------------
+
+ASYNCHRONOUS FEATURES:
+
+Image Generation:
+• Submit workflow
+• Return immediately
+• Background polling timer checks status
+• UI remains responsive
+• Updates when complete
+
+UV Texture Generation:
+• Submit workflow
+• Return immediately
+• Background polling
+• Completion callback
+• Import mesh when done
+
+BLOCKING OPERATIONS:
+
+LLM Prompt Refinement:
+• Currently blocking (UI freezes)
+• Simple polling loop
+• Future: Convert to modal operator
+
+FILE UPLOADS:
+• Brief pause (typically < 1 second)
+• Acceptable for UX
+
+
+15.4 POLLING TIMERS
+-------------------
+
+IMPLEMENTATION:
+• Blender timer system (bpy.app.timers)
+• Periodic function calls
+• Non-blocking
+
+USAGE:
+
+Generation Polling:
+• Check every 2 seconds (GCS mode)
+• Check every 10 seconds (RunComfy mode)
+• Stop when complete
+
+UV Texture Polling:
+• Check every 5 seconds
+• Long-running (1-2 minutes)
+• Callback on completion
+
+CLEANUP:
+• Timers removed on completion
+• No memory leaks
+• Persistent across Blender sessions (if needed)
+
+
+15.5 MODAL OPERATORS
+---------------------
+
+DEFINITION:
+Operators that handle events over time (not instant execution).
+
+EXAMPLES IN STYLE ENGINE:
+
+None currently, but candidates:
+
+LLM Refinement (future):
+• Modal operator with timer
+• Updates UI with progress
+• Allows cancel operation
+• ESC to abort
+
+Batch Generation (future):
+• Modal operator for multiple generations
+• Progress bar
+• Cancel/pause options
+
+BENEFITS:
+• Non-blocking UI
+• Better user feedback
+• Cancellable operations
+
+
+================================================================================
+================================================================================
+PART 16: CRITICAL UX INSIGHTS & LEARNINGS
+================================================================================
+
+16.1 WHAT WORKS WELL
+--------------------
+
+✓ PIE MENU AS PRIMARY INTERFACE
+  • Faster than clicking through N-panel
+  • Muscle memory develops quickly
+  • Radial layout is intuitive
+  • Alt+W is easy to remember
+
+✓ TEXT EDITOR FOR PROMPTS
+  • More space than property field
+  • Familiar interface (all Blender users know text editor)
+  • Copy/paste friendly
+  • Multi-line support
+  • Syntax highlighting helps structure
+
+✓ AUTOMATIC PROMPT PARSING
+  • No toggle to remember
+  • Tags optional (raw text works too)
+  • Graceful fallback
+  • Clear feedback in console
+
+✓ REFERENCE IMAGE THUMBNAILS
+  • Visual confirmation of loaded images
+  • Quick identification
+  • Professional appearance
+  • Grid layout efficient
+
+✓ CAMERA BACKGROUND DISPLAY
+  • Result immediately visible
+  • No need to open external viewer
+  • Overlay with geometry shows context
+  • Real-time update on completion
+
+
+16.2 WHAT NEEDS IMPROVEMENT
+----------------------------
+
+⚠️ LLM REFINEMENT BLOCKS UI
+  • Current: UI freezes 3-10 seconds
+  • Better: Modal operator with progress indicator
+  • Best: Async with cancel button
+
+⚠️ NO VISIBLE GENERATION CONTROLS
+  • Current: All settings hidden (uses defaults)
+  • Better: Collapsible "Advanced" section with steps/influence
+  • Risk: Users may not find controls when needed
+
+⚠️ NO UNDO FOR PROMPT REFINEMENT
+  • Current: LLM overwrites prompt, can't revert
+  • Better: Store previous version, "Undo Refinement" button
+  • Best: Full prompt history browser
+
+⚠️ UV TEXTURE FEEDBACK IS CONSOLE-ONLY
+  • Current: Background operation, check console
+  • Better: Progress bar in N-panel
+  • Best: Modal dialog with preview during processing
+
+⚠️ NO GENERATION HISTORY IN UI
+  • Current: Files saved but no browser UI
+  • Better: Prev/Next buttons to navigate
+  • Best: Grid gallery with thumbnails + metadata
+
+
+16.3 USER PAIN POINTS (OBSERVED)
+---------------------------------
+
+1. "WHERE IS THE GENERATE BUTTON?"
+   Solution: Moved to pie menu (Alt+W → BOTTOM)
+   Reasoning: Pie menu is faster, reduces N-panel clutter
+
+2. "MY PROMPT DIDN'T PARSE"
+   Cause: Prompt Builder was disabled (old version)
+   Solution: Made automatic (always parses, no toggle)
+
+3. "HOW DO I ADJUST QUALITY?"
+   Cause: Steps slider hidden
+   Solution: Document Python access, or re-expose UI
+   Note: 15 steps usually sufficient
+
+4. "GENERATION SEEMS RANDOM"
+   Cause: Influence at 0.25 gives AI creative freedom
+   Solution: Document behavior, or expose slider
+   Note: This is actually desired (AI interpretation)
+
+5. "I CAN'T FIND MY GENERATIONS"
+   Cause: Files in temp directory (volatile)
+   Solution: Project library system saves timestamped copies
+   Note: Need UI browser to make this discoverable
+
+
+16.4 DESIGN DECISIONS EXPLAINED
+--------------------------------
+
+DECISION: Hide generation controls (steps, influence, resolution)
+REASONING:
+• Defaults work for 95% of cases
+• Prevents users from setting steps too low (quality issues)
+• Prevents users from setting influence too high (no AI)
+• Reduces decision fatigue
+• Faster onboarding
+
+TRADE-OFF:
+• Power users can't easily adjust
+• Advanced workflows require Python console
+• Less flexibility
+
+MITIGATION:
+• Document Python property access
+• Consider "Advanced Mode" toggle in future
+• Re-evaluate based on user feedback
+
+---
+
+DECISION: Prompt Builder always automatic (no toggle)
+REASONING:
+• Previous version had confusing "Enable Prompt Builder" checkbox
+• Users forgot to enable it, prompts didn't parse
+• Automatic detection is more intuitive
+• Falls back gracefully to raw text
+
+TRADE-OFF:
+• None significant (just works)
+
+---
+
+DECISION: LLM refinement as blocking operation
+REASONING:
+• Simpler to implement than modal operator
+• Manual operation (not frequent)
+• 3-10 second freeze is acceptable for this use case
+• Easy to upgrade to async later if needed
+
+TRADE-OFF:
+• UI freezes during refinement
+• Can't cancel mid-operation
+• No progress feedback during wait
+
+MITIGATION:
+• Future: Convert to modal operator
+• Future: Add progress indicator
+• Future: Add cancel button
+
+---
+
+DECISION: Pie menu for primary actions
+REASONING:
+• Faster than N-panel navigation
+• Reduces N-panel clutter
+• Standard Blender paradigm (used by many addons)
+• Muscle memory develops quickly
+• Works in all modes (Object, Edit, Sculpt)
+
+TRADE-OFF:
+• Requires learning keyboard shortcut (Alt+W)
+• Not immediately discoverable for new users
+• Some users prefer clicking visible buttons
+
+MITIGATION:
+• Quick start guide explains Alt+W prominently
+• Pie menu is industry standard in Blender ecosystem
+• First-time hint/tooltip could help
+
+---
+
+DECISION: Reference images visible in N-panel
+REASONING:
+• Core feature (not advanced)
+• Visual thumbnails aid workflow
+• Collapsible sections reduce clutter when not needed
+• 15 slots is powerful for users who need it
+• Can be ignored by users who don't
+
+TRADE-OFF:
+• Takes up vertical space in N-panel
+• May seem overwhelming initially
+
+MITIGATION:
+• Sections collapsed by default
+• Clear labeling (Style/Composition/Transfer)
+• Thumbnails make purpose obvious
+
+
+16.5 FUTURE UX ROADMAP
+----------------------
+
+PHASE 1: POLISH CURRENT MINIMAL UI
+• Convert LLM refinement to modal operator (non-blocking)
+• Add progress indicators for all operations
+• Add undo for prompt refinement
+• Improve error messages (more actionable)
+
+PHASE 2: EXPOSE ADVANCED CONTROLS (OPTIONAL)
+• Add "Show Advanced" toggle in N-panel
+• When enabled, show:
+  - Steps slider
+  - Influence slider
+  - Resolution dropdown
+  - LoRa selector
+• Keep collapsed by default
+
+PHASE 3: GENERATION BROWSER
+• Add Prev/Next navigation buttons
+• Thumbnail gallery view
+• Load previous generations
+• Remix from old prompts
+• Compare side-by-side
+
+PHASE 4: BATCH OPERATIONS
+• Queue multiple prompts
+• Variation generator (same prompt, different seeds)
+• Parameter sweep (test different settings)
+• Overnight batch processing
+
+PHASE 5: KEYBOARD SHORTCUTS
+• Alt+R: Refine prompt
+• Shift+Alt+G: Generate (alternative to pie)
+• Ctrl+Alt+P: Project texture
+• Configurable hotkeys in preferences
+
+
+16.6 ACCESSIBILITY CONSIDERATIONS
+----------------------------------
+
+CURRENT STATE:
+
+✓ Keyboard accessible (pie menu)
+✓ Clear iconography (consistent meanings)
+✓ Descriptive tooltips (hover for help)
+✓ Console logging (debug friendly)
+✓ Error messages (actionable text)
+
+AREAS FOR IMPROVEMENT:
+
+⚠️ Screen reader support (Blender limitation)
+⚠️ High contrast mode (depends on Blender theme)
+⚠️ Font size scaling (depends on Blender UI scale)
+⚠️ Color blind friendly (icons help, but colors used in status)
+
+BLENDER ECOSYSTEM:
+Accessibility largely determined by Blender itself.
+Addon follows Blender UI guidelines and conventions.
+
+
+16.7 PERFORMANCE & RESPONSIVENESS
+----------------------------------
+
+FAST OPERATIONS (< 100ms):
+• UI updates
+• Property changes
+• Panel redraws
+• File browser opening
+
+MEDIUM OPERATIONS (100ms - 1s):
+• File uploads (small images)
+• Workflow JSON loading
+• Reference image loading
+• Thumbnail generation
+
+SLOW OPERATIONS (1-10s):
+• Workbench rendering (0.1-0.5s)
+• Image encoding to Base64 (0.5-2s)
+• LLM prompt refinement (3-10s)
+• Network uploads/downloads (1-5s)
+
+VERY SLOW OPERATIONS (10s+):
+• AI image generation (10-30s typical)
+• UV texture generation (60-120s)
+• High-resolution rendering (varies)
+
+UX STRATEGY:
+• Fast operations: Instant feedback
+• Medium operations: Brief "Loading..." if needed
+• Slow operations: Progress indicator, console logging
+• Very slow: Async/background, status updates
+
+
+16.8 CROSS-PLATFORM CONSIDERATIONS
+-----------------------------------
+
+WINDOWS:
+• Fully supported
+• File paths use backslashes
+• PowerShell scripts for packaging
+• Console accessible via Window menu
+
+MACOS:
+• Fully supported
+• File paths use forward slashes
+• Import system compatibility issues (resolved with fallback)
+• Console requires launching Blender from Terminal
+
+LINUX:
+• Fully supported
+• File paths use forward slashes
+• Standard Python environment
+• Console output to terminal by default
+
+PATH HANDLING:
+• All file operations use Path() from pathlib
+• Cross-platform path resolution
+• Symlinks supported
+• Network paths supported (Windows UNC, etc.)
+
+KEYBOARD SHORTCUTS:
+• Alt+W tested on all platforms
+• macOS: Option+W
+• Linux: Alt+W
+• No platform-specific code needed
+
+
+================================================================================
+APPENDIX: SUMMARY FOR DIFFERENT AUDIENCES
+================================================================================
+================================================================================
+
+FOR END USERS (ARTISTS):
+------------------------
+
+Style Engine lets you generate AI images directly in Blender:
+
+1. Install addon and enable it
+2. Set up backend (GCS or RunComfy)
+3. Press Alt+W → Click LEFT (Setup Workspace)
+4. Write prompt in text editor using <p> tags
+5. Press Alt+W → Click BOTTOM (Generate)
+6. Wait 10-30 seconds
+7. AI image appears as camera background
+8. Project onto objects or export
+
+Key Features:
+• HTML-style prompt format (easy to learn)
+• LLM prompt refinement (one button)
+• Reference images (15 slots for style/composition)
+• Texture projection (onto 3D objects)
+• UV texture generation (fully textured meshes)
+• Visualization modes (see Canny/Depth)
+
+
+FOR DESIGNERS (UX/UI):
+---------------------
+
+Interface Overview:
+• N-panel: Primary interface (vertical layout, collapsible sections)
+• Pie menu: Quick access (6 operations, radial layout)
+• Text editor: Prompt input (HTML tags, syntax highlighting)
+• Preferences: Backend configuration (minimal by default)
+
+Visual Design:
+• Icon consistency (file, image, text, etc.)
+• Button hierarchy (2.5x for primary, 1.0x for standard)
+• Collapsible sections (progressive disclosure)
+• Status indicators (generating, idle, error states)
+
+User Flows:
+• First-time setup: 3-4 steps (backend → workspace → prompt → generate)
+• Iterative refinement: Write → Generate → Adjust → Repeat
+• Multi-object texturing: Generate → Project → New object → Repeat
+
+
+FOR DEVELOPERS (TECHNICAL):
+---------------------------
+
+Architecture:
+• Blender addon (Python 3.10+)
+• ComfyUI backend (REST API or direct connection)
+• Modular structure (ui_panel, workspace_setup, utils, etc.)
+
+Key Modules:
+• ui_panel.py: All UI elements, operators, panels
+• workspace_setup.py: Core generation logic, workspace management
+• utils.py: Prompt parsing, file operations, helpers
+• runcomfy_deployment.py: Backend abstraction layer
+• runcomfy_polling.py: Async status polling
+
+Data Flow:
+Text Editor → parse_prompt_tags() → build_prompt_from_template()
+→ workspace_setup.generate_ai_image_cloud() → ComfyUI API
+→ Polling → Download → Update camera background
+
+Property System:
+• scene.style_engine_props (per-project settings)
+• preferences.addons['styleengine'].preferences (global settings)
+• bpy.data.images (reference images)
+
+
+FOR QA (TESTING):
+----------------
+
+Critical Paths:
+1. Installation & Enable
+2. Backend Configuration
+3. Workspace Setup
+4. First Generation
+5. Reference Images
+6. Texture Projection
+7. UV Texture Generation
+8. LLM Prompt Refinement
+
+Test Scenarios:
+• Fresh install (no prior config)
+• Backend switching (GCS ↔ RunComfy)
+• Missing files (workflows, templates)
+• Network failures (server down, timeout)
+• Invalid inputs (empty prompts, wrong file types)
+• Multiple Blender instances
+• Project save/load (library migration)
+
+Edge Cases:
+• No internet connection (local GCS)
+• Huge images (>4K resolution)
+• Empty reference slots
+• Corrupted workflow JSON
+• Session ID conflicts
+
+
+FOR DOCUMENTATION WRITERS:
+--------------------------
+
+Key Concepts to Explain:
+• HTML-style tag format (unique to Style Engine)
+• ControlNet (Canny + Depth for composition preservation)
+• IPAdapter (reference images for style/composition guidance)
+• Iteration system (archival snapshots for multi-texture scenes)
+• Backend modes (GCS vs RunComfy, trade-offs)
+
+Common Questions:
+• "Why isn't my prompt working?" → Check <p> tags
+• "Where are my files saved?" → Project library + temp dir
+• "Can I use custom LoRas?" → Yes, put in ComfyUI/models/loras/
+• "Why is generation slow?" → Depends on server, steps, resolution
+• "Can I use offline?" → Yes with local GCS (localhost)
+
+Documentation Structure:
+• Quickstart (get started in 5 minutes)
+• User Guide (complete walkthrough, this document)
+• Technical Reference (API, properties, workflows)
+• Troubleshooting (common issues, solutions)
+
+
+================================================================================
+END OF DOCUMENT
+================================================================================
+
+This comprehensive UX flow document covers every aspect of Style Engine,
+from installation to advanced workflows. Use it as a reference for:
+
+• User onboarding and training
+• Feature development and prioritization
+• QA test case creation
+• Documentation writing
+• UI/UX improvements
+
+For questions or clarifications, see:
+• Source code: scripts/addons/styleengine/
+• Documentation: docs/
+• Issues: GitHub repository (if applicable)
+
+Version: 0.3.7
+Last Updated: January 27, 2026

@@ -1,0 +1,236 @@
+{
+  "14": {
+    "inputs": {
+      "image": "3D model test.png"
+    },
+    "class_type": "Hy3D21LoadImageWithTransparency",
+    "_meta": {
+      "title": "Hunyuan 3D 2.1 Load Image with Transparency"
+    }
+  },
+  "19": {
+    "inputs": {
+      "camera_azimuths": "0, 90, 180, 270, 0, 180",
+      "camera_elevations": "0, 0, 0, 0, 90, -90",
+      "view_weights": "1, 0.5, 1, 0.5, 1, 1",
+      "ortho_scale": 1.1
+    },
+    "class_type": "Hy3D21CameraConfig",
+    "_meta": {
+      "title": "Hunyuan 3D 2.1 Camera Config"
+    }
+  },
+  "20": {
+    "inputs": {
+      "view_size": 768,
+      "steps": 10,
+      "guidance_scale": 3,
+      "texture_size": 1024,
+      "unwrap_mesh": true,
+      "seed": 988077496205809,
+      "trimesh": [
+        "45",
+        0
+      ],
+      "camera_config": [
+        "19",
+        0
+      ],
+      "image": [
+        "64",
+        0
+      ]
+    },
+    "class_type": "Hy3DMultiViewsGenerator",
+    "_meta": {
+      "title": "Hunyuan 3D 2.1 MultiViews Generator"
+    }
+  },
+  "21": {
+    "inputs": {
+      "pipeline": [
+        "20",
+        0
+      ],
+      "camera_config": [
+        "19",
+        0
+      ],
+      "albedo": [
+        "20",
+        1
+      ],
+      "mr": [
+        "20",
+        2
+      ]
+    },
+    "class_type": "Hy3DBakeMultiViews",
+    "_meta": {
+      "title": "Hunyuan 3D 2.1 Bake MultiViews"
+    }
+  },
+  "30": {
+    "inputs": {
+      "value": 200000
+    },
+    "class_type": "INTConstant",
+    "_meta": {
+      "title": "INT Constant"
+    }
+  },
+  "32": {
+    "inputs": {
+      "string": "Hy21_Mesh"
+    },
+    "class_type": "StringConstant",
+    "_meta": {
+      "title": "String Constant"
+    }
+  },
+  "45": {
+    "inputs": {
+      "trimesh": [
+        "55",
+        0
+      ]
+    },
+    "class_type": "Hy3D21MeshUVWrap",
+    "_meta": {
+      "title": "Hunyuan 3D 2.1 Mesh UV Wrap"
+    }
+  },
+  "46": {
+    "inputs": {
+      "filename_prefix": "MV",
+      "images": [
+        "20",
+        1
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "49": {
+    "inputs": {
+      "output_mesh_name": [
+        "32",
+        0
+      ],
+      "pipeline": [
+        "21",
+        0
+      ],
+      "albedo": [
+        "21",
+        1
+      ],
+      "albedo_mask": [
+        "21",
+        2
+      ],
+      "mr": [
+        "21",
+        3
+      ],
+      "mr_mask": [
+        "21",
+        4
+      ]
+    },
+    "class_type": "Hy3DInPaint",
+    "_meta": {
+      "title": "Hunyuan 3D 2.1 InPaint"
+    }
+  },
+  "50": {
+    "inputs": {
+      "images": [
+        "49",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "51": {
+    "inputs": {
+      "images": [
+        "49",
+        1
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "55": {
+    "inputs": {
+      "load_path": "/home/Juan/ComfyUI/output/Hy21_Mesh_00006_.glb",
+      "file_format": "glb"
+    },
+    "class_type": "TrimeshLoad",
+    "_meta": {
+      "title": "Trimesh Load"
+    }
+  },
+  "62": {
+    "inputs": {
+      "model_file": [
+        "49",
+        3
+      ],
+      "image": ""
+    },
+    "class_type": "Preview3D",
+    "_meta": {
+      "title": "Preview 3D"
+    }
+  },
+  "63": {
+    "inputs": {
+      "transparency": true,
+      "model": "u2net",
+      "post_processing": false,
+      "only_mask": false,
+      "alpha_matting": false,
+      "alpha_matting_foreground_threshold": 240,
+      "alpha_matting_background_threshold": 10,
+      "alpha_matting_erode_size": 10,
+      "background_color": "none",
+      "images": [
+        "14",
+        2
+      ]
+    },
+    "class_type": "Image Rembg (Remove Background)",
+    "_meta": {
+      "title": "Image Rembg (Remove Background)"
+    }
+  },
+  "64": {
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "upscale_method": "nearest-exact",
+      "keep_proportion": "stretch",
+      "pad_color": "0, 0, 0",
+      "crop_position": "center",
+      "divisible_by": 2,
+      "device": "cpu",
+      "image": [
+        "63",
+        0
+      ]
+    },
+    "class_type": "ImageResizeKJv2",
+    "_meta": {
+      "title": "Resize Image v2"
+    }
+  }
+}

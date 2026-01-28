@@ -17,7 +17,9 @@ preview_collections = {}
 _lora_cache = {
     'items': [],
     'timestamp': 0,
-    'cache_duration': 300  # 5 minutes
+    'cache_duration': 300,  # 5 minutes
+    'last_failure': 0,      # Track last failure time
+    'failure_cooldown': 60  # Don't retry for 60 seconds after failure
 }
 
 
@@ -25,36 +27,58 @@ def get_lora_items(self, context):
     """
     Dynamic callback to fetch available LoRa models from ComfyUI server.
     Caches results for 5 minutes to avoid excessive API calls.
+    
+    ROBUST: Returns default items if anything fails (registration, server down, etc.)
     """
     import time
-    from . import runcomfy_deployment
     
-    # Check cache validity
-    current_time = time.time()
-    cache_age = current_time - _lora_cache['timestamp']
-    
-    # Default fallback items
+    # Default fallback items (ALWAYS valid)
     default_items = [
         ('NONE', "None", "No LoRa"),
         ('xl_more_art-full_v1.safetensors', "More Art Full", "Default LoRa"),
     ]
     
+    # Safety: If context is None (during registration), return defaults
+    if context is None:
+        return default_items
+    
+    # Check cache validity
+    current_time = time.time()
+    cache_age = current_time - _lora_cache['timestamp']
+    
     # Return cached if valid
     if _lora_cache['items'] and cache_age < _lora_cache['cache_duration']:
         return _lora_cache['items']
     
+    # Check if we recently failed - don't retry immediately (prevents lag)
+    failure_age = current_time - _lora_cache.get('last_failure', 0)
+    if failure_age < _lora_cache.get('failure_cooldown', 60):
+        # Too soon after failure, return defaults without retrying
+        return default_items
+    
     # Check if in GCS mode (self-hosted ComfyUI)
     try:
-        prefs = context.preferences.addons['styleengine'].preferences
+        # Import only when needed (avoid circular imports during registration)
+        from . import runcomfy_deployment
+        
+        # Safety: Check if preferences are accessible
+        if not hasattr(context, 'preferences'):
+            return default_items
+        
+        prefs = context.preferences.addons.get('styleengine')
+        if not prefs:
+            return default_items
+        
+        prefs = prefs.preferences
         
         if hasattr(prefs, 'api_backend') and prefs.api_backend == 'GCS':
             # Try to fetch from server
             try:
                 server_client = runcomfy_deployment.get_server_client()
                 
-                # Fetch /object_info from ComfyUI server
+                # Fetch /object_info from ComfyUI server (short timeout to avoid lag)
                 print("[Style Engine] Fetching LoRa list from ComfyUI server...")
-                object_info = server_client._request('GET', '/object_info', timeout=5)
+                object_info = server_client._request('GET', '/object_info', timeout=2)
                 
                 if 'LoraLoader' in object_info:
                     lora_loader = object_info['LoraLoader']
@@ -93,14 +117,18 @@ def get_lora_items(self, context):
                                 return items
                 
             except Exception as e:
+                # Mark failure time to avoid repeated timeouts
+                _lora_cache['last_failure'] = current_time
                 print(f"[Style Engine] ⚠️ Failed to fetch LoRas from server: {e}")
+                print(f"[Style Engine] (Will retry in {_lora_cache['failure_cooldown']}s)")
         
         # Fallback to default list
-        print("[Style Engine] Using default LoRa list")
         return default_items
         
     except Exception as e:
-        print(f"[Style Engine] Error in LoRa callback: {e}")
+        # Silently fail during registration, log during normal use
+        if context and hasattr(context, 'preferences'):
+            print(f"[Style Engine] LoRa fetch failed: {e}")
         return default_items
 
 # ----------------------------------------------------------------
@@ -328,8 +356,8 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
     
     use_prompt_builder: bpy.props.BoolProperty(
         name="Enable Prompt Builder",
-        description="Automatic: parses HTML tags if present, otherwise uses raw text",
-        default=True,  # Always enabled by default
+        description="Use template-based prompt building with structured tags (subject, style, mood, etc.)",
+        default=False,
         update=update_prompt_builder
     )
     
@@ -546,29 +574,22 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         default=False
     )
     
-    # Advanced control toggle for reference images
-    show_advanced_ref_controls: bpy.props.BoolProperty(
-        name="Advanced Control",
-        description="Show individual weight sliders for each reference image (default: all weights = 1.0)",
-        default=False
-    )
-    
-    # Global strength sliders (UI: 0.0-1.0, Workflow: 0.0-1.5 via 1.5x multiplier)
+    # Global strength sliders
     style_transfer_strength: bpy.props.FloatProperty(
         name="Style Transfer Strength",
-        description="Global strength for all Style Transfer images (0.0 to 1.0, scaled to 1.5 in workflow)",
+        description="Global strength for all Style Transfer images (0.0 to 5.0)",
         default=0.0,
         min=0.0,
-        max=1.0,
+        max=5.0,
         update=update_session_json
     )
     
     composition_strength: bpy.props.FloatProperty(
         name="Composition Strength",
-        description="Global strength for all Composition images (0.0 to 1.0, scaled to 1.5 in workflow)",
+        description="Global strength for all Composition images (0.0 to 5.0)",
         default=0.0,
         min=0.0,
-        max=1.0,
+        max=5.0,
         update=update_session_json
     )
     
@@ -856,8 +877,34 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         update=update_session_json
     )
     
+    # LoRa 2 (second LoRa slot for stacking)
+    lora2_enabled: bpy.props.BoolProperty(
+        name="Use LoRa 2",
+        description="Enable second LoRa model for stacking effects",
+        default=False,
+        update=update_session_json
+    )
+    
+    lora2_name: bpy.props.EnumProperty(
+        name="LoRa 2 Model",
+        description="Select second LoRa model (fetched from ComfyUI server in GCS mode)",
+        items=get_lora_items,  # Uses same callback as lora_name
+        update=update_session_json
+    )
+    
+    lora2_strength_model: bpy.props.FloatProperty(
+        name="LoRa 2 Strength",
+        description="Second LoRa influence on the model (0.0 to 1.0)",
+        default=0.8,
+        min=0.0,
+        max=1.0,
+        step=1,
+        precision=2,
+        update=update_session_json
+    )
+    
     # ================================================================
-    # 3D OBJECT GENERATION CONFIGURATION
+    # 3D OBJECT GENERATION QUALITY
     # ================================================================
     
     object_quality: bpy.props.EnumProperty(
@@ -1252,13 +1299,18 @@ class WM_OT_ProjectTexture(bpy.types.Operator):
             # Select all faces
             bpy.ops.mesh.select_all(action='SELECT')
             
-            # Project from active view (user's current viewport)
-            # This is simpler and more intuitive than camera projection
+            # Set ai_camera as active scene camera temporarily for consistent projection
+            context.scene.camera = ai_camera
+            
+            # Project from ai_camera (always consistent with render/background image)
             bpy.ops.uv.project_from_view(
-                camera_bounds=False,  # Use viewport, not camera
-                correct_aspect=True,
-                scale_to_bounds=False
+                camera_bounds=True,      # Use ai_camera, not viewport
+                correct_aspect=True,      # Maintains image aspect ratio
+                scale_to_bounds=False    # Preserve camera framing scale
             )
+            
+            # Restore original camera
+            context.scene.camera = original_camera
             
             # Return to object mode
             bpy.ops.object.mode_set(mode='OBJECT')
@@ -1798,6 +1850,85 @@ class WM_OT_TestCloudGeneration(bpy.types.Operator):
 
 
 # ----------------------------------------------------------------
+# PROMPT BUILDER TEMPLATE OPERATORS
+# ----------------------------------------------------------------
+
+class WM_OT_LoadTemplates(bpy.types.Operator):
+    """Load all prompt templates into text editor"""
+    bl_idname = "style_engine.load_templates"
+    bl_label = "Load Templates"
+    bl_description = "Load all prompt templates from templates folder into Blender's text editor"
+    
+    def execute(self, context):
+        from . import utils
+        
+        count, message = utils.load_all_templates()
+        
+        if count > 0:
+            self.report({'INFO'}, message)
+            print(f"[Style Engine] {message}")
+        else:
+            self.report({'WARNING'}, message)
+            print(f"[Style Engine] {message}")
+        
+        return {'FINISHED'}
+
+
+class WM_OT_SavePromptAsTemplate(bpy.types.Operator):
+    """Save currently active text editor content as a template"""
+    bl_idname = "style_engine.save_prompt_as_template"
+    bl_label = "Save as Template"
+    bl_description = "Save the currently open text editor content as a reusable template"
+    
+    template_name: bpy.props.StringProperty(
+        name="Template Name",
+        description="Name for the new template (will be prefixed with STYLEENGINE_)",
+        default="My_Template"
+    )
+    
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self)
+    
+    def draw(self, context):
+        layout = self.layout
+        
+        # Show which text block will be saved
+        active_text_name = None
+        for area in context.screen.areas:
+            if area.type == 'TEXT_EDITOR':
+                for space in area.spaces:
+                    if space.type == 'TEXT_EDITOR' and space.text:
+                        active_text_name = space.text.name
+                        break
+                if active_text_name:
+                    break
+        
+        if not active_text_name:
+            active_text_name = "STYLEENGINE_Prompt (fallback)"
+        
+        info_box = layout.box()
+        info_box.label(text=f"Source: {active_text_name}", icon='TEXT')
+        
+        layout.separator()
+        layout.prop(self, "template_name")
+        layout.label(text="Will be saved as: STYLEENGINE_{name}.txt", icon='DISK_DRIVE')
+    
+    def execute(self, context):
+        from . import utils
+        
+        success, message = utils.save_current_prompt_as_template(self.template_name)
+        
+        if success:
+            self.report({'INFO'}, message)
+            print(f"[Style Engine] {message}")
+        else:
+            self.report({'ERROR'}, message)
+            print(f"[Style Engine] {message}")
+        
+        return {'FINISHED'}
+
+
+# ----------------------------------------------------------------
 # 3. UI PANEL
 # ----------------------------------------------------------------
 class VIEW3D_PT_StyleEngine(bpy.types.Panel):
@@ -1855,19 +1986,17 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
         prompt_box = layout.box()
         prompt_box.label(text="Prompt Settings:", icon='TEXT')
         
-        # Info box with tag format (always visible)
-        help_box = prompt_box.box()
-        help_box.scale_y = 0.8
-        col = help_box.column(align=True)
-        col.label(text="Use HTML-style tags in text editor:", icon='INFO')
-        col.label(text="<k>keywords</k>  (optional)")
-        col.label(text="<p>main prompt</p>  (required)")
-        col.label(text="<n>negative prompt</n>  (optional)")
-        col.label(text="Without tags, raw text is used", icon='FORWARD')
+        # Prompt Builder checkbox
+        row = prompt_box.row()
+        row.prop(style_props, "use_prompt_builder", icon='SYNTAX_ON' if style_props.use_prompt_builder else 'SYNTAX_OFF')
         
-        # Refine Prompt button
-        prompt_box.separator()
-        prompt_box.operator("style_engine.refine_prompt", icon='SORTALPHA')
+        # Show template controls when enabled
+        if style_props.use_prompt_builder:
+            # Template management buttons
+            prompt_box.separator()
+            template_row = prompt_box.row(align=True)
+            template_row.operator("style_engine.load_templates", icon='IMPORT', text="Load Templates")
+            template_row.operator("style_engine.save_prompt_as_template", icon='FILE_TICK', text="Save Template")
             
             # # Helper text box - COMMENTED OUT FOR MINIMAL UI
             # prompt_box.separator()
@@ -2107,13 +2236,9 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
         ref_box = layout.box()
         header_row = ref_box.row(align=True)
         header_row.label(text="Reference Images", icon='IMAGE_DATA')
-        
-        # Advanced Control toggle (shows individual weight sliders when enabled)
-        adv_row = ref_box.row(align=True)
-        adv_row.prop(style_props, "show_advanced_ref_controls", text="Advanced Control", toggle=True, icon='PREFERENCES')
             
         # Helper function to draw a reference image section
-        def draw_reference_section(box, title, icon, show_prop, slots, strength_prop, show_weights=False):
+        def draw_reference_section(box, title, icon, show_prop, slots, strength_prop):
             """Draw a collapsible reference image section with grid layout"""
             section_box = box.box()
             header = section_box.row(align=True)
@@ -2206,10 +2331,10 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                         
                         col.separator(factor=0.3)
                     
-                        # Weight slider (only shown when Advanced Control is enabled)
-                        if show_weights:
-                            col.prop(style_props, weight_prop, text="", slider=True)
-                            col.separator(factor=0.2)
+                        # Weight slider
+                        col.prop(style_props, weight_prop, text="", slider=True)
+                        
+                        col.separator(factor=0.2)
                     
                         # Action buttons (reload and clear)
                         btn_row = col.row(align=True)
@@ -2239,8 +2364,7 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
             ("st5", "st5_image", "st5_weight", "ST5"),
         ]
         draw_reference_section(ref_box, "Style", 'BRUSH_DATA', 
-                             "show_style_transfer", st_slots, "style_transfer_strength",
-                             show_weights=style_props.show_advanced_ref_controls)
+                             "show_style_transfer", st_slots, "style_transfer_strength")
         
         # Composition section
         comp_slots = [
@@ -2251,20 +2375,18 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
             ("comp5", "comp5_image", "comp5_weight", "COMP5"),
         ]
         draw_reference_section(ref_box, "Composition", 'MESH_GRID', 
-                             "show_composition", comp_slots, "composition_strength",
-                             show_weights=style_props.show_advanced_ref_controls)
+                             "show_composition", comp_slots, "composition_strength")
         
-        # Transfer section (Force Style Transfer) - HIDDEN: Too aggressive, not used in production
-        # sst_slots = [
-        #     ("sst1", "sst1_image", "sst1_weight", "SST1"),
-        #     ("sst2", "sst2_image", "sst2_weight", "SST2"),
-        #     ("sst3", "sst3_image", "sst3_weight", "SST3"),
-        #     ("sst4", "sst4_image", "sst4_weight", "SST4"),
-        #     ("sst5", "sst5_image", "sst5_weight", "SST5"),
-        # ]
-        # draw_reference_section(ref_box, "Transfer", 'FORCE_FORCE', 
-        #                      "show_force_transfer", sst_slots, "force_transfer_strength",
-        #                      show_weights=style_props.show_advanced_ref_controls)
+        # Transfer section (Force Style Transfer)
+        sst_slots = [
+            ("sst1", "sst1_image", "sst1_weight", "SST1"),
+            ("sst2", "sst2_image", "sst2_weight", "SST2"),
+            ("sst3", "sst3_image", "sst3_weight", "SST3"),
+            ("sst4", "sst4_image", "sst4_weight", "SST4"),
+            ("sst5", "sst5_image", "sst5_weight", "SST5"),
+        ]
+        draw_reference_section(ref_box, "Transfer", 'FORCE_FORCE', 
+                             "show_force_transfer", sst_slots, "force_transfer_strength")
         
         # # --- Settings - COLLAPSIBLE --- COMMENTED OUT
         # layout.separator()
@@ -2281,244 +2403,6 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
         #     settings_box.label(text="(Advanced settings in addon preferences)", icon='INFO')
 
         # Legacy action buttons removed (Visualize, Create 3D, Render)
-
-
-# ----------------------------------------------------------------
-# 3.5 PROMPT REFINEMENT OPERATOR
-# ----------------------------------------------------------------
-
-class WM_OT_RefinePrompt(bpy.types.Operator):
-    """Use local LLM to refine the prompt text (extracts <p> content, enhances it, and updates the text editor)"""
-    bl_idname = "style_engine.refine_prompt"
-    bl_label = "Refine Prompt (LLM)"
-    bl_description = "Use local LLM to enhance the main prompt (<p> tag)"
-    
-    def execute(self, context):
-        import re
-        import json
-        from pathlib import Path
-        from . import runcomfy_deployment
-        
-        # 1. Get text editor content
-        text_block = bpy.data.texts.get("STYLEENGINE_Prompt")
-        if not text_block:
-            self.report({'ERROR'}, "STYLEENGINE_Prompt text block not found")
-            return {'CANCELLED'}
-        
-        current_content = text_block.as_string()
-        
-        # 2. Extract <p> content
-        p_match = re.search(r'<p>(.*?)</p>', current_content, re.DOTALL | re.IGNORECASE)
-        if not p_match:
-            self.report({'ERROR'}, "No <p> tag found in prompt text")
-            print("[Refine Prompt] No <p> tag found in text editor")
-            return {'CANCELLED'}
-        
-        original_prompt = p_match.group(1).strip()
-        if not original_prompt:
-            self.report({'ERROR'}, "<p> tag is empty")
-            print("[Refine Prompt] <p> tag is empty")
-            return {'CANCELLED'}
-        
-        print(f"[Refine Prompt] Original prompt: {original_prompt}")
-        
-        # 3. Check if in Server mode (GCS)
-        if not runcomfy_deployment.is_server_mode():
-            self.report({'ERROR'}, "Prompt refinement only works in Server mode (GCS)")
-            print("[Refine Prompt] ❌ Not in Server mode - feature requires direct ComfyUI connection")
-            return {'CANCELLED'}
-        
-        try:
-            # 4. Load PromptRefiner.json workflow
-            addon_dir = Path(__file__).parent
-            workflow_file = addon_dir / "workflows" / "PromptRefiner.json"
-            
-            if not workflow_file.exists():
-                self.report({'ERROR'}, "PromptRefiner.json not found")
-                print(f"[Refine Prompt] ❌ Workflow not found: {workflow_file}")
-                return {'CANCELLED'}
-            
-            with open(workflow_file, 'r') as f:
-                workflow = json.load(f)
-            
-            print(f"[Refine Prompt] ✓ Loaded workflow: {workflow_file.name}")
-            
-            # 5. Patch node 7 with the original prompt text
-            if "7" not in workflow:
-                self.report({'ERROR'}, "Invalid workflow structure (node 7 missing)")
-                print("[Refine Prompt] ❌ Node 7 not found in workflow")
-                return {'CANCELLED'}
-            
-            workflow["7"]["inputs"]["text"] = original_prompt
-            print(f"[Refine Prompt] ✓ Patched node 7 with prompt text")
-            
-            # 6. Submit to ComfyUI server
-            server_client = runcomfy_deployment.get_server_client()
-            
-            print(f"[Refine Prompt] Submitting to ComfyUI server...")
-            response = server_client.queue_prompt(workflow)
-            prompt_id = response['prompt_id']
-            print(f"[Refine Prompt] ✓ Queued prompt refinement (ID: {prompt_id[:8]}...)")
-            
-            # 7. Poll for result (blocking - simple implementation)
-            import time
-            max_wait = 60  # 60 seconds timeout
-            poll_interval = 2  # Check every 2 seconds
-            elapsed = 0
-            
-            self.report({'INFO'}, "Refining prompt... (this may take a moment)")
-            
-            while elapsed < max_wait:
-                history = server_client.get_history(prompt_id)
-                
-                if history and prompt_id in history:
-                    execution = history[prompt_id]
-                    status = execution.get('status', {})
-                    
-                    # Check if completed
-                    if status.get('completed', False):
-                        # Extract refined text from node 17 output
-                        outputs = execution.get('outputs', {})
-                        
-                        # Try to find the text output (node 17 or 19)
-                        refined_text = None
-                        
-                        # Debug: Show available outputs
-                        print(f"[Refine Prompt] DEBUG: Available output nodes: {list(outputs.keys())}")
-                        
-                        # Try node 17 first (Griptape Run: Agent)
-                        if "17" in outputs:
-                            node_17_output = outputs["17"]
-                            print(f"[Refine Prompt] DEBUG: Node 17 output type: {type(node_17_output)}")
-                            print(f"[Refine Prompt] DEBUG: Node 17 output: {node_17_output}")
-                            
-                            if isinstance(node_17_output, dict) and "string" in node_17_output:
-                                refined_text = node_17_output["string"][0]
-                            elif isinstance(node_17_output, list) and len(node_17_output) > 0:
-                                refined_text = node_17_output[0]
-                        
-                        # Try node 19 if node 17 didn't work (Display: Text)
-                        if not refined_text and "19" in outputs:
-                            node_19_output = outputs["19"]
-                            print(f"[Refine Prompt] DEBUG: Node 19 output type: {type(node_19_output)}")
-                            print(f"[Refine Prompt] DEBUG: Node 19 output keys: {node_19_output.keys() if isinstance(node_19_output, dict) else 'not a dict'}")
-                            print(f"[Refine Prompt] DEBUG: Node 19 output: {node_19_output}")
-                            
-                            # Try various extraction methods
-                            if isinstance(node_19_output, dict):
-                                # Try "string" key
-                                if "string" in node_19_output:
-                                    string_val = node_19_output["string"]
-                                    if isinstance(string_val, list) and len(string_val) > 0:
-                                        # Check if list of characters - join them
-                                        if all(isinstance(c, str) and len(c) == 1 for c in string_val[:10]):
-                                            refined_text = ''.join(string_val)
-                                        else:
-                                            refined_text = string_val[0]
-                                    elif isinstance(string_val, str):
-                                        refined_text = string_val
-                                # Try "text" key
-                                elif "text" in node_19_output:
-                                    text_val = node_19_output["text"]
-                                    if isinstance(text_val, list) and len(text_val) > 0:
-                                        # Check if list of characters - join them
-                                        if all(isinstance(c, str) and len(c) == 1 for c in text_val[:10]):
-                                            refined_text = ''.join(text_val)
-                                        else:
-                                            refined_text = text_val[0]
-                                    elif isinstance(text_val, str):
-                                        refined_text = text_val
-                                # Try "STRING" key (uppercase)
-                                elif "STRING" in node_19_output:
-                                    string_val = node_19_output["STRING"]
-                                    if isinstance(string_val, list) and len(string_val) > 0:
-                                        # Check if list of characters - join them
-                                        if all(isinstance(c, str) and len(c) == 1 for c in string_val[:10]):
-                                            refined_text = ''.join(string_val)
-                                        else:
-                                            refined_text = string_val[0]
-                                    elif isinstance(string_val, str):
-                                        refined_text = string_val
-                                # Try "INPUT" key (from Griptape Display: Text)
-                                elif "INPUT" in node_19_output:
-                                    input_val = node_19_output["INPUT"]
-                                    if isinstance(input_val, list) and len(input_val) > 0:
-                                        # Check if list of characters - join them
-                                        if all(isinstance(c, str) and len(c) <= 1 for c in input_val[:10]):
-                                            refined_text = ''.join(input_val)
-                                        else:
-                                            refined_text = input_val[0]
-                                    elif isinstance(input_val, str):
-                                        refined_text = input_val
-                                # Try getting any string value
-                                else:
-                                    for key, value in node_19_output.items():
-                                        if isinstance(value, str) and len(value) > 10:
-                                            refined_text = value
-                                            break
-                                        elif isinstance(value, list) and len(value) > 0:
-                                            # Check if list of characters - join them
-                                            if all(isinstance(c, str) and len(c) <= 1 for c in value[:10]):
-                                                refined_text = ''.join(value)
-                                                break
-                                            elif isinstance(value[0], str):
-                                                refined_text = value[0]
-                                                break
-                            elif isinstance(node_19_output, list) and len(node_19_output) > 0:
-                                refined_text = node_19_output[0]
-                            elif isinstance(node_19_output, str):
-                                refined_text = node_19_output
-                        
-                        if not refined_text:
-                            self.report({'ERROR'}, "Could not extract refined text from workflow output")
-                            print(f"[Refine Prompt] ❌ No text output found in nodes 17 or 19")
-                            print(f"[Refine Prompt] Available outputs: {list(outputs.keys())}")
-                            print(f"[Refine Prompt] Full outputs structure: {outputs}")
-                            return {'CANCELLED'}
-                        
-                        # Clean up refined text
-                        refined_text = refined_text.strip()
-                        print(f"[Refine Prompt] ✓ Refined prompt: {refined_text}")
-                        
-                        # 8. Replace <p> content in text editor
-                        new_content = re.sub(
-                            r'(<p>)(.*?)(</p>)',
-                            r'\1' + refined_text + r'\3',
-                            current_content,
-                            flags=re.DOTALL | re.IGNORECASE
-                        )
-                        
-                        # Update text block
-                        text_block.clear()
-                        text_block.write(new_content)
-                        
-                        print(f"[Refine Prompt] ✓ Updated text editor with refined prompt")
-                        self.report({'INFO'}, "Prompt refined successfully!")
-                        return {'FINISHED'}
-                    
-                    # Check if failed
-                    if 'error' in status or status.get('status_str') == 'error':
-                        error_msg = status.get('error', 'Unknown error')
-                        self.report({'ERROR'}, f"Refinement failed: {error_msg}")
-                        print(f"[Refine Prompt] ❌ Workflow failed: {error_msg}")
-                        return {'CANCELLED'}
-                
-                # Wait before next poll
-                time.sleep(poll_interval)
-                elapsed += poll_interval
-                print(f"[Refine Prompt] Waiting... ({elapsed}s/{max_wait}s)")
-            
-            # Timeout
-            self.report({'ERROR'}, "Prompt refinement timed out")
-            print(f"[Refine Prompt] ❌ Timed out after {max_wait}s")
-            return {'CANCELLED'}
-            
-        except Exception as e:
-            self.report({'ERROR'}, f"Failed to refine prompt: {str(e)}")
-            print(f"[Refine Prompt] ❌ Error: {e}")
-            import traceback
-            traceback.print_exc()
-            return {'CANCELLED'}
 
 
 # ----------------------------------------------------------------
@@ -2543,7 +2427,8 @@ classes = (
     WM_OT_CancelGeneration,
     WM_OT_RefreshLoraList,
     WM_OT_TestCloudGeneration,
-    WM_OT_RefinePrompt,
+    WM_OT_LoadTemplates,
+    WM_OT_SavePromptAsTemplate,
     VIEW3D_PT_StyleEngine,
 )
 

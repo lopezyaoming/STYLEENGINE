@@ -1,0 +1,59 @@
+# How to Reload Style Engine Addon in Blender
+
+After making code changes, Blender needs to reload the addon to see the updates.
+
+## Method 1: Quick Reload (Recommended)
+
+1. In Blender, press F3 (search)
+2. Type: "Reload Scripts"
+3. Click "Reload Scripts"
+4. Done! Changes are now active
+
+## Method 2: Disable/Enable Addon
+
+1. Edit → Preferences
+2. Add-ons tab
+3. Find "Style Engine"
+4. Uncheck the checkbox (disable)
+5. Check the checkbox again (enable)
+6. Close Preferences
+7. Done!
+
+## Method 3: Restart Blender (Most Reliable)
+
+1. Save your work
+2. File → Quit
+3. Restart Blender
+4. Open your file
+5. Done!
+
+## After Reloading
+
+Test the Create Object button:
+1. Alt+W (pie menu)
+2. Object section (top)
+3. Click "Create Object"
+4. Should now show: "Generating 3D mesh from current_ai.png... (check console)"
+
+## Console Output Should Show
+
+```
+[Create Object] ============================================
+[Create Object] STARTING 3D MESH GENERATION
+[Create Object] ============================================
+[Create Object] Step 1: Getting reference image...
+[Create Object] ✓ Found: current_ai.png
+...
+```
+
+Instead of:
+```
+Info: Create Object - Coming Soon
+```
+
+---
+
+**Current Status:**
+✅ Files updated on disk
+❌ Blender still running old cached version
+→ Need to reload!

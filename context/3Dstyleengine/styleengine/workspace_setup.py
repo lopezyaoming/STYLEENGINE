@@ -502,7 +502,6 @@ def write_session_json(context):
             },
             "lookup": props.lookup,
             "global_prompt": props.global_prompt,
-            "negative_prompt": props.negative_prompt if hasattr(props, 'negative_prompt') else "",
             "depth_influence": round(props.depth_influence, 3),
             "silhouette_influence": round(props.silhouette_influence, 3),
             "texture_influence": round(props.texture_influence, 3),
@@ -519,10 +518,16 @@ def write_session_json(context):
                 "strength_model": round(props.lora_strength_model, 3) if hasattr(props, 'lora_strength_model') else 0.8,
                 "strength_clip": round(props.lora_strength_model, 3) if hasattr(props, 'lora_strength_model') else 0.8
             },
+            "lora2": {
+                "enabled": props.lora2_enabled if hasattr(props, 'lora2_enabled') else False,
+                "name": props.lora2_name if hasattr(props, 'lora2_name') else "NONE",
+                "strength_model": round(props.lora2_strength_model, 3) if hasattr(props, 'lora2_strength_model') else 0.8,
+                "strength_clip": round(props.lora2_strength_model, 3) if hasattr(props, 'lora2_strength_model') else 0.8
+            },
             "reference_images": {
-                # Global strengths (UI: 0.0-1.0, multiplied by 1.5 for workflow: 0.0-1.5)
-                "style_transfer_strength": round(props.style_transfer_strength * 1.5, 3),
-                "composition_strength": round(props.composition_strength * 1.5, 3),
+                # Global strengths
+                "style_transfer_strength": round(props.style_transfer_strength, 3),
+                "composition_strength": round(props.composition_strength, 3),
                 "force_transfer_strength": round(props.force_transfer_strength, 3),
                 # Individual weights
                 "st1_weight": round(props.st1_weight, 3),
@@ -1199,9 +1204,13 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
                 # Template loaded successfully with full layout
                 print("[Style Engine] ✓ Using template layout as-is (no splitting needed)")
                 
-                # Create/get the prompt text block with template
-                from . import utils
-                prompt_text = utils.get_or_create_prompt_text()
+                # Create the prompt text block if it doesn't exist
+                if "STYLEENGINE_Prompt" not in bpy.data.texts:
+                    prompt_text = bpy.data.texts.new("STYLEENGINE_Prompt")
+                    prompt_text.write("Enter your AI prompt here...")
+                    print("[Style Engine] Created prompt text block: STYLEENGINE_Prompt")
+                else:
+                    prompt_text = bpy.data.texts["STYLEENGINE_Prompt"]
                 
                 # Configure all text editors in the workspace
                 for area in workspace.screens[0].areas:
@@ -2022,15 +2031,14 @@ def generate_ai_image_cloud(context):
     props = context.scene.style_engine_props
     
     if prompt_from_editor:
-        # Always process through prompt builder (auto-detects tags, falls back to raw text)
-        positive_prompt, negative_prompt = utils.process_prompt_builder(prompt_from_editor)
-        
-        if positive_prompt:
-            props.global_prompt = positive_prompt
-            props.negative_prompt = negative_prompt  # Store negative prompt!
+        # Check if Prompt Builder is enabled
+        if props.use_prompt_builder:
+            # Process through prompt builder
+            positive_prompt, negative_prompt = utils.process_prompt_builder(prompt_from_editor)
             
-            # Check if tags were used (has negative prompt or comma in positive)
-            if negative_prompt or ', ' in positive_prompt:
+            if positive_prompt:
+                props.global_prompt = positive_prompt
+                props.negative_prompt = negative_prompt  # Store negative prompt!
                 print(f"[Style Engine] ✓ Prompt Builder: Built prompt from tags ({len(positive_prompt)} chars)")
                 print(f"[Style Engine]   → Positive: {positive_prompt[:100]}...")
                 if negative_prompt:
@@ -2038,9 +2046,15 @@ def generate_ai_image_cloud(context):
                 else:
                     print(f"[Style Engine]   → Negative: (none - will use default)")
             else:
-                # Raw text was used (no tags detected)
-                print(f"[Style Engine] ✓ Using raw text as prompt ({len(positive_prompt)} chars)")
-                print(f"[Style Engine]   → Prompt: {positive_prompt[:100]}...")
+                # Fallback to raw text if builder failed
+                props.global_prompt = prompt_from_editor
+                props.negative_prompt = ""  # Clear negative prompt
+                print(f"[Style Engine] ⚠️ Prompt Builder: No tags found, using raw text")
+        else:
+            # Normal mode: use raw text as-is
+            props.global_prompt = prompt_from_editor
+            props.negative_prompt = ""  # Clear negative prompt in normal mode
+            print(f"[Style Engine] ✓ Auto-synced prompt from text editor ({len(prompt_from_editor)} chars)")
     
     # 1. Check if generation already in progress
     if runcomfy_polling.RunComfyPoller.active_requests:
@@ -2068,12 +2082,8 @@ def generate_ai_image_cloud(context):
     
     # 3.5. Update session_data with the freshly synced prompt from text editor
     # This ensures the current prompt is used, not the old one from session.json
-    props = context.scene.style_engine_props
-    session_data['global_prompt'] = props.global_prompt
-    session_data['negative_prompt'] = props.negative_prompt if hasattr(props, 'negative_prompt') else ""
+    session_data['global_prompt'] = context.scene.style_engine_props.global_prompt
     print(f"[Style Engine] Using prompt: {session_data['global_prompt'][:50]}...")
-    if session_data['negative_prompt']:
-        print(f"[Style Engine] Using negative: {session_data['negative_prompt'][:50]}...")
     
     # 4. Encode combined image to base64
     # NOTE: Only combined pass is sent - depth is generated by DepthAnything AI on the server
@@ -2241,6 +2251,18 @@ def generate_ai_image_cloud(context):
             # Prompt (Node 25 - PrimitiveString)
             workflow_json["25"]["inputs"]["value"] = session_data['global_prompt']
             
+            # Negative Prompt (Node 7 - CLIPTextEncode)
+            custom_negative = session_data.get('negative_prompt', '')
+            if custom_negative:
+                negative_prompt = custom_negative
+                print(f"[GCS] 🚫 Using custom negative prompt: {negative_prompt[:50]}...")
+            else:
+                # Default negative prompt
+                negative_prompt = "text, watermark, blurry, deformed, ugly, bad anatomy, worst quality, low quality"
+                print(f"[GCS] 🚫 Using default negative prompt")
+            
+            workflow_json["7"]["inputs"]["text"] = negative_prompt
+            
             # Steps (Node 42 - PrimitiveInt)
             workflow_json["42"]["inputs"]["value"] = session_data.get('steps', 15)
             
@@ -2257,20 +2279,36 @@ def generate_ai_image_cloud(context):
             workflow_json["135"]["inputs"]["value"] = denoise_value
             
             # ============================================================
-            # LORA (Node 34 - LoraLoader)
+            # LORA (Node 136 - LoRa 1, Node 34 - LoRa 2)
             # ============================================================
             lora_config = session_data.get('lora', {})
+            lora2_config = session_data.get('lora2', {})
+            
+            # LoRa 1 (Node 136 - base LoRa)
             if lora_config.get('enabled', False) and lora_config.get('name') != 'NONE':
-                workflow_json["34"]["inputs"]["lora_name"] = lora_config['name']
-                workflow_json["34"]["inputs"]["strength_model"] = lora_config.get('strength_model', 0.8)
-                workflow_json["34"]["inputs"]["strength_clip"] = lora_config.get('strength_clip', 0.8)
-                print(f"[GCS] 🎨 LoRa enabled: {lora_config['name']}")
-                print(f"[GCS]    Strength: {lora_config.get('strength_model', 0.8):.2f}")
+                workflow_json["136"]["inputs"]["lora_name"] = lora_config['name']
+                workflow_json["136"]["inputs"]["strength_model"] = lora_config.get('strength_model', 0.8)
+                workflow_json["136"]["inputs"]["strength_clip"] = lora_config.get('strength_clip', 0.8)
+                print(f"[GCS] 🎨 LoRa 1 enabled: {lora_config['name']}")
+                print(f"[GCS]    Strength 1: {lora_config.get('strength_model', 0.8):.2f}")
             else:
-                # Disable LoRa by setting strength to 0
+                # Disable LoRa 1 by setting strength to 0
+                workflow_json["136"]["inputs"]["strength_model"] = 0.0
+                workflow_json["136"]["inputs"]["strength_clip"] = 0.0
+                print(f"[GCS] LoRa 1 disabled")
+            
+            # LoRa 2 (Node 34 - stacked LoRa)
+            if lora2_config.get('enabled', False) and lora2_config.get('name') != 'NONE':
+                workflow_json["34"]["inputs"]["lora_name"] = lora2_config['name']
+                workflow_json["34"]["inputs"]["strength_model"] = lora2_config.get('strength_model', 0.8)
+                workflow_json["34"]["inputs"]["strength_clip"] = lora2_config.get('strength_clip', 0.8)
+                print(f"[GCS] 🎨 LoRa 2 enabled: {lora2_config['name']}")
+                print(f"[GCS]    Strength 2: {lora2_config.get('strength_model', 0.8):.2f}")
+            else:
+                # Disable LoRa 2 by setting strength to 0
                 workflow_json["34"]["inputs"]["strength_model"] = 0.0
                 workflow_json["34"]["inputs"]["strength_clip"] = 0.0
-                print(f"[GCS] LoRa disabled")
+                print(f"[GCS] LoRa 2 disabled")
             
             # ============================================================
             # RESOLUTION (Node 5 - EmptyLatentImage)
@@ -2350,7 +2388,7 @@ def generate_ai_image_cloud(context):
             print(f"[GCS]   - Steps: {session_data.get('steps', 15)}")
             print(f"[GCS]   - ControlNet: Canny={session_data.get('silhouette_influence', 1.0):.2f}, Depth={session_data.get('depth_influence', 1.0):.2f}")
             print(f"[GCS]   - Influence: {influence_value:.2f} (1.0=keep render, 0.0=full AI) → denoise={denoise_value:.2f}")
-            print(f"[GCS]   - Global Strengths (scaled 1.5x): ST={ref_images.get('style_transfer_strength', 0.0):.2f}, Comp={ref_images.get('composition_strength', 1.0):.2f}, Force={ref_images.get('force_transfer_strength', 0.0):.2f}")
+            print(f"[GCS]   - Global Strengths: ST={ref_images.get('style_transfer_strength', 0.0):.2f}, Comp={ref_images.get('composition_strength', 1.0):.2f}, Force={ref_images.get('force_transfer_strength', 0.0):.2f}")
             
             # Time the submission operation
             submit_start = time.time()
@@ -2625,8 +2663,8 @@ def build_runcomfy_overrides(context, session_data, combined_b64, workflow_type)
         print(f"  Canny Influence: {session_data.get('silhouette_influence', 0.75)}")
         print(f"  Depth Influence: {session_data.get('depth_influence', 0.5)}")
         
-        # Global strengths (UI 0.0-1.0 scaled to 0.0-1.5 for workflow)
-        print(f"\n🎚️ GLOBAL STRENGTHS (scaled 1.5x for workflow):")
+        # Global strengths
+        print(f"\n🎚️ GLOBAL STRENGTHS:")
         print(f"  Style Transfer Strength (Node 52): {ref_data.get('style_transfer_strength', 0.0)}")
         print(f"  Composition Strength (Node 90): {ref_data.get('composition_strength', 1.0)}")
         print(f"  Force Transfer Strength (Node 91): {ref_data.get('force_transfer_strength', 0.0)}")
@@ -2750,8 +2788,8 @@ def load_workflow_json_for_gcs():
     addon_dir = Path(__file__).parent  # This is scripts/addons/styleengine/
     workflows_dir = addon_dir / "workflows"
     
-    # Use StyleEngineTexture.json for GCS mode (img2img with texture control)
-    workflow_file = workflows_dir / "StyleEngineTexture.json"
+    # Use StyleEngineTexture2.json for GCS mode (img2img with dual LoRa support)
+    workflow_file = workflows_dir / "StyleEngineTexture2.json"
     
     try:
         with open(workflow_file, 'r') as f:

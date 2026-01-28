@@ -1,0 +1,369 @@
+================================================================================
+                    STYLE ENGINE - UX QUICK REFERENCE
+                         Essential Interface Guide
+================================================================================
+
+Version: 0.3.7 | Date: January 27, 2026 | One-Page Overview
+
+================================================================================
+WHAT YOU SEE (v0.3.7 MINIMAL UI)
+================================================================================
+
+N-PANEL (Press N in 3D Viewport):
+┌────────────────────────────────┐
+│ STYLE ENGINE                    │
+│                                 │
+│ 📁 Output Path                 │ ← Where files save
+│ [Browse...]                     │
+│                                 │
+│ 📝 Prompt Settings              │ ← Prompt help + LLM button
+│ • <k>, <p>, <n> tag help       │
+│ [Refine Prompt (LLM)]          │
+│                                 │
+│ 🖼️ Reference Images             │ ← 15 slots total
+│ ▼ Style (5 slots)              │
+│ ▶ Composition (5 slots)        │
+│ ▶ Transfer (5 slots)           │
+└────────────────────────────────┘
+
+PIE MENU (Press Alt+W):
+         TOP: UV Texture
+              |
+LEFT: Setup --+-- RIGHT: Visualize
+              |
+      BOTTOM: Generate
+
+TEXT EDITOR (After Setup):
+• Bottom-right area
+• STYLEENGINE_Prompt text block
+• HTML-style tag template
+
+================================================================================
+5-MINUTE WORKFLOW
+================================================================================
+
+FIRST TIME:
+1. Preferences → Style Engine → Choose Backend → Test Connection
+2. Alt+W → LEFT (Setup Workspace)
+3. Fill <p> tag in text editor
+4. Alt+W → BOTTOM (Generate)
+5. Wait 10-30s → AI appears in camera
+
+ITERATION:
+1. Edit prompt
+2. Alt+W → BOTTOM
+3. Repeat
+
+================================================================================
+HTML TAG FORMAT
+================================================================================
+
+# Keywords
+<k>photorealistic, 8k, detailed</k>
+
+# Prompt
+<p>a medieval castle on a hill at sunset</p>
+
+# Negative Prompt
+<n>blurry, ugly, low quality</n>
+
+RULES:
+• Lines starting with # are comments (ignored)
+• <k> = keywords (optional, prepended to prompt)
+• <p> = main prompt (required, the actual description)
+• <n> = negative prompt (optional, things to avoid)
+• Without tags, raw text is used
+
+================================================================================
+REFERENCE IMAGES
+================================================================================
+
+THREE CATEGORIES (15 slots total):
+
+STYLE (ST1-ST5):
+• Influences artistic style, colors, textures
+• Use for: paint style, photo style, illustration
+
+COMPOSITION (COMP1-COMP5):
+• Influences layout, placement, framing
+• Use for: pose reference, scene layout
+
+TRANSFER (SST1-SST5):
+• Strong influence on both style + composition
+• Use for: direct style mimicry
+
+EACH SLOT HAS:
+• Thumbnail preview
+• Load button (📁)
+• Clear button (X)
+• Reload button (↻)
+• Weight slider (0.0-2.0)
+
+GLOBAL STRENGTH:
+• Each category has master slider
+• Affects all 5 slots proportionally
+• Final strength = global × individual weight
+
+================================================================================
+LLM PROMPT REFINEMENT
+================================================================================
+
+BUTTON: "Refine Prompt (LLM)"
+LOCATION: N-panel, Prompt Settings section
+
+WHAT IT DOES:
+• Extracts text from <p> tag only
+• Sends to local LLM (Ollama via ComfyUI)
+• LLM applies 8 prompt engineering rules
+• Returns enhanced version
+• Replaces content inside <p> tag
+• <k> and <n> tags unchanged
+
+REQUIREMENTS:
+• GCS backend mode (not RunComfy)
+• ComfyUI with Griptape nodes
+• Ollama running (http://127.0.0.1:11434)
+• gemma3:4b model installed
+
+USAGE:
+1. Write basic prompt: <p>dragon</p>
+2. Click "Refine Prompt (LLM)"
+3. Wait 3-10 seconds (UI freezes)
+4. See enhanced prompt in text editor
+5. Generate image with refined prompt
+
+EXAMPLE:
+BEFORE: <p>bilbo baggins in hobbiton</p>
+AFTER: <p>A detailed oil painting of Bilbo Baggins sitting in his 
+cozy hobbit hole in Hobbiton, warm golden hour sunlight streaming 
+through a round window, wooden table with tea, plush patterned rug, 
+smooth stone walls, peaceful domestic atmosphere, medium shot at 
+eye level, 50mm lens, earthy greens and browns palette</p>
+
+================================================================================
+PIE MENU ACTIONS
+================================================================================
+
+ALT+W HOTKEY → 6 OPERATIONS:
+
+LEFT: Setup Workspace
+• Creates AI Vision dual-viewport layout
+• Adds text editor with prompt template
+• Creates ai_camera and aligns to view
+• One-time per .blend file
+
+BOTTOM: Generate AI Quick
+• Main generation action
+• Renders scene → Sends to ComfyUI → Updates camera
+• Most common operation (hence bottom position)
+
+TOP: UV Texture
+• Generates UV-mapped textures for selected mesh
+• Requires GCS mode + saved .blend file
+• 1-2 minute processing time
+
+RIGHT: Visualize
+• Cycles: Combined → Canny → Depth → Combined
+• Shows ControlNet inputs
+• Helps understand AI interpretation
+
+BOTTOM-LEFT: Project Texture
+• Projects current_ai.png onto selected objects
+• Creates iteration snapshot (Iteration_###.png)
+• Allows multi-texture scenes
+
+BOTTOM-RIGHT: Render Passes
+• Re-renders Workbench passes
+• Updates combined.jpg, canny, depth
+• Use after camera/geometry changes
+
+================================================================================
+FILE LOCATIONS
+================================================================================
+
+TEMP (Volatile - per session):
+C:\Users\<USER>\AppData\Local\Temp\blender_styleengine\ai_vision\
+├── current_ai.png    (latest generation, displayed)
+├── combined.jpg      (your render, sent to AI)
+├── canny.png         (edge map preview)
+└── depth.png         (depth map preview)
+
+PROJECT LIBRARY (Persistent - per .blend file):
+<BlendName>_styleengine/
+├── generations/      (all timestamped generations)
+├── iterations/       (projected texture snapshots)
+├── preview/          (canny/depth copies)
+├── current_ai.png    (symlink to latest)
+└── project_metadata.json (generation history)
+
+FILE NAMING:
+20260127_143022_582_gcs.png
+   │       │      │   └─ Backend (gcs or runcomfy)
+   │       │      └───── Milliseconds
+   │       └──────────── Time (HH:MM:SS)
+   └──────────────────── Date (YYYY-MM-DD)
+
+================================================================================
+BACKEND MODES
+================================================================================
+
+GCS (Self-Hosted ComfyUI):
+• URL: http://IP:8188
+• Full feature access
+• LLM refinement ✓
+• UV texture ✓
+• Preview images ✓
+• Custom workflows ✓
+
+RunComfy Cloud:
+• Credentials: API Token + User ID
+• Managed service
+• LLM refinement ✗
+• UV texture ✗
+• Preview images ✗
+• Standard workflows only
+
+SWITCHING:
+Preferences → Backend dropdown → Configure → Test Connection
+
+================================================================================
+KEYBOARD SHORTCUTS
+================================================================================
+
+Alt+W : Pie Menu (main hotkey)
+N     : Toggle sidebar (show/hide Style Engine panel)
+ESC   : Cancel pie menu
+
+(More shortcuts planned for future)
+
+================================================================================
+COMMON WORKFLOWS
+================================================================================
+
+BASIC GENERATION:
+Alt+W → LEFT → Write prompt → Alt+W → BOTTOM
+
+ITERATIVE REFINEMENT:
+Generate → Edit prompt → Generate → Repeat
+
+MULTI-OBJECT TEXTURING:
+Generate → Select objects → Alt+W → BOTTOM-LEFT → 
+New prompt → Generate → Select different objects → Project → Repeat
+
+STYLE EXPLORATION:
+Write prompt → Generate → Change keywords → Generate → 
+Compare results → Pick best
+
+LLM-ENHANCED WORKFLOW:
+Write basic prompt → Click "Refine Prompt (LLM)" → 
+Review enhancement → Generate
+
+================================================================================
+HIDDEN FEATURES (Exist but no UI)
+================================================================================
+
+These work but have no visible controls:
+
+• Resolution (default: 1024x1024)
+• Steps (default: 15)
+• Influence (default: 0.25)
+• LoRa selector (disabled)
+• Render quality (default: Fast)
+• Auto-generate (discouraged)
+• Groups system (fully functional)
+
+Access via Python console:
+>>> props = bpy.context.scene.style_engine_props
+>>> props.steps = 25
+>>> props.texture_influence = 0.4
+>>> props.ai_resolution = '1536x1536'
+
+================================================================================
+TROUBLESHOOTING (COMMON ISSUES)
+================================================================================
+
+"BUTTON DOESN'T APPEAR"
+→ Reload addon (F3 → "Reload Scripts")
+
+"PROMPT NOT WORKING"
+→ Add <p> tags around your text
+
+"REFINEMENT BUTTON SAYS ERROR"
+→ Check you're in GCS mode (not RunComfy)
+
+"NO AI IMAGE APPEARS"
+→ Check console for errors (Window → Toggle System Console)
+
+"WHERE ARE MY FILES?"
+→ Look in <BlendName>_styleengine/generations/
+
+"GENERATION STUCK"
+→ Check ComfyUI server is running
+→ Check console for error messages
+→ Restart Blender if needed
+
+"REFINEMENT GIVES SINGLE LETTER"
+→ Fixed in v0.3.7 (character array join bug)
+→ Reload addon to get latest code
+
+================================================================================
+CONSOLE MESSAGES (What's Normal)
+================================================================================
+
+GOOD SIGNS:
+[Style Engine] ✓ Workspace has 6 areas
+[GCS] ✓ Server connection verified
+[Refine Prompt] ✓ Refined prompt: ...
+[Style Engine] Using prompt: ...
+[GCS] ✅ Saved: current_ai.png
+Info: AI generation started!
+
+WARNING SIGNS:
+[Style Engine] ⚠️ STYLEENGINE_Prompt text block not found
+[GCS] ⚠️ Server connection check failed
+[Refine Prompt] Waiting... (56s/60s)  ← Slow, but may complete
+
+ERROR SIGNS:
+[Refine Prompt] ❌ No text output found
+[UV Texture] ❌ Workflow missing
+[GCS] ❌ Server connection check failed
+Error: "PromptRefiner.json not found"
+
+================================================================================
+DESIGN PHILOSOPHY (Why It Looks This Way)
+================================================================================
+
+MINIMAL BY DEFAULT:
+• Only 3 sections in N-panel (Output, Prompt, References)
+• No overwhelming controls
+• Defaults handle 95% of cases
+• Pie menu for actions (not in panel)
+
+PROGRESSIVE DISCLOSURE:
+• Reference images collapsible (expand when needed)
+• Advanced settings in preferences (not main UI)
+• Power features accessible via Python console
+
+KEYBOARD-FIRST:
+• Primary actions via Alt+W (faster than clicking)
+• Muscle memory develops quickly
+• Reduces mouse travel distance
+
+VISUAL HIERARCHY:
+• Important actions: Large buttons (2.5x scale)
+• Common actions: Normal size
+• Info text: Small (0.8x scale)
+
+CONSISTENCY:
+• Icons mean the same thing everywhere
+• Console prefixes identify subsystems
+• Error messages are actionable
+• Tooltips explain all controls
+
+================================================================================
+END OF QUICK REFERENCE
+================================================================================
+
+For complete details, see: COMPLETE_UX_FLOW.txt
+For user guide, see: docs/USER_GUIDE.txt
+For technical docs, see: docs/ARCHITECTURE.md

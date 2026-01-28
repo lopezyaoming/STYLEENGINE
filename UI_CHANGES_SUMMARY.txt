@@ -1,0 +1,225 @@
+================================================================================
+                  STYLE ENGINE - UI CHANGES SUMMARY
+                        January 27, 2026
+================================================================================
+
+TWO MAJOR UI IMPROVEMENTS APPLIED:
+
+================================================================================
+1. REFERENCE IMAGES SECTION - SIMPLIFIED
+================================================================================
+
+CHANGE A: Hidden "Transfer" Category
+-------------------------------------
+BEFORE:
+┌────────────────────────────────┐
+│ Reference Images                │
+│ ▼ Style (5 slots)              │
+│ ▶ Composition (5 slots)        │
+│ ▶ Transfer (5 slots)           │ ← REMOVED
+└────────────────────────────────┘
+
+AFTER:
+┌────────────────────────────────┐
+│ Reference Images                │
+│ ▼ Style (5 slots)              │
+│ ▶ Composition (5 slots)        │
+│                                 │ ← Transfer HIDDEN
+└────────────────────────────────┘
+
+Reason: Transfer too aggressive, not used in production
+
+
+CHANGE B: Advanced Control Toggle + Hidden Weight Sliders
+----------------------------------------------------------
+BEFORE (Every image always showed weight slider):
+┌────────────────────────────────┐
+│ ▼ Style                         │
+│   Global Strength: [███---] 0.5│
+│   ┌────┐                        │
+│   │ST1 │                        │
+│   │img │                        │
+│   │Weight: [██████---] 0.8     │ ← Always visible
+│   │[↻][X]                      │
+│   └────┘                        │
+└────────────────────────────────┘
+
+AFTER (Default - Toggle OFF):
+┌────────────────────────────────┐
+│ Reference Images                │
+│ [Advanced Control] ← Toggle    │
+│                                 │
+│ ▼ Style                         │
+│   Global Strength: [███---] 0.5│
+│   ┌────┐                        │
+│   │ST1 │                        │
+│   │img │                        │
+│   │[↻][X]                      │ ← NO weight slider
+│   └────┘                        │
+└────────────────────────────────┘
+
+AFTER (Advanced Control ON):
+┌────────────────────────────────┐
+│ Reference Images                │
+│ [✓ Advanced Control]           │
+│                                 │
+│ ▼ Style                         │
+│   Global Strength: [███---] 0.5│
+│   ┌────┐                        │
+│   │ST1 │                        │
+│   │img │                        │
+│   │Weight: [██████---] 0.8     │ ← Slider appears
+│   │[↻][X]                      │
+│   └────┘                        │
+└────────────────────────────────┘
+
+Benefit: Cleaner UI for 90% of users who don't need per-image weights
+
+
+================================================================================
+2. GLOBAL STRENGTH SLIDERS - REMAPPED
+================================================================================
+
+UI SLIDER RANGE CHANGED:
+------------------------
+BEFORE: 0.0 ──────────────────────────────────> 5.0
+         [──────────────────────────────────────]
+
+AFTER:  0.0 ─────────> 1.0
+         [──────────────]
+
+What user sees: Slider from 0.0 to 1.0 (more intuitive!)
+
+
+BEHIND THE SCENES (Automatic):
+-------------------------------
+UI Value → Multiplied by 1.5 → Sent to Workflow
+
+Examples:
+┌──────────┬─────────────────┐
+│ UI Shows │ Workflow Gets   │
+├──────────┼─────────────────┤
+│   0.00   │      0.00       │
+│   0.25   │      0.375      │
+│   0.50   │      0.75       │
+│   0.75   │      1.125      │
+│   1.00   │      1.50       │
+└──────────┴─────────────────┘
+
+Your example: UI 0.75 → Workflow 1.12 ✓
+
+
+WHY THIS IS BETTER:
+-------------------
+✓ 0-1 scale is industry standard (like opacity, alpha, etc.)
+✓ More intuitive for artists
+✓ Old 5.0 max was unnecessarily high (caused over-aggressive styling)
+✓ Easier to find good values (most work in 0.3-0.8 range)
+✓ Behind-the-scenes multiplier gives optimal 0-1.5 range for IPAdapter
+
+
+================================================================================
+COMBINED RESULT - NEW REFERENCE IMAGES UI
+================================================================================
+
+┌─────────────────────────────────────────────────────────────┐
+│ 🖼️ Reference Images                                         │
+│                                                              │
+│ [Advanced Control]  ← Toggle (OFF by default)              │
+│                                                              │
+│ ▼ Style                                                     │
+│   Global Strength: [█████─────] 0.50                       │ ← 0.0-1.0 range
+│   (Workflow receives 0.75 automatically)                    │
+│                                                              │
+│   ┌──────┐ ┌──────┐ ┌──────┐                              │
+│   │ ST1  │ │ ST2  │ │ ST3  │                              │
+│   │ img  │ │ img  │ │ img  │                              │
+│   │ [↻][X]│ │ [↻][X]│ │ [↻][X]│                              │
+│   └──────┘ └──────┘ └──────┘                              │
+│   ┌──────┐ ┌──────┐                                       │
+│   │ ST4  │ │ ST5  │                                       │
+│   │ img  │ │ img  │                                       │
+│   │ [↻][X]│ │ [↻][X]│                                       │
+│   └──────┘ └──────┘                                       │
+│                                                              │
+│ ▶ Composition                                               │
+│   Global Strength: [███───────] 0.30                       │ ← 0.0-1.0 range
+│   (Workflow receives 0.45 automatically)                    │
+│                                                              │
+│                                                              │
+│ (Transfer section hidden - not needed in production)        │
+└─────────────────────────────────────────────────────────────┘
+
+
+================================================================================
+WHAT YOU NEED TO KNOW
+================================================================================
+
+FOR USERS:
+----------
+✓ Cleaner interface - less visual clutter
+✓ Transfer section gone (wasn't useful anyway)
+✓ Global strength sliders now 0-1 (easier to use)
+✓ Individual weights hidden by default (enable "Advanced Control" if needed)
+✓ Everything still works exactly the same behind the scenes
+
+FOR TECHNICAL:
+--------------
+✓ All properties still exist (nothing deleted)
+✓ Transfer UI hidden (can be re-enabled by uncommenting)
+✓ Weight sliders conditionally shown based on toggle
+✓ Global strengths multiplied by 1.5 before sending to workflow
+✓ Session.json stores scaled values (0.0-1.5 range)
+✓ Console logs show scaled values for debugging
+
+MIGRATION:
+----------
+✓ Old projects with Transfer images: Still work, just no UI to edit
+✓ Old projects with strength > 1.0: Auto-clamped to 1.0 on save
+  Example: Old 2.5 → New 1.0 (max) → Workflow 1.5
+✓ No data loss, fully backward compatible
+
+
+================================================================================
+FILES MODIFIED
+================================================================================
+
+1. scripts/addons/styleengine/ui_panel.py
+   - Added show_advanced_ref_controls property
+   - Added Advanced Control toggle in UI
+   - Modified draw_reference_section function
+   - Commented out Transfer section UI
+   - Changed global strength max from 5.0 to 1.0
+
+2. scripts/addons/styleengine/workspace_setup.py
+   - Added 1.5x multiplier when writing to session.json
+   - Updated debug logging to show scaled values
+
+3. context/UI_SIMPLIFICATION_2026-01-27.md (NEW)
+   - Full documentation of UI changes
+
+4. context/GLOBAL_STRENGTH_REMAPPING.md (NEW)
+   - Detailed technical docs for strength remapping
+
+
+================================================================================
+TESTING CHECKLIST
+================================================================================
+
+□ Load addon in Blender
+□ Open Reference Images section
+□ Verify Transfer section is hidden
+□ Verify "Advanced Control" toggle appears at top
+□ Verify toggle is OFF by default
+□ Verify weight sliders hidden when toggle OFF
+□ Enable Advanced Control toggle
+□ Verify weight sliders appear when toggle ON
+□ Verify global strength sliders go from 0.0 to 1.0
+□ Set Style strength to 0.5, check console log shows 0.75
+□ Set Composition strength to 1.0, check console log shows 1.5
+□ Generate image and verify everything works
+
+
+================================================================================
+END OF SUMMARY
+================================================================================
