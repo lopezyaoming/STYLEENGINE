@@ -551,15 +551,203 @@ class WM_OT_CreateObject(Operator):
 
 
 class WM_OT_CreateTexturedObject(Operator):
-    """Create textured 3D object from AI generation"""
+    """Create textured 3D mesh from current_ai.png using Hunyuan 3D 2.1"""
     bl_idname = "style_engine.create_textured_object"
     bl_label = "Create Textured Object"
-    bl_description = "Generate a new 3D mesh with textures using AI (Coming Soon)"
+    bl_description = "Generate a new 3D mesh WITH UV-mapped textures from current_ai.png"
     bl_options = {'REGISTER', 'UNDO'}
     
     def execute(self, context):
-        self.report({'INFO'}, "Create Textured Object - Coming Soon")
-        return {'FINISHED'}
+        from . import workspace_setup
+        from . import runcomfy_deployment
+        from pathlib import Path
+        import tempfile
+        import time
+        
+        # Check if in GCS mode
+        if not runcomfy_deployment.is_server_mode():
+            self.report({'ERROR'}, "Create Textured Object requires GCS mode")
+            print("[Create Textured] ❌ Feature requires GCS backend mode")
+            return {'CANCELLED'}
+        
+        print(f"[Create Textured] ============================================")
+        print(f"[Create Textured] STARTING TEXTURED MESH GENERATION")
+        print(f"[Create Textured] ============================================")
+        
+        try:
+            # Step 1: Get current_ai.png
+            print(f"[Create Textured] Step 1: Getting reference image...")
+            temp_img_dir = workspace_setup.get_temp_directory(context)
+            current_ai_path = temp_img_dir / "current_ai.png"
+            
+            if not current_ai_path.exists():
+                self.report({'ERROR'}, "current_ai.png not found. Generate an image first.")
+                print(f"[Create Textured] ❌ current_ai.png not found")
+                return {'CANCELLED'}
+            
+            print(f"[Create Textured] ✓ Found: {current_ai_path.name}")
+            
+            # Step 2: Upload image
+            print(f"[Create Textured] Step 2: Uploading image to server...")
+            server_client = runcomfy_deployment.get_server_client()
+            img_upload = server_client.upload_image(str(current_ai_path), overwrite=True)
+            uploaded_img_name = img_upload['name']
+            print(f"[Create Textured] ✓ Uploaded as: {uploaded_img_name}")
+            
+            # Step 3: Load workflow
+            print(f"[Create Textured] Step 3: Loading workflow...")
+            addon_dir = Path(__file__).parent
+            workflow_path = addon_dir / "workflows" / "objectCreateTexturedObject.json"
+            
+            if not workflow_path.exists():
+                self.report({'ERROR'}, f"Workflow not found: {workflow_path.name}")
+                print(f"[Create Textured] ❌ Workflow missing")
+                return {'CANCELLED'}
+            
+            import json
+            with open(workflow_path, 'r') as f:
+                workflow_json = json.load(f)
+            
+            print(f"[Create Textured] ✓ Loaded workflow: {workflow_path.name}")
+            
+            # Step 4: Override nodes with quality parameters
+            print(f"[Create Textured] Step 4: Configuring workflow...")
+            
+            # Get quality parameters
+            style_props = context.scene.style_engine_props
+            quality = style_props.object_quality if hasattr(style_props, 'object_quality') else 'BALANCED'
+            params = get_quality_params(quality)
+            
+            workflow_json["14"]["inputs"]["image"] = uploaded_img_name
+            workflow_json["32"]["inputs"]["string"] = f"StyleEngine_Textured_{int(time.time())}"
+            workflow_json["37"]["inputs"]["seed"] = int(time.time() * 1000) % 999999999999
+            
+            # Apply quality parameters (mesh + texture)
+            workflow_json["37"]["inputs"]["steps"] = params['mesh_steps']
+            workflow_json["9"]["inputs"]["octree_resolution"] = params['octree_resolution']
+            workflow_json["9"]["inputs"]["num_chunks"] = params['num_chunks']
+            workflow_json["30"]["inputs"]["value"] = params['max_faces']
+            workflow_json["20"]["inputs"]["view_size"] = params['view_size']
+            workflow_json["20"]["inputs"]["steps"] = params['texture_steps']
+            workflow_json["20"]["inputs"]["texture_size"] = params['texture_size']
+            
+            output_name = workflow_json["32"]["inputs"]["string"]
+            print(f"[Create Textured] ✓ Quality: {quality}")
+            print(f"[Create Textured] ✓ Mesh: steps={params['mesh_steps']}, octree={params['octree_resolution']}, faces={params['max_faces']}")
+            print(f"[Create Textured] ✓ Texture: view={params['view_size']}, steps={params['texture_steps']}, size={params['texture_size']}")
+            print(f"[Create Textured] ✓ Node 14 (image): {uploaded_img_name}")
+            print(f"[Create Textured] ✓ Node 32 (output): {output_name}")
+            
+            # Step 5: Submit
+            print(f"[Create Textured] Step 5: Submitting workflow...")
+            self.report({'INFO'}, f"Generating textured 3D mesh... (2-3 minutes)")
+            
+            result = server_client.queue_prompt(workflow_json)
+            prompt_id = result['prompt_id']
+            print(f"[Create Textured] ✓ Queued: {prompt_id}")
+            print(f"[Create Textured] ⏳ Processing (includes mesh + texture generation)...")
+            
+            # Capture variables
+            temp_dir = Path(tempfile.gettempdir()) / "styleengine_create"
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            download_path = temp_dir / f"{output_name}.glb"
+            
+            # Step 6: Start polling
+            from . import runcomfy_polling
+            
+            def on_create_textured_complete(success, result=None, error=None, workflow_type=None):
+                """Called when textured mesh generation completes - schedules heavy import work"""
+                if not success:
+                    print(f"[Create Textured] ❌ Generation failed: {error}")
+                    return
+                
+                print(f"[Create Textured] ✓ Generation complete! Scheduling download/import...")
+                
+                # Schedule heavy operations separately (keeps callback fast!)
+                def do_download_and_import():
+                    """Heavy operations - download and import GLB"""
+                    try:
+                        print(f"[Create Textured] ============================================")
+                        print(f"[Create Textured] Starting download & import...")
+                        print(f"[Create Textured] ============================================")
+                        
+                        outputs = result.get('outputs', {})
+                        output_filename = None
+                        subfolder = ""
+                        
+                        # Get filename from Node 62
+                        if '62' in outputs:
+                            node_62_output = outputs['62']
+                            if isinstance(node_62_output, dict) and 'result' in node_62_output:
+                                result_data = node_62_output['result']
+                                if isinstance(result_data, list) and len(result_data) > 0:
+                                    full_path = result_data[0]
+                                    if full_path and full_path.endswith('.glb'):
+                                        if '/' in full_path:
+                                            subfolder, output_filename = full_path.rsplit('/', 1)
+                                        else:
+                                            output_filename = full_path
+                                        print(f"[Create Textured] ✓ Found: {subfolder}/{output_filename}" if subfolder else f"✓ Found: {output_filename}")
+                        
+                        if not output_filename:
+                            print(f"[Create Textured] ❌ No GLB found!")
+                            return None
+                        
+                        # Download
+                        print(f"[Create Textured] Downloading...")
+                        download_success = server_client.download_mesh(output_filename, str(download_path), subfolder=subfolder, file_type="output")
+                        
+                        if not download_success:
+                            print(f"[Create Textured] ❌ Download failed")
+                            return None
+                        
+                        print(f"[Create Textured] ✓ Downloaded ({download_path.stat().st_size / 1024:.1f} KB)")
+                        
+                        # Import (heavy operation)
+                        print(f"[Create Textured] Importing...")
+                        original_selected = list(bpy.context.selected_objects)
+                        bpy.ops.import_scene.gltf(filepath=str(download_path))
+                        newly_imported = [o for o in bpy.context.selected_objects if o not in original_selected]
+                        
+                        if newly_imported:
+                            new_obj = newly_imported[0]
+                            new_obj.name = f"AI_Textured_{int(time.time())}"
+                            new_obj.location = (0, 0, 0)
+                            print(f"[Create Textured] ✅ Textured 3D mesh created: {new_obj.name}")
+                        
+                        print(f"[Create Textured] ============================================")
+                        print(f"[Create Textured] COMPLETE!")
+                        print(f"[Create Textured] ============================================")
+                        
+                    except Exception as e:
+                        print(f"[Create Textured] ❌ Error: {e}")
+                        import traceback
+                        traceback.print_exc()
+                    
+                    return None  # Don't repeat timer
+                
+                # Schedule heavy work separately (keeps polling callback fast!)
+                bpy.app.timers.register(do_download_and_import, first_interval=0.1)
+            
+            # Register polling
+            runcomfy_polling.RunComfyPoller.start_polling(
+                deployment_id='server',
+                request_id=prompt_id,
+                callback=on_create_textured_complete,
+                workflow_type='create_textured'
+            )
+            
+            print(f"[Create Textured] ✅ Submitted! Processing in background...")
+            print(f"[Create Textured] ============================================")
+            
+            return {'FINISHED'}
+            
+        except Exception as e:
+            self.report({'ERROR'}, f"Create Textured Object failed: {e}")
+            print(f"[Create Textured] ❌ Error: {e}")
+            import traceback
+            traceback.print_exc()
+            return {'CANCELLED'}
 
 
 class WM_OT_SetVisualization(Operator):
