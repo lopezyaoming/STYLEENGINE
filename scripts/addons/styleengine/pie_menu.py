@@ -890,6 +890,95 @@ class WM_OT_NextGeneration(Operator):
         return {'CANCELLED'}
 
 
+class WM_OT_PrevPrompt(Operator):
+    """Navigate to previous prompt snapshot"""
+    bl_idname = "style_engine.prev_prompt"
+    bl_label = "Previous Prompt"
+    bl_description = "Load previous prompt snapshot to text editor"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    def execute(self, context):
+        from . import workspace_setup
+        
+        style_props = context.scene.style_engine_props
+        
+        # Get list of prompts
+        prompts = workspace_setup.get_prompt_list(context)
+        
+        if not prompts:
+            self.report({'WARNING'}, "No prompt snapshots found")
+            return {'CANCELLED'}
+        
+        # Handle index (-1 means latest/newest)
+        if style_props.current_prompt_index == -1:
+            # Currently at latest, go to second-to-last
+            new_index = len(prompts) - 2
+        else:
+            # Go one step back (older)
+            new_index = style_props.current_prompt_index - 1
+        
+        # Clamp to valid range
+        new_index = max(0, min(new_index, len(prompts) - 1))
+        
+        # Load the prompt
+        if workspace_setup.load_prompt_to_editor(context, prompts[new_index]):
+            style_props.current_prompt_index = new_index
+            self.report({'INFO'}, f"Prompt {new_index + 1}/{len(prompts)}")
+            return {'FINISHED'}
+        else:
+            self.report({'ERROR'}, "Failed to load prompt")
+            return {'CANCELLED'}
+
+
+class WM_OT_NextPrompt(Operator):
+    """Navigate to next prompt snapshot"""
+    bl_idname = "style_engine.next_prompt"
+    bl_label = "Next Prompt"
+    bl_description = "Load next prompt snapshot to text editor"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    def execute(self, context):
+        from . import workspace_setup
+        
+        style_props = context.scene.style_engine_props
+        
+        # Get list of prompts
+        prompts = workspace_setup.get_prompt_list(context)
+        
+        if not prompts:
+            self.report({'WARNING'}, "No prompt snapshots found")
+            return {'CANCELLED'}
+        
+        # Handle index (-1 means latest/newest)
+        if style_props.current_prompt_index == -1:
+            # Already at latest
+            self.report({'INFO'}, f"Already at latest prompt")
+            return {'CANCELLED'}
+        
+        # Go one step forward (newer)
+        new_index = style_props.current_prompt_index + 1
+        
+        # Check if we've reached the latest
+        if new_index >= len(prompts) - 1:
+            new_index = -1  # Back to "latest" mode
+        
+        # Load the prompt
+        if new_index == -1:
+            # Load the latest prompt
+            if workspace_setup.load_prompt_to_editor(context, prompts[-1]):
+                style_props.current_prompt_index = -1
+                self.report({'INFO'}, f"Latest prompt")
+                return {'FINISHED'}
+        else:
+            if workspace_setup.load_prompt_to_editor(context, prompts[new_index]):
+                style_props.current_prompt_index = new_index
+                self.report({'INFO'}, f"Prompt {new_index + 1}/{len(prompts)}")
+                return {'FINISHED'}
+        
+        self.report({'ERROR'}, "Failed to load prompt")
+        return {'CANCELLED'}
+
+
 # ----------------------------------------------------------------
 # MAIN PIE MENU
 # ----------------------------------------------------------------
@@ -1215,6 +1304,8 @@ classes = (
     WM_OT_SetRenderQuality,
     WM_OT_PrevGeneration,
     WM_OT_NextGeneration,
+    WM_OT_PrevPrompt,
+    WM_OT_NextPrompt,
     STYLEENGINE_MT_pie_main,
 )
 

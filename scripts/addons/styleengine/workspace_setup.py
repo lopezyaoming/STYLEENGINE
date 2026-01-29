@@ -74,10 +74,11 @@ def ensure_project_library(context):
     
     Structure:
         MyProject_styleengine/
-        ├── generations/     - All AI generations (timestamped)
-        ├── iterations/      - Projected texture iterations
-        ├── preview/         - Canny/Depth preview images
-        ├── current_ai.png   - Latest generation (for camera)
+        ├── Text/            - LLM/text generation outputs (future)
+        ├── Images/          - All AI image generations (timestamped)
+        ├── Textures/        - Projected texture snapshots
+        ├── Models/          - 3D model outputs (future)
+        ├── temp/            - Working files (canny, depth, current_ai.png)
         └── project_metadata.json - Generation history
     
     Returns:
@@ -88,10 +89,12 @@ def ensure_project_library(context):
     if project_lib is None:
         return None
     
-    # Create directory structure
-    (project_lib / "generations").mkdir(parents=True, exist_ok=True)
-    (project_lib / "iterations").mkdir(parents=True, exist_ok=True)
-    (project_lib / "preview").mkdir(parents=True, exist_ok=True)
+    # Create directory structure (matching UI categories)
+    (project_lib / "Text").mkdir(parents=True, exist_ok=True)
+    (project_lib / "Images").mkdir(parents=True, exist_ok=True)
+    (project_lib / "Textures").mkdir(parents=True, exist_ok=True)
+    (project_lib / "Models").mkdir(parents=True, exist_ok=True)
+    (project_lib / "temp").mkdir(parents=True, exist_ok=True)
     
     print(f"[Style Engine] 📁 Project library: {project_lib}")
     
@@ -100,26 +103,26 @@ def ensure_project_library(context):
 
 def get_working_directory(context):
     """
-    Get the working directory for storing generations.
+    Get the working directory for storing AI image generations.
     
     Priority:
-    1. Project library (if .blend saved)
+    1. Project library Images/ folder (if .blend saved)
     2. Session-based temp directory (if unsaved)
     
     Returns:
-        Path: Directory for storing generations
+        Path: Directory for storing image generations
     """
     # Try project library first
     project_lib = get_project_library(context)
     if project_lib:
         ensure_project_library(context)
-        return project_lib / "generations"
+        return project_lib / "Images"
     
     # Fall back to session-based temp
     import tempfile
     session_id = get_session_id()
     temp_base = Path(tempfile.gettempdir()) / "blender_styleengine" / "sessions"
-    session_dir = temp_base / session_id / "generations"
+    session_dir = temp_base / session_id / "Images"
     session_dir.mkdir(parents=True, exist_ok=True)
     
     return session_dir
@@ -130,7 +133,7 @@ def migrate_session_to_project(context):
     Migrate session data from temp to project library.
     Called when .blend file is saved for the first time.
     
-    This copies all generations from the temp session directory
+    This copies all images and textures from the temp session directory
     to the new project library, preserving all work.
     """
     global _session_migrated
@@ -160,17 +163,18 @@ def migrate_session_to_project(context):
     
     migrated_count = 0
     
-    # Copy all generations
-    source_gens = temp_session / "generations"
-    if source_gens.exists():
-        for img_file in source_gens.glob("*.png"):
-            dest = project_lib / "generations" / img_file.name
-            try:
-                shutil.copy2(img_file, dest)
-                print(f"[Style Engine]    ✓ Migrated: {img_file.name}")
-                migrated_count += 1
-            except Exception as e:
-                print(f"[Style Engine]    ✗ Failed to migrate {img_file.name}: {e}")
+    # Copy all images (check both old "generations" and new "Images" folders for compatibility)
+    for source_folder_name in ["Images", "generations"]:
+        source_images = temp_session / source_folder_name
+        if source_images.exists():
+            for img_file in source_images.glob("*.png"):
+                dest = project_lib / "Images" / img_file.name
+                try:
+                    shutil.copy2(img_file, dest)
+                    print(f"[Style Engine]    ✓ Migrated: {img_file.name}")
+                    migrated_count += 1
+                except Exception as e:
+                    print(f"[Style Engine]    ✗ Failed to migrate {img_file.name}: {e}")
     
     # Copy metadata if exists
     source_meta = temp_session / "project_metadata.json"
@@ -192,24 +196,25 @@ def migrate_session_to_project(context):
         except Exception as e:
             print(f"[Style Engine]    ✗ Failed to migrate current_ai.png: {e}")
     
-    # Copy iteration textures if exist
-    source_iterations = temp_session / "iterations"
-    if source_iterations.exists():
-        iteration_count = 0
-        for img_file in source_iterations.glob("*.png"):
-            dest = project_lib / "iterations" / img_file.name
-            try:
-                shutil.copy2(img_file, dest)
-                print(f"[Style Engine]    ✓ Migrated iteration: {img_file.name}")
-                iteration_count += 1
-            except Exception as e:
-                print(f"[Style Engine]    ✗ Failed to migrate {img_file.name}: {e}")
-        
-        if iteration_count > 0:
-            print(f"[Style Engine]    📦 Migrated {iteration_count} iteration textures")
+    # Copy textures (check both old "iterations" and new "Textures" folders for compatibility)
+    texture_count = 0
+    for source_folder_name in ["Textures", "iterations"]:
+        source_textures = temp_session / source_folder_name
+        if source_textures.exists():
+            for img_file in source_textures.glob("*.png"):
+                dest = project_lib / "Textures" / img_file.name
+                try:
+                    shutil.copy2(img_file, dest)
+                    print(f"[Style Engine]    ✓ Migrated texture: {img_file.name}")
+                    texture_count += 1
+                except Exception as e:
+                    print(f"[Style Engine]    ✗ Failed to migrate {img_file.name}: {e}")
+    
+    if texture_count > 0:
+        print(f"[Style Engine]    📦 Migrated {texture_count} textures")
     
     _session_migrated = True
-    print(f"[Style Engine] ✅ Migration complete! ({migrated_count} generations)")
+    print(f"[Style Engine] ✅ Migration complete! ({migrated_count} images)")
 
 
 def on_blend_file_saved(dummy):
@@ -315,6 +320,137 @@ def load_generation_to_current(context, generation_path):
         return False
 
 
+# ================================================================
+#    Prompt History System
+# ================================================================
+
+def get_prompt_directory(context):
+    """
+    Get the Text directory for storing prompt history.
+    
+    Returns:
+        Path: Directory for storing prompt snapshots
+    """
+    project_lib = get_project_library(context)
+    if project_lib:
+        ensure_project_library(context)
+        return project_lib / "Text"
+    
+    # Fall back to session-based temp
+    import tempfile
+    session_id = get_session_id()
+    temp_base = Path(tempfile.gettempdir()) / "blender_styleengine" / "sessions"
+    text_dir = temp_base / session_id / "Text"
+    text_dir.mkdir(parents=True, exist_ok=True)
+    
+    return text_dir
+
+
+def get_prompt_list(context):
+    """
+    Get list of all saved prompt snapshots, sorted chronologically (oldest to newest).
+    
+    Returns:
+        list[Path]: List of prompt text file paths, sorted by number
+    """
+    text_dir = get_prompt_directory(context)
+    
+    if not text_dir.exists():
+        return []
+    
+    # Get all TXT files in Text folder
+    prompts = list(text_dir.glob("*.txt"))
+    
+    # Sort by filename (numbered, so chronological)
+    prompts.sort()
+    
+    return prompts
+
+
+def save_prompt_snapshot(context, prefix="prompt"):
+    """
+    Save current STYLEENGINE_Prompt content to a numbered text file.
+    
+    Args:
+        context: Blender context
+        prefix: Prefix for filename (e.g., "before", "after")
+    
+    Returns:
+        Path: Path to saved prompt file, or None if failed
+    """
+    import bpy
+    
+    # Get current prompt content
+    text_block = bpy.data.texts.get("STYLEENGINE_Prompt")
+    if not text_block:
+        print("[Style Engine] ⚠️ STYLEENGINE_Prompt text block not found")
+        return None
+    
+    content = text_block.as_string()
+    if not content.strip():
+        print("[Style Engine] ⚠️ Prompt is empty, skipping snapshot")
+        return None
+    
+    # Get Text directory
+    text_dir = get_prompt_directory(context)
+    text_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Find next available number
+    existing = list(text_dir.glob("*.txt"))
+    next_num = len(existing)
+    
+    # Create filename with number and prefix
+    filename = f"{next_num:03d}_{prefix}.txt"
+    dest_path = text_dir / filename
+    
+    try:
+        with open(dest_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        print(f"[Style Engine] 📝 Saved prompt snapshot: {filename}")
+        return dest_path
+    except Exception as e:
+        print(f"[Style Engine] ❌ Failed to save prompt snapshot: {e}")
+        return None
+
+
+def load_prompt_to_editor(context, prompt_path):
+    """
+    Load a saved prompt snapshot to STYLEENGINE_Prompt text editor.
+    
+    Args:
+        context: Blender context
+        prompt_path: Path to the prompt text file
+    
+    Returns:
+        bool: True if successful
+    """
+    import bpy
+    
+    if not prompt_path.exists():
+        print(f"[Style Engine] ⚠️ Prompt file not found: {prompt_path}")
+        return False
+    
+    # Get or create the text block
+    text_block = bpy.data.texts.get("STYLEENGINE_Prompt")
+    if not text_block:
+        text_block = bpy.data.texts.new("STYLEENGINE_Prompt")
+    
+    try:
+        with open(prompt_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # Update text block
+        text_block.clear()
+        text_block.write(content)
+        
+        print(f"[Style Engine] 📖 Loaded prompt: {prompt_path.name}")
+        return True
+    
+    except Exception as e:
+        print(f"[Style Engine] ❌ Failed to load prompt: {e}")
+        return False
+
+
 def save_generation_to_library(context, source_image_path, backend='unknown'):
     """
     Save a generated image to the project library with proper organization.
@@ -378,10 +514,10 @@ def save_generation_to_library(context, source_image_path, backend='unknown'):
         except Exception as e:
             print(f"[Style Engine] ⚠️ Failed to update current_ai.png: {e}")
     
-    # Legacy: Save to output_path if set (for backwards compatibility)
+    # Also save to output_path if set (user-specified backup location)
     props = context.scene.style_engine_props
     if hasattr(props, 'output_path') and props.output_path and os.path.exists(props.output_path):
-        output_dir = Path(props.output_path) / "generated"
+        output_dir = Path(props.output_path) / "Images"
         output_dir.mkdir(exist_ok=True, parents=True)
         
         output_path = output_dir / f"{timestamp}_{backend.lower()}.png"
@@ -400,13 +536,13 @@ def save_generation_to_library(context, source_image_path, backend='unknown'):
 
 def get_temp_directory(context=None):
     """
-    Get the temp directory for storing AI vision data.
+    Get the temp directory for storing AI vision working files (canny, depth, current_ai.png).
     Once determined, the path is locked for the entire session to prevent
     filepath issues when .blend file is saved mid-session.
     
     Priority:
-    1. Use .blend file directory if file is saved (//temp/ai_vision/)
-    2. Use output_path from preferences if set
+    1. Use project library temp folder if .blend is saved (ProjectName_styleengine/temp/)
+    2. Use output_path temp folder if set
     3. Fall back to system temp directory
     """
     global _session_temp_dir
@@ -418,26 +554,27 @@ def get_temp_directory(context=None):
     # Determine temp directory (priority order)
     temp_dir = None
     
-    # 1. Try .blend file directory if saved
+    # 1. Try project library temp folder if .blend is saved
     if bpy.data.is_saved:
-        blend_dir = Path(bpy.path.abspath("//"))
-        temp_dir = blend_dir / "temp" / "ai_vision"
+        project_lib = get_project_library(context)
+        if project_lib:
+            temp_dir = project_lib / "temp"
     
     # 2. Try user's output_path setting
-    elif context:
+    if temp_dir is None and context:
         try:
             props = context.scene.style_engine_props
             if hasattr(props, 'output_path') and props.output_path:
                 output_path = Path(props.output_path)
                 if output_path.exists():
-                    temp_dir = output_path / "temp" / "ai_vision"
+                    temp_dir = output_path / "temp"
         except:
             pass
     
     # 3. Fall back to system temp
     if temp_dir is None:
         import tempfile
-        temp_dir = Path(tempfile.gettempdir()) / "blender_styleengine" / "ai_vision"
+        temp_dir = Path(tempfile.gettempdir()) / "blender_styleengine" / "temp"
     
     # Lock it for this session
     _session_temp_dir = temp_dir
@@ -579,9 +716,9 @@ def write_session_json(context):
                 for idx, group in enumerate(props.object_groups)
             ],
             "routing": {
-                "temp_dir": "//temp/ai_vision/",
-                "preview_out": "//temp/ai_vision/current_ai.png",
-                "passes_dir": "//temp/ai_vision/passes/",
+                "temp_dir": str(get_temp_directory(context)).replace("\\", "/") + "/",
+                "preview_out": str(get_temp_directory(context) / "current_ai.png").replace("\\", "/"),
+                "passes_dir": str(get_temp_directory(context) / "passes").replace("\\", "/") + "/",
                 "commits_dir": props.output_path.replace("\\", "/") + "/",
                 "comfy_path": comfy_path.replace("\\", "/") if comfy_path else ""
             },
@@ -1239,7 +1376,7 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
         return {'FINISHED'}
     
     def ensure_temp_directory(self, context):
-        """Create the data/temp/ai_vision directory if it doesn't exist."""
+        """Create the temp directory for working files (canny, depth, current_ai.png)."""
         # Get temp directory using the new helper function
         temp_path = get_temp_directory(context)
         temp_path.mkdir(parents=True, exist_ok=True)

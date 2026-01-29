@@ -584,6 +584,14 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         min=-1
     )
     
+    # Prompt browser - track current prompt index
+    current_prompt_index: bpy.props.IntProperty(
+        name="Current Prompt",
+        description="Index of currently displayed prompt snapshot (0 = oldest, -1 = latest)",
+        default=-1,  # -1 means "latest/newest"
+        min=-1
+    )
+    
     # ================================================================
     # REFERENCE IMAGE SYSTEM (15 slots: 5 per mode)
     # ================================================================
@@ -1404,26 +1412,26 @@ class WM_OT_ProjectTexture(bpy.types.Operator):
         project_lib = workspace_setup.get_project_library(context)
         
         if project_lib:
-            # Save to project library iterations folder
-            iterations_dir = project_lib / "iterations"
-            iterations_dir.mkdir(parents=True, exist_ok=True)
+            # Save to project library Textures folder
+            textures_dir = project_lib / "Textures"
+            textures_dir.mkdir(parents=True, exist_ok=True)
             
-            dest_path = iterations_dir / f"{iteration_name}.png"
+            dest_path = textures_dir / f"{iteration_name}.png"
             
             try:
                 shutil.copy2(source_image_path, dest_path)
                 print(f"[Style Engine] 💾 Saved texture to: {dest_path.name}")
             except Exception as e:
-                print(f"[Style Engine] ⚠️ Failed to save texture to iterations folder: {e}")
+                print(f"[Style Engine] ⚠️ Failed to save texture to Textures folder: {e}")
         else:
             # .blend not saved - save to session temp
             import tempfile
             session_id = workspace_setup.get_session_id()
             temp_base = Path(tempfile.gettempdir()) / "blender_styleengine" / "sessions"
-            iterations_dir = temp_base / session_id / "iterations"
-            iterations_dir.mkdir(parents=True, exist_ok=True)
+            textures_dir = temp_base / session_id / "Textures"
+            textures_dir.mkdir(parents=True, exist_ok=True)
             
-            dest_path = iterations_dir / f"{iteration_name}.png"
+            dest_path = textures_dir / f"{iteration_name}.png"
             
             try:
                 shutil.copy2(source_image_path, dest_path)
@@ -2057,6 +2065,44 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
             col.operator("style_engine.refine_prompt", text="Refine Prompt", icon='SORTALPHA')
             col.operator("style_engine.generate_image_description", text="Generate Image Description", icon='FILE_TEXT')
             
+            # Prompt Browser
+            text_box.separator()
+            col = text_box.column(align=True)
+            col.label(text="Prompt Browser:", icon='BOOKMARKS')
+            
+            # Get prompt history info
+            from . import workspace_setup
+            prompts = workspace_setup.get_prompt_list(context)
+            
+            if prompts:
+                # Navigation buttons
+                row = col.row(align=True)
+                row.scale_y = 1.2
+                
+                # Check if at boundaries
+                at_oldest = (style_props.current_prompt_index == 0)
+                at_latest = (style_props.current_prompt_index == -1)
+                
+                # Previous button (go to older)
+                prev_row = row.row(align=True)
+                prev_row.enabled = not at_oldest
+                prev_row.operator("style_engine.prev_prompt", text="", icon='TRIA_LEFT')
+                
+                # Current prompt indicator
+                if at_latest:
+                    current_text = f"Latest ({len(prompts)})"
+                else:
+                    current_text = f"{style_props.current_prompt_index + 1}/{len(prompts)}"
+                
+                row.label(text=current_text)
+                
+                # Next button (go to newer)
+                next_row = row.row(align=True)
+                next_row.enabled = not at_latest
+                next_row.operator("style_engine.next_prompt", text="", icon='TRIA_RIGHT')
+            else:
+                col.label(text="No prompt history yet", icon='INFO')
+            
             # # Helper text box - COMMENTED OUT FOR MINIMAL UI
             # prompt_box.separator()
             # help_box = prompt_box.box()
@@ -2659,6 +2705,10 @@ class WM_OT_RefinePrompt(bpy.types.Operator):
         
         print(f"[Refine Prompt] Original prompt: {original_prompt}")
         
+        # Save "before" snapshot
+        from . import workspace_setup
+        workspace_setup.save_prompt_snapshot(context, prefix="before_refine")
+        
         # 3. Check if in Server mode (GCS)
         if not runcomfy_deployment.is_server_mode():
             self.report({'ERROR'}, "Prompt refinement only works in Server mode (GCS)")
@@ -2829,6 +2879,9 @@ class WM_OT_RefinePrompt(bpy.types.Operator):
                         text_block.clear()
                         text_block.write(new_content)
                         
+                        # Save "after" snapshot
+                        workspace_setup.save_prompt_snapshot(context, prefix="after_refine")
+                        
                         print(f"[Refine Prompt] ✓ Updated text editor with refined prompt")
                         self.report({'INFO'}, "Prompt refined successfully!")
                         return {'FINISHED'}
@@ -2888,6 +2941,9 @@ class WM_OT_GenerateImageDescription(bpy.types.Operator):
             return {'CANCELLED'}
         
         print(f"[Image Description] Using image: {image_path}")
+        
+        # Save "before" snapshot
+        workspace_setup.save_prompt_snapshot(context, prefix="before_vision")
         
         try:
             # 3. Load ImageAgent.json workflow
@@ -3040,6 +3096,9 @@ class WM_OT_GenerateImageDescription(bpy.types.Operator):
                         # Update text block
                         text_block.clear()
                         text_block.write(new_content)
+                        
+                        # Save "after" snapshot
+                        workspace_setup.save_prompt_snapshot(context, prefix="after_vision")
                         
                         print(f"[Image Description] ✓ Updated text editor with description")
                         self.report({'INFO'}, "Image description generated successfully!")
