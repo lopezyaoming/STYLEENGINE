@@ -195,6 +195,67 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         default=False
     )
     
+    # N Panel category dropdowns
+    show_file_settings: bpy.props.BoolProperty(
+        name="Show File Settings",
+        description="Expand or collapse the File section",
+        default=True
+    )
+    
+    show_view_settings: bpy.props.BoolProperty(
+        name="Show View Settings",
+        description="Expand or collapse the View section",
+        default=True
+    )
+    
+    show_text_generation: bpy.props.BoolProperty(
+        name="Show Text Generation",
+        description="Expand or collapse the Text Generation section",
+        default=True
+    )
+    
+    show_image_generation_main: bpy.props.BoolProperty(
+        name="Show Image Generation",
+        description="Expand or collapse the Image Generation section",
+        default=True
+    )
+    
+    show_influence: bpy.props.BoolProperty(
+        name="Show Influence",
+        description="Expand or collapse the Influence section",
+        default=True
+    )
+    
+    show_reference_images: bpy.props.BoolProperty(
+        name="Show Reference Images",
+        description="Expand or collapse the Reference Images section",
+        default=False
+    )
+    
+    show_loras: bpy.props.BoolProperty(
+        name="Show LoRas",
+        description="Expand or collapse the LoRas section",
+        default=False
+    )
+    
+    show_3d_generation: bpy.props.BoolProperty(
+        name="Show 3D Generation",
+        description="Expand or collapse the 3D Generation section",
+        default=True
+    )
+    
+    show_3d_single_image: bpy.props.BoolProperty(
+        name="Show 3D from Single Image",
+        description="Expand or collapse the 3D from Single Image section",
+        default=True
+    )
+    
+    show_3d_multiview: bpy.props.BoolProperty(
+        name="Show 3D from Multiview",
+        description="Expand or collapse the 3D from Multiview section",
+        default=False
+    )
+    
     show_groups: bpy.props.BoolProperty(
         name="Groups",
         description="Expand or collapse the groups section",
@@ -233,9 +294,9 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
     )
     
     texture_influence: bpy.props.FloatProperty(
-        name="Influence",
+        name="Viewport",
         description="Controls how much of the render to keep in img2img workflow (GCS mode). 1.0 = keep 100% of render, 0.0 = full AI generation ignoring render",
-        default=0.25,
+        default=0.0,
         min=0.0,
         max=0.7,
         update=update_session_json
@@ -244,7 +305,7 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
     steps: bpy.props.IntProperty(
         name="Steps",
         description="Number of sampling steps for AI generation (15-30)",
-        default=15,
+        default=25,
         min=15,
         max=30,
         update=update_session_json
@@ -257,7 +318,7 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
             ('FAST', "Fast", "Workbench render - fast preview quality, good for quick iterations", 'SHADING_WIRE', 0),
             ('DETAILED', "Detailed", "EEVEE render - high quality, better for img2img when texture_influence is low", 'SHADING_RENDERED', 1),
         ],
-        default='FAST',
+        default='DETAILED',
         update=update_session_json
     )
 
@@ -848,6 +909,32 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
     lora_strength_model: bpy.props.FloatProperty(
         name="LoRa Strength",
         description="LoRa influence on the model (0.0 to 1.0)",
+        default=0.8,
+        min=0.0,
+        max=1.0,
+        step=1,
+        precision=2,
+        update=update_session_json
+    )
+    
+    # LoRa 2 (second LoRa slot for stacking)
+    lora2_enabled: bpy.props.BoolProperty(
+        name="Use LoRa 2",
+        description="Enable second LoRa model for stacking effects",
+        default=False,
+        update=update_session_json
+    )
+    
+    lora2_name: bpy.props.EnumProperty(
+        name="LoRa 2 Model",
+        description="Select second LoRa model (fetched from ComfyUI server in GCS mode)",
+        items=get_lora_items,  # Dynamic callback - fetches from server
+        update=update_session_json
+    )
+    
+    lora2_strength_model: bpy.props.FloatProperty(
+        name="LoRa 2 Strength",
+        description="Second LoRa influence on the model (0.0 to 1.0)",
         default=0.8,
         min=0.0,
         max=1.0,
@@ -1812,10 +1899,114 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
         layout = self.layout
         style_props = context.scene.style_engine_props
 
-        # --- Output Path (VISIBLE) ---
-        output_box = layout.box()
-        output_box.label(text="Output Path:", icon='FILE_FOLDER')
-        output_box.prop(style_props, "output_path", text="")
+        # ================================================================
+        # FILE CATEGORY (Collapsible)
+        # ================================================================
+        file_box = layout.box()
+        file_header = file_box.row(align=True)
+        icon = 'TRIA_DOWN' if style_props.show_file_settings else 'TRIA_RIGHT'
+        file_header.prop(style_props, "show_file_settings", text="File", icon=icon, emboss=False, toggle=True)
+        file_header.label(text="", icon='FILE_FOLDER')
+        
+        if style_props.show_file_settings:
+            # Output Path
+            col = file_box.column(align=True)
+            col.label(text="Output Path:")
+            col.prop(style_props, "output_path", text="")
+            
+            # Resolution
+            file_box.separator()
+            col = file_box.column(align=True)
+            col.label(text="Resolution:")
+            col.prop(style_props, "ai_resolution", text="")
+            
+            # Render Quality
+            file_box.separator()
+            col = file_box.column(align=True)
+            col.label(text="Render Quality:")
+            col.prop(style_props, "render_quality", text="")
+            
+            # ────────────────────────────────────────────────────────────
+            # VIEW SUB-CATEGORY (Collapsible)
+            # ────────────────────────────────────────────────────────────
+            file_box.separator()
+            view_box = file_box.box()
+            view_header = view_box.row(align=True)
+            view_icon = 'TRIA_DOWN' if style_props.show_view_settings else 'TRIA_RIGHT'
+            view_header.prop(style_props, "show_view_settings", text="View", icon=view_icon, emboss=False, toggle=True)
+            view_header.label(text="", icon='VIEW_CAMERA')
+            
+            if style_props.show_view_settings:
+                # Visualization Type Buttons
+                col = view_box.column(align=True)
+                col.label(text="Visualization:")
+                row = col.row(align=True)
+                row.scale_y = 1.3
+                
+                # Combined button
+                op = row.operator("style_engine.set_visualization", 
+                                 text="Combined", 
+                                 icon='IMAGE_DATA',
+                                 depress=(style_props.visualization_type == 'COMBINED'))
+                op.viz_type = 'COMBINED'
+                
+                # Silhouette button
+                op = row.operator("style_engine.set_visualization", 
+                                 text="Silhouette", 
+                                 icon='MESH_PLANE',
+                                 depress=(style_props.visualization_type == 'CANNY'))
+                op.viz_type = 'CANNY'
+                
+                # Depth button
+                op = row.operator("style_engine.set_visualization", 
+                                 text="Depth", 
+                                 icon='EMPTY_SINGLE_ARROW',
+                                 depress=(style_props.visualization_type == 'DEPTH'))
+                op.viz_type = 'DEPTH'
+                
+                # Background Opacity
+                view_box.separator()
+                col = view_box.column(align=True)
+                col.label(text="Background Opacity:")
+                col.prop(style_props, "background_opacity", text="", slider=True)
+                
+                # Generation Browser
+                view_box.separator()
+                col = view_box.column(align=True)
+                col.label(text="Generation Browser:")
+                
+                # Get generation info
+                from . import workspace_setup
+                generations = workspace_setup.get_generation_list(context)
+                
+                if generations:
+                    # Navigation buttons
+                    row = col.row(align=True)
+                    row.scale_y = 1.2
+                    
+                    # Check if at boundaries
+                    at_oldest = (style_props.current_generation_index == 0)
+                    at_latest = (style_props.current_generation_index == -1)
+                    
+                    # Previous button (go to older)
+                    prev_row = row.row(align=True)
+                    prev_row.enabled = not at_oldest
+                    prev_row.operator("style_engine.prev_generation", text="", icon='TRIA_LEFT')
+                    
+                    # Current generation indicator
+                    if at_latest:
+                        current_text = f"Latest ({len(generations)})"
+                    else:
+                        current_text = f"{style_props.current_generation_index + 1}/{len(generations)}"
+                    
+                    row.label(text=current_text)
+                    
+                    # Next button (go to newer)
+                    next_row = row.row(align=True)
+                    next_row.enabled = not at_latest
+                    next_row.operator("style_engine.next_generation", text="", icon='TRIA_RIGHT')
+                else:
+                    col.label(text="No generations yet", icon='INFO')
 
         # --- Generation Status (MINIMAL) ---
         try:
@@ -1850,24 +2041,21 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
             # Silently fail if status unavailable
             pass
 
-        # --- Prompt Builder (VISIBLE) ---
+        # ================================================================
+        # TEXT GENERATION CATEGORY (Collapsible)
+        # ================================================================
         layout.separator()
-        prompt_box = layout.box()
-        prompt_box.label(text="Prompt Settings:", icon='TEXT')
+        text_box = layout.box()
+        text_header = text_box.row(align=True)
+        text_icon = 'TRIA_DOWN' if style_props.show_text_generation else 'TRIA_RIGHT'
+        text_header.prop(style_props, "show_text_generation", text="Text Generation", icon=text_icon, emboss=False, toggle=True)
+        text_header.label(text="", icon='TEXT')
         
-        # Info box with tag format (always visible)
-        help_box = prompt_box.box()
-        help_box.scale_y = 0.8
-        col = help_box.column(align=True)
-        col.label(text="Use HTML-style tags in text editor:", icon='INFO')
-        col.label(text="<k>keywords</k>  (optional)")
-        col.label(text="<p>main prompt</p>  (required)")
-        col.label(text="<n>negative prompt</n>  (optional)")
-        col.label(text="Without tags, raw text is used", icon='FORWARD')
-        
-        # Refine Prompt button
-        prompt_box.separator()
-        prompt_box.operator("style_engine.refine_prompt", icon='SORTALPHA')
+        if style_props.show_text_generation:
+            col = text_box.column(align=True)
+            col.scale_y = 1.2
+            col.operator("style_engine.refine_prompt", text="Refine Prompt", icon='SORTALPHA')
+            col.operator("style_engine.generate_image_description", text="Generate Image Description", icon='FILE_TEXT')
             
             # # Helper text box - COMMENTED OUT FOR MINIMAL UI
             # prompt_box.separator()
@@ -2102,169 +2290,318 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
         #     #             # Keywords input
         #     #             row.prop(group, "keywords", text="")
         
-        # --- Reference Images - COLLAPSIBLE ---
+        # ================================================================
+        # IMAGE GENERATION CATEGORY (Collapsible)
+        # ================================================================
         layout.separator()
-        ref_box = layout.box()
-        header_row = ref_box.row(align=True)
-        header_row.label(text="Reference Images", icon='IMAGE_DATA')
+        img_gen_box = layout.box()
+        img_gen_header = img_gen_box.row(align=True)
+        img_gen_icon = 'TRIA_DOWN' if style_props.show_image_generation_main else 'TRIA_RIGHT'
+        img_gen_header.prop(style_props, "show_image_generation_main", text="Image Generation", icon=img_gen_icon, emboss=False, toggle=True)
+        img_gen_header.label(text="", icon='IMAGE_DATA')
         
-        # Advanced Control toggle (shows individual weight sliders when enabled)
-        adv_row = ref_box.row(align=True)
-        adv_row.prop(style_props, "show_advanced_ref_controls", text="Advanced Control", toggle=True, icon='PREFERENCES')
+        if style_props.show_image_generation_main:
+            # ────────────────────────────────────────────────────────────
+            # INFLUENCE SUB-CATEGORY (Collapsible)
+            # ────────────────────────────────────────────────────────────
+            influence_box = img_gen_box.box()
+            influence_header = influence_box.row(align=True)
+            influence_icon = 'TRIA_DOWN' if style_props.show_influence else 'TRIA_RIGHT'
+            influence_header.prop(style_props, "show_influence", text="Influence", icon=influence_icon, emboss=False, toggle=True)
+            influence_header.label(text="", icon='SMOOTHCURVE')
             
-        # Helper function to draw a reference image section
-        def draw_reference_section(box, title, icon, show_prop, slots, strength_prop, show_weights=False):
-            """Draw a collapsible reference image section with grid layout"""
-            section_box = box.box()
-            header = section_box.row(align=True)
-            icon_tri = 'TRIA_DOWN' if getattr(style_props, show_prop) else 'TRIA_RIGHT'
-            header.prop(style_props, show_prop, text=title, icon=icon_tri, emboss=False, toggle=True)
-        
-            if getattr(style_props, show_prop):
-                # Global strength slider
-                section_box.separator()
-                strength_row = section_box.row()
-                strength_row.scale_y = 1.5
-                strength_row.prop(style_props, strength_prop, text="Global Strength", slider=True)
+            if style_props.show_influence:
+                col = influence_box.column(align=True)
+                col.prop(style_props, "silhouette_influence", text="Silhouette", slider=True)
+                col.prop(style_props, "depth_influence", text="Depth", slider=True)
+                col.prop(style_props, "texture_influence", text="Viewport", slider=True)
                 
-                section_box.separator()
-                
-                # Grid layout for images (3 columns)
-                grid = section_box.grid_flow(
-                    row_major=True,
-                    columns=3,
-                    even_columns=True,
-                    even_rows=True,
-                    align=True
-                )
-                
-                # Draw each slot
-                for slot_id, img_prop, weight_prop, label in slots:
-                    img = getattr(style_props, img_prop)
+                influence_box.separator()
+                col = influence_box.column(align=True)
+                col.label(text="Steps:")
+                col.prop(style_props, "steps", text="", slider=True)
             
-                    # Card for each slot
-                    card = grid.box()
-                    card.scale_y = 1.0
-                    
-                    if img:
-                        # Image exists - show preview and controls
-                        col = card.column(align=True)
+            # Autogenerate toggle
+            img_gen_box.separator()
+            row = img_gen_box.row()
+            row.scale_y = 1.3
+            row.prop(style_props, "auto_generate", 
+                     text="Autogenerate", 
+                     toggle=True, 
+                     icon='FILE_REFRESH')
             
-                        # Image thumbnail using template_icon
-                        # This displays the actual image content as an icon
-                        preview_box = col.box()
-                        preview_col = preview_box.column(align=True)
+            # ────────────────────────────────────────────────────────────
+            # REFERENCE IMAGES SUB-CATEGORY (Collapsible, closed by default)
+            # ────────────────────────────────────────────────────────────
+            img_gen_box.separator()
+            ref_box = img_gen_box.box()
+            ref_header = ref_box.row(align=True)
+            ref_icon = 'TRIA_DOWN' if style_props.show_reference_images else 'TRIA_RIGHT'
+            ref_header.prop(style_props, "show_reference_images", text="Reference Images", icon=ref_icon, emboss=False, toggle=True)
+            ref_header.label(text="", icon='IMAGE_REFERENCE')
+            
+            if style_props.show_reference_images:
+                # Advanced Control toggle (shows individual weight sliders when enabled)
+                adv_row = ref_box.row(align=True)
+                adv_row.prop(style_props, "show_advanced_ref_controls", text="Advanced Control", toggle=True, icon='PREFERENCES')
+                
+                # Helper function to draw a reference image section
+                def draw_reference_section(box, title, icon, show_prop, slots, strength_prop, show_weights=False):
+                    """Draw a collapsible reference image section with grid layout"""
+                    section_box = box.box()
+                    header = section_box.row(align=True)
+                    icon_tri = 'TRIA_DOWN' if getattr(style_props, show_prop) else 'TRIA_RIGHT'
+                    header.prop(style_props, show_prop, text=title, icon=icon_tri, emboss=False, toggle=True)
+                
+                    if getattr(style_props, show_prop):
+                        # Global strength slider
+                        section_box.separator()
+                        strength_row = section_box.row()
+                        strength_row.scale_y = 1.5
+                        strength_row.prop(style_props, strength_prop, text="Global Strength", slider=True)
                         
-                        # Display image thumbnail using preview collection (Poliigon method)
-                        try:
-                            # Get the persistent preview collection
-                            pcoll = preview_collections.get("ref_images")
+                        section_box.separator()
+                        
+                        # Grid layout for images (3 columns)
+                        grid = section_box.grid_flow(
+                            row_major=True,
+                            columns=3,
+                            even_columns=True,
+                            even_rows=True,
+                            align=True
+                        )
+                        
+                        # Draw each slot
+                        for slot_id, img_prop, weight_prop, label in slots:
+                            img = getattr(style_props, img_prop)
+                        
+                            # Card for each slot
+                            card = grid.box()
+                            card.scale_y = 1.0
                             
-                            if pcoll is None:
-                                preview_col.label(text="[No Collection]", icon='ERROR')
-                            else:
-                                # Generate unique key for this image
-                                thumb_key = f"{slot_id}_{img.name}"
+                            if img:
+                                # Image exists - show preview and controls
+                                col = card.column(align=True)
+                        
+                                # Image thumbnail using template_icon
+                                # This displays the actual image content as an icon
+                                preview_box = col.box()
+                                preview_col = preview_box.column(align=True)
                                 
-                                # Load thumbnail into preview collection if not already loaded
-                                if thumb_key not in pcoll:
-                                    if img.filepath:
-                                        abs_path = bpy.path.abspath(img.filepath)
-                                        try:
-                                            pcoll.load(thumb_key, abs_path, 'IMAGE')
-                                        except Exception as e:
-                                            print(f"[UI] Failed to load preview for {img.name}: {e}")
-                                
-                                # Display the thumbnail using template_icon
-                                if thumb_key in pcoll:
-                                    thumb = pcoll[thumb_key]
-                                    if thumb.icon_id > 0:
-                                        preview_col.template_icon(icon_value=thumb.icon_id, scale=5.0)
+                                # Display image thumbnail using preview collection (Poliigon method)
+                                try:
+                                    # Get the persistent preview collection
+                                    pcoll = preview_collections.get("ref_images")
+                                    
+                                    if pcoll is None:
+                                        preview_col.label(text="[No Collection]", icon='ERROR')
                                     else:
-                                        preview_col.label(text="[Invalid Icon]", icon='IMAGE_DATA')
-                                else:
-                                    preview_col.label(text="[Not Loaded]", icon='IMAGE_DATA')
+                                        # Generate unique key for this image
+                                        thumb_key = f"{slot_id}_{img.name}"
+                                        
+                                        # Load thumbnail into preview collection if not already loaded
+                                        if thumb_key not in pcoll:
+                                            if img.filepath:
+                                                abs_path = bpy.path.abspath(img.filepath)
+                                                try:
+                                                    pcoll.load(thumb_key, abs_path, 'IMAGE')
+                                                except Exception as e:
+                                                    print(f"[UI] Failed to load preview for {img.name}: {e}")
+                                        
+                                        # Display the thumbnail using template_icon
+                                        if thumb_key in pcoll:
+                                            thumb = pcoll[thumb_key]
+                                            if thumb.icon_id > 0:
+                                                preview_col.template_icon(icon_value=thumb.icon_id, scale=5.0)
+                                            else:
+                                                preview_col.label(text="[Invalid Icon]", icon='IMAGE_DATA')
+                                        else:
+                                            preview_col.label(text="[Not Loaded]", icon='IMAGE_DATA')
+                                    
+                                except Exception as e:
+                                    preview_col.label(text="[Error]", icon='ERROR')
+                                    print(f"[UI] Error displaying thumbnail for {img.name}: {e}")
+                                
+                                col.separator(factor=0.2)
                             
-                        except Exception as e:
-                            preview_col.label(text="[Error]", icon='ERROR')
-                            print(f"[UI] Error displaying thumbnail for {img.name}: {e}")
-                        
-                        col.separator(factor=0.2)
+                                # Slot label and image name
+                                info_col = col.column(align=True)
+                                info_col.scale_y = 0.7
+                                
+                                label_row = info_col.row()
+                                label_row.alignment = 'CENTER'
+                                label_row.label(text=label, icon='IMAGE_DATA')
+                                
+                                name_row = info_col.row()
+                                name_row.alignment = 'CENTER'
+                                display_name = img.name[:10] + "..." if len(img.name) > 13 else img.name
+                                name_row.label(text=display_name)
+                                
+                                col.separator(factor=0.3)
+                            
+                                # Weight slider (only shown when Advanced Control is enabled)
+                                if show_weights:
+                                    col.prop(style_props, weight_prop, text="", slider=True)
+                                    col.separator(factor=0.2)
+                            
+                                # Action buttons (reload and clear)
+                                btn_row = col.row(align=True)
+                                btn_row.scale_y = 0.7
+                                reload_op = btn_row.operator("style_engine.reload_reference", text="", icon='FILE_REFRESH')
+                                reload_op.slot = slot_id
+                                clear_op = btn_row.operator("style_engine.clear_reference", text="", icon='X')
+                                clear_op.slot = slot_id
+                            else:
+                                # Empty slot - show add button
+                                col = card.column(align=True)
+                                col.scale_y = 2.5
+                                col.separator()
+                                load_op = col.operator("style_engine.load_reference", 
+                                                     text=f"{label}\n+", 
+                                                     icon='ADD',
+                                                     emboss=True)
+                                load_op.slot = slot_id
+                                col.separator()
+                
+                # Style Transfer section
+                st_slots = [
+                    ("st1", "st1_image", "st1_weight", "ST1"),
+                    ("st2", "st2_image", "st2_weight", "ST2"),
+                    ("st3", "st3_image", "st3_weight", "ST3"),
+                    ("st4", "st4_image", "st4_weight", "ST4"),
+                    ("st5", "st5_image", "st5_weight", "ST5"),
+                ]
+                draw_reference_section(ref_box, "Style", 'BRUSH_DATA', 
+                                     "show_style_transfer", st_slots, "style_transfer_strength",
+                                     show_weights=style_props.show_advanced_ref_controls)
+                
+                # Composition section
+                comp_slots = [
+                    ("comp1", "comp1_image", "comp1_weight", "COMP1"),
+                    ("comp2", "comp2_image", "comp2_weight", "COMP2"),
+                    ("comp3", "comp3_image", "comp3_weight", "COMP3"),
+                    ("comp4", "comp4_image", "comp4_weight", "COMP4"),
+                    ("comp5", "comp5_image", "comp5_weight", "COMP5"),
+                ]
+                draw_reference_section(ref_box, "Composition", 'MESH_GRID', 
+                                     "show_composition", comp_slots, "composition_strength",
+                                     show_weights=style_props.show_advanced_ref_controls)
+            
+            # ────────────────────────────────────────────────────────────
+            # LORAS SUB-CATEGORY (Collapsible, closed by default)
+            # ────────────────────────────────────────────────────────────
+            img_gen_box.separator()
+            lora_box = img_gen_box.box()
+            lora_header = lora_box.row(align=True)
+            lora_icon = 'TRIA_DOWN' if style_props.show_loras else 'TRIA_RIGHT'
+            lora_header.prop(style_props, "show_loras", text="LoRas", icon=lora_icon, emboss=False, toggle=True)
+            lora_header.label(text="", icon='MODIFIER')
+            
+            if style_props.show_loras:
+                lora_col = lora_box.column(align=True)
+                
+                # Enable checkbox
+                lora_col.prop(style_props, "lora_enabled", 
+                              text="Use LoRa", 
+                              toggle=True)
+                
+                # Only show controls if enabled
+                if style_props.lora_enabled:
+                    lora_col.separator(factor=0.5)
                     
-                        # Slot label and image name
-                        info_col = col.column(align=True)
-                        info_col.scale_y = 0.7
-                        
-                        label_row = info_col.row()
-                        label_row.alignment = 'CENTER'
-                        label_row.label(text=label, icon='IMAGE_DATA')
-                        
-                        name_row = info_col.row()
-                        name_row.alignment = 'CENTER'
-                        display_name = img.name[:10] + "..." if len(img.name) > 13 else img.name
-                        name_row.label(text=display_name)
-                        
-                        col.separator(factor=0.3)
+                    # LoRa dropdown with refresh button
+                    lora_col.label(text="Model:", icon='FILE')
+                    refresh_row = lora_col.row(align=True)
+                    refresh_row.prop(style_props, "lora_name", text="")
+                    refresh_row.operator("style_engine.refresh_lora_list", text="", icon='FILE_REFRESH')
                     
-                        # Weight slider (only shown when Advanced Control is enabled)
-                        if show_weights:
-                            col.prop(style_props, weight_prop, text="", slider=True)
-                            col.separator(factor=0.2)
+                    lora_col.separator(factor=0.5)
                     
-                        # Action buttons (reload and clear)
-                        btn_row = col.row(align=True)
-                        btn_row.scale_y = 0.7
-                        reload_op = btn_row.operator("style_engine.reload_reference", text="", icon='FILE_REFRESH')
-                        reload_op.slot = slot_id
-                        clear_op = btn_row.operator("style_engine.clear_reference", text="", icon='X')
-                        clear_op.slot = slot_id
-                    else:
-                        # Empty slot - show add button
-                        col = card.column(align=True)
-                        col.scale_y = 2.5
-                        col.separator()
-                        load_op = col.operator("style_engine.load_reference", 
-                                             text=f"{label}\n+", 
-                                             icon='ADD',
-                                             emboss=True)
-                        load_op.slot = slot_id
-                        col.separator()
+                    # Strength slider
+                    lora_col.label(text="Strength:", icon='FORCE_FORCE')
+                    lora_col.prop(style_props, "lora_strength_model", 
+                                  text="", 
+                                  slider=True)
+                
+                # LoRa 2 Enable
+                lora_col.separator(factor=0.5)
+                lora_col.prop(style_props, "lora2_enabled", text="Use LoRa 2", toggle=True)
+                
+                # Show LoRa 2 controls if enabled
+                if style_props.lora2_enabled:
+                    lora_col.separator(factor=0.5)
+                    
+                    # LoRa 2 dropdown
+                    lora_col.label(text="LoRa 2:", icon='FILE')
+                    lora_col.prop(style_props, "lora2_name", text="")
+                    
+                    lora_col.separator(factor=0.5)
+                    
+                    # LoRa 2 Strength
+                    lora_col.label(text="Strength 2:", icon='FORCE_FORCE')
+                    lora_col.prop(style_props, "lora2_strength_model", text="", slider=True)
+                
+                # Show active LoRas summary
+                lora_col.separator(factor=0.3)
+                active_loras = []
+                if style_props.lora_enabled and style_props.lora_name != 'NONE':
+                    active_loras.append(f"L1: {style_props.lora_name.replace('.safetensors', '')[:12]}")
+                if style_props.lora2_enabled and style_props.lora2_name != 'NONE':
+                    active_loras.append(f"L2: {style_props.lora2_name.replace('.safetensors', '')[:12]}")
+                
+                if active_loras:
+                    info_row = lora_col.row()
+                    info_row.scale_y = 0.7
+                    info_row.label(text=", ".join(active_loras), icon='CHECKMARK')
         
-        # Style Transfer section
-        st_slots = [
-            ("st1", "st1_image", "st1_weight", "ST1"),
-            ("st2", "st2_image", "st2_weight", "ST2"),
-            ("st3", "st3_image", "st3_weight", "ST3"),
-            ("st4", "st4_image", "st4_weight", "ST4"),
-            ("st5", "st5_image", "st5_weight", "ST5"),
-        ]
-        draw_reference_section(ref_box, "Style", 'BRUSH_DATA', 
-                             "show_style_transfer", st_slots, "style_transfer_strength",
-                             show_weights=style_props.show_advanced_ref_controls)
+        # ================================================================
+        # 3D GENERATION CATEGORY (Collapsible)
+        # ================================================================
+        layout.separator()
+        gen3d_box = layout.box()
+        gen3d_header = gen3d_box.row(align=True)
+        gen3d_icon = 'TRIA_DOWN' if style_props.show_3d_generation else 'TRIA_RIGHT'
+        gen3d_header.prop(style_props, "show_3d_generation", text="3D Generation", icon=gen3d_icon, emboss=False, toggle=True)
+        gen3d_header.label(text="", icon='MESH_CUBE')
         
-        # Composition section
-        comp_slots = [
-            ("comp1", "comp1_image", "comp1_weight", "COMP1"),
-            ("comp2", "comp2_image", "comp2_weight", "COMP2"),
-            ("comp3", "comp3_image", "comp3_weight", "COMP3"),
-            ("comp4", "comp4_image", "comp4_weight", "COMP4"),
-            ("comp5", "comp5_image", "comp5_weight", "COMP5"),
-        ]
-        draw_reference_section(ref_box, "Composition", 'MESH_GRID', 
-                             "show_composition", comp_slots, "composition_strength",
-                             show_weights=style_props.show_advanced_ref_controls)
-        
-        # Transfer section (Force Style Transfer) - HIDDEN: Too aggressive, not used in production
-        # sst_slots = [
-        #     ("sst1", "sst1_image", "sst1_weight", "SST1"),
-        #     ("sst2", "sst2_image", "sst2_weight", "SST2"),
-        #     ("sst3", "sst3_image", "sst3_weight", "SST3"),
-        #     ("sst4", "sst4_image", "sst4_weight", "SST4"),
-        #     ("sst5", "sst5_image", "sst5_weight", "SST5"),
-        # ]
-        # draw_reference_section(ref_box, "Transfer", 'FORCE_FORCE', 
-        #                      "show_force_transfer", sst_slots, "force_transfer_strength",
-        #                      show_weights=style_props.show_advanced_ref_controls)
+        if style_props.show_3d_generation:
+            # 3D Quality selector
+            col = gen3d_box.column(align=True)
+            col.label(text="3D Quality:")
+            col.prop(style_props, "object_quality", text="")
+            
+            gen3d_box.separator()
+            
+            # ────────────────────────────────────────────────────────────
+            # 3D FROM SINGLE IMAGE SUB-CATEGORY (Collapsible)
+            # ────────────────────────────────────────────────────────────
+            single_box = gen3d_box.box()
+            single_header = single_box.row(align=True)
+            single_icon = 'TRIA_DOWN' if style_props.show_3d_single_image else 'TRIA_RIGHT'
+            single_header.prop(style_props, "show_3d_single_image", text="3D from Single Image", icon=single_icon, emboss=False, toggle=True)
+            single_header.label(text="", icon='IMAGE_DATA')
+            
+            if style_props.show_3d_single_image:
+                col = single_box.column(align=True)
+                col.scale_y = 1.2
+                col.operator("style_engine.create_object", text="Generate Mesh", icon='MESH_UVSPHERE')
+                col.operator("style_engine.create_textured_object", text="Generate Textured Mesh", icon='SHADING_TEXTURE')
+            
+            # ────────────────────────────────────────────────────────────
+            # 3D FROM MULTIVIEW SUB-CATEGORY (Collapsible, closed by default)
+            # ────────────────────────────────────────────────────────────
+            gen3d_box.separator()
+            multi_box = gen3d_box.box()
+            multi_header = multi_box.row(align=True)
+            multi_icon = 'TRIA_DOWN' if style_props.show_3d_multiview else 'TRIA_RIGHT'
+            multi_header.prop(style_props, "show_3d_multiview", text="3D from Multiview", icon=multi_icon, emboss=False, toggle=True)
+            multi_header.label(text="", icon='VIEW_ORTHO')
+            
+            if style_props.show_3d_multiview:
+                col = multi_box.column(align=True)
+                col.scale_y = 1.2
+                col.operator("style_engine.generate_mesh_multiview", text="Generate Mesh", icon='MESH_UVSPHERE')
+                col.operator("style_engine.generate_textured_mesh_multiview", text="Generate Textured Mesh", icon='SHADING_TEXTURE')
         
         # # --- Settings - COLLAPSIBLE --- COMMENTED OUT
         # layout.separator()
@@ -2521,6 +2858,42 @@ class WM_OT_RefinePrompt(bpy.types.Operator):
             return {'CANCELLED'}
 
 
+class WM_OT_GenerateImageDescription(bpy.types.Operator):
+    """Generate description from current AI image (Coming Soon)"""
+    bl_idname = "style_engine.generate_image_description"
+    bl_label = "Generate Image Description"
+    bl_description = "Use AI to generate a text description from current_ai.png (Coming Soon)"
+    bl_options = {'REGISTER'}
+    
+    def execute(self, context):
+        self.report({'INFO'}, "Generate Image Description - Coming Soon")
+        return {'FINISHED'}
+
+
+class WM_OT_GenerateMeshMultiview(bpy.types.Operator):
+    """Generate 3D mesh from multiple view images (Coming Soon)"""
+    bl_idname = "style_engine.generate_mesh_multiview"
+    bl_label = "Generate Mesh (Multiview)"
+    bl_description = "Generate 3D mesh from multiple camera angles (Coming Soon)"
+    bl_options = {'REGISTER'}
+    
+    def execute(self, context):
+        self.report({'INFO'}, "Generate Mesh (Multiview) - Coming Soon")
+        return {'FINISHED'}
+
+
+class WM_OT_GenerateTexturedMeshMultiview(bpy.types.Operator):
+    """Generate textured 3D mesh from multiple view images (Coming Soon)"""
+    bl_idname = "style_engine.generate_textured_mesh_multiview"
+    bl_label = "Generate Textured Mesh (Multiview)"
+    bl_description = "Generate textured 3D mesh from multiple camera angles (Coming Soon)"
+    bl_options = {'REGISTER'}
+    
+    def execute(self, context):
+        self.report({'INFO'}, "Generate Textured Mesh (Multiview) - Coming Soon")
+        return {'FINISHED'}
+
+
 # ----------------------------------------------------------------
 # 4. REGISTRATION
 # ----------------------------------------------------------------
@@ -2544,6 +2917,9 @@ classes = (
     WM_OT_RefreshLoraList,
     WM_OT_TestCloudGeneration,
     WM_OT_RefinePrompt,
+    WM_OT_GenerateImageDescription,
+    WM_OT_GenerateMeshMultiview,
+    WM_OT_GenerateTexturedMeshMultiview,
     VIEW3D_PT_StyleEngine,
 )
 

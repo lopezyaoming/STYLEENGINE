@@ -905,7 +905,7 @@ class STYLEENGINE_MT_pie_main(Menu):
         style_props = context.scene.style_engine_props
         
         # ═══════════════════════════════════════════════════
-        # Position 0: TOP (NORTH) - Object
+        # Position 0: TOP (NORTH) - Object (3D Generation)
         # ═══════════════════════════════════════════════════
         box = pie.box()
         col = box.column(align=True)
@@ -916,13 +916,14 @@ class STYLEENGINE_MT_pie_main(Menu):
         row.label(text="Object", icon='OBJECT_DATA')
         col.separator()
         
-        # Buttons (4 total)
-        col.operator("style_engine.project_texture_scene", 
-                     text="Project Texture", 
-                     icon='TEXTURE')
-        col.operator("style_engine.uv_texture", 
-                     text="UV Texture", 
-                     icon='UV')
+        # Buttons - Project Texture moved to separate category
+        # col.operator("style_engine.project_texture_scene", 
+        #              text="Project Texture", 
+        #              icon='TEXTURE')
+        # # HIDDEN: UV Texture - available in N panel
+        # col.operator("style_engine.uv_texture", 
+        #              text="UV Texture", 
+        #              icon='UV')
         col.operator("style_engine.create_object", 
                      text="Create Object", 
                      icon='MESH_CUBE')
@@ -956,16 +957,16 @@ class STYLEENGINE_MT_pie_main(Menu):
         row.operator("style_engine.setup_workspace", 
                      text="Setup Workspace", 
                      icon='PLAY')
-        col.separator()
         
-        # Background opacity
-        col.label(text="Background Opacity")
-        col.prop(style_props, "background_opacity", text="", slider=True)
-        col.separator()
+        # # HIDDEN: Background opacity - moved to Visualization category
+        # col.separator()
+        # col.label(text="Background Opacity")
+        # col.prop(style_props, "background_opacity", text="", slider=True)
         
-        # Resolution
-        col.label(text="Resolution")
-        col.prop(style_props, "ai_resolution", text="")
+        # # HIDDEN: Resolution - available in N panel (File category)
+        # col.separator()
+        # col.label(text="Resolution")
+        # col.prop(style_props, "ai_resolution", text="")
         
         # ═══════════════════════════════════════════════════
         # Position 2: BOTTOM (SOUTH) - Generate Image
@@ -992,98 +993,94 @@ class STYLEENGINE_MT_pie_main(Menu):
         influence_col.prop(style_props, "depth_influence", 
                           text="Depth", slider=True)
         influence_col.prop(style_props, "texture_influence", 
-                          text="Influence", slider=True)
+                          text="Viewport", slider=True)
         
-        col.separator()
+        # # HIDDEN: Steps - available in N panel (Image Generation > Influence)
+        # col.separator()
+        # col.label(text="Steps", icon='SORTTIME')
+        # col.prop(style_props, "steps", text="", slider=True)
         
-        # Steps
-        col.label(text="Steps", icon='SORTTIME')
-        col.prop(style_props, "steps", text="", slider=True)
+        # # HIDDEN: Autogenerate - available in N panel (Image Generation)
+        # col.separator()
+        # row = col.row()
+        # row.scale_y = 1.5
+        # row.prop(style_props, "auto_generate", 
+        #          text="Autogenerate", 
+        #          toggle=True, 
+        #          icon='FILE_REFRESH')
         
-        col.separator()
+        # # HIDDEN: Render Quality - available in N panel (File category)
+        # col.separator()
+        # quality_box = col.box()
+        # quality_col = quality_box.column(align=True)
+        # quality_col.label(text="Render Quality", icon='SHADING_RENDERED')
+        # 
+        # # Two buttons: Fast (Workbench) and Detailed (EEVEE)
+        # row = quality_col.row(align=True)
+        # row.scale_y = 1.3
+        # 
+        # # Fast button
+        # op = row.operator("style_engine.set_render_quality", 
+        #                  text="Fast", 
+        #                  icon='SHADING_WIRE',
+        #                  depress=(style_props.render_quality == 'FAST'))
+        # op.quality = 'FAST'
+        # 
+        # # Detailed button
+        # op = row.operator("style_engine.set_render_quality", 
+        #                  text="Detailed", 
+        #                  icon='SHADING_RENDERED',
+        #                  depress=(style_props.render_quality == 'DETAILED'))
+        # op.quality = 'DETAILED'
+        # 
+        # quality_col.separator(factor=0.5)
+        # 
+        # # Show description based on current selection
+        # if style_props.render_quality == 'FAST':
+        #     quality_col.label(text="Workbench - Quick iterations", icon='INFO')
+        # else:
+        #     quality_col.label(text="EEVEE - Better for img2img", icon='INFO')
         
-        # Autogenerate toggle
-        row = col.row()
-        row.scale_y = 1.5
-        row.prop(style_props, "auto_generate", 
-                 text="Autogenerate", 
-                 toggle=True, 
-                 icon='FILE_REFRESH')
-        
-        col.separator()
-        
-        # Render Quality selector
-        quality_box = col.box()
-        quality_col = quality_box.column(align=True)
-        quality_col.label(text="Render Quality", icon='SHADING_RENDERED')
-        
-        # Two buttons: Fast (Workbench) and Detailed (EEVEE)
-        row = quality_col.row(align=True)
-        row.scale_y = 1.3
-        
-        # Fast button
-        op = row.operator("style_engine.set_render_quality", 
-                         text="Fast", 
-                         icon='SHADING_WIRE',
-                         depress=(style_props.render_quality == 'FAST'))
-        op.quality = 'FAST'
-        
-        # Detailed button
-        op = row.operator("style_engine.set_render_quality", 
-                         text="Detailed", 
-                         icon='SHADING_RENDERED',
-                         depress=(style_props.render_quality == 'DETAILED'))
-        op.quality = 'DETAILED'
-        
-        quality_col.separator(factor=0.5)
-        
-        # Show description based on current selection
-        if style_props.render_quality == 'FAST':
-            quality_col.label(text="Workbench - Quick iterations", icon='INFO')
-        else:
-            quality_col.label(text="EEVEE - Better for img2img", icon='INFO')
-        
-        col.separator()
-        
-        # LoRa Configuration
-        lora_box = col.box()
-        lora_col = lora_box.column(align=True)
-        lora_col.label(text="LoRa", icon='MODIFIER')
-        
-        # Enable checkbox
-        lora_col.prop(style_props, "lora_enabled", 
-                      text="Use LoRa", 
-                      toggle=True)
-        
-        # Only show controls if enabled
-        if style_props.lora_enabled:
-            lora_col.separator(factor=0.5)
-            
-            # LoRa dropdown with refresh button
-            lora_col.label(text="Model:", icon='FILE')
-            refresh_row = lora_col.row(align=True)
-            refresh_row.prop(style_props, "lora_name", text="")
-            refresh_row.operator("style_engine.refresh_lora_list", text="", icon='FILE_REFRESH')
-            
-            lora_col.separator(factor=0.5)
-            
-            # Strength slider
-            lora_col.label(text="Strength:", icon='FORCE_FORCE')
-            lora_col.prop(style_props, "lora_strength_model", 
-                          text="", 
-                          slider=True)
-            
-            lora_col.separator(factor=0.3)
-            
-            # Show active LoRa
-            if style_props.lora_name != 'NONE':
-                info_row = lora_col.row()
-                info_row.scale_y = 0.7
-                # Truncate long names
-                display_name = style_props.lora_name.replace('.safetensors', '')
-                if len(display_name) > 20:
-                    display_name = display_name[:17] + "..."
-                info_row.label(text=f"Active: {display_name}", icon='CHECKMARK')
+        # # HIDDEN: LoRa Configuration - available in N panel (Image Generation > LoRas)
+        # col.separator()
+        # lora_box = col.box()
+        # lora_col = lora_box.column(align=True)
+        # lora_col.label(text="LoRa", icon='MODIFIER')
+        # 
+        # # Enable checkbox
+        # lora_col.prop(style_props, "lora_enabled", 
+        #               text="Use LoRa", 
+        #               toggle=True)
+        # 
+        # # Only show controls if enabled
+        # if style_props.lora_enabled:
+        #     lora_col.separator(factor=0.5)
+        #     
+        #     # LoRa dropdown with refresh button
+        #     lora_col.label(text="Model:", icon='FILE')
+        #     refresh_row = lora_col.row(align=True)
+        #     refresh_row.prop(style_props, "lora_name", text="")
+        #     refresh_row.operator("style_engine.refresh_lora_list", text="", icon='FILE_REFRESH')
+        #     
+        #     lora_col.separator(factor=0.5)
+        #     
+        #     # Strength slider
+        #     lora_col.label(text="Strength:", icon='FORCE_FORCE')
+        #     lora_col.prop(style_props, "lora_strength_model", 
+        #                   text="", 
+        #                   slider=True)
+        #     
+        #     lora_col.separator(factor=0.3)
+        #     
+        #     # Show active LoRa
+        #     if style_props.lora_name != 'NONE':
+        #         info_row = lora_col.row()
+        #         info_row.scale_y = 0.7
+        #         # Truncate long names
+        #         display_name = style_props.lora_name.replace('.safetensors', '')
+        #         if len(display_name) > 20:
+        #             display_name = display_name[:17] + "..."
+        #         info_row.label(text=f"Active: {display_name}", icon='CHECKMARK')
         
         # ═══════════════════════════════════════════════════
         # Position 3: RIGHT (EAST) - Visualization Type
@@ -1134,6 +1131,11 @@ class STYLEENGINE_MT_pie_main(Menu):
             
             # Show current visualization
             col.label(text=f"Current: {style_props.visualization_type.title()}", icon='INFO')
+            
+            # Background opacity (moved from Setup Workspace)
+            col.separator()
+            col.label(text="Background Opacity")
+            col.prop(style_props, "background_opacity", text="", slider=True)
             
             # ═══════════════════════════════════════════════════
             # Generation Browser - Navigate Through Saved Generations
@@ -1191,6 +1193,33 @@ class STYLEENGINE_MT_pie_main(Menu):
             col.label(text="Enable 'Download Preview", icon='INFO')
             col.label(text="Images' in GCS settings")
             col.label(text="to use this feature")
+        
+        # ═══════════════════════════════════════════════════
+        # Position 4-6: Skip (Northwest, Northeast, Southwest)
+        # ═══════════════════════════════════════════════════
+        pie.separator()  # Position 4: Northwest - skip
+        pie.separator()  # Position 5: Northeast - skip
+        pie.separator()  # Position 6: Southwest - skip
+        
+        # ═══════════════════════════════════════════════════
+        # Position 7: SOUTHEAST - Project Texture
+        # (Between Generate Image and Setup Workspace)
+        # ═══════════════════════════════════════════════════
+        box = pie.box()
+        col = box.column(align=True)
+        col.scale_y = 1.1
+        
+        # Header
+        row = col.row()
+        row.label(text="Project Texture", icon='TEXTURE')
+        col.separator()
+        
+        # Project Texture button
+        row = col.row()
+        row.scale_y = 1.5
+        row.operator("style_engine.project_texture_scene", 
+                     text="Project Texture", 
+                     icon='TEXTURE')
 
 
 # ----------------------------------------------------------------

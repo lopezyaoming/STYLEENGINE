@@ -519,6 +519,12 @@ def write_session_json(context):
                 "strength_model": round(props.lora_strength_model, 3) if hasattr(props, 'lora_strength_model') else 0.8,
                 "strength_clip": round(props.lora_strength_model, 3) if hasattr(props, 'lora_strength_model') else 0.8
             },
+            "lora2": {
+                "enabled": props.lora2_enabled if hasattr(props, 'lora2_enabled') else False,
+                "name": props.lora2_name if hasattr(props, 'lora2_name') else "NONE",
+                "strength_model": round(props.lora2_strength_model, 3) if hasattr(props, 'lora2_strength_model') else 0.8,
+                "strength_clip": round(props.lora2_strength_model, 3) if hasattr(props, 'lora2_strength_model') else 0.8
+            },
             "reference_images": {
                 # Global strengths (UI: 0.0-1.0, multiplied by 1.5 for workflow: 0.0-1.5)
                 "style_transfer_strength": round(props.style_transfer_strength * 1.5, 3),
@@ -2257,20 +2263,53 @@ def generate_ai_image_cloud(context):
             workflow_json["135"]["inputs"]["value"] = denoise_value
             
             # ============================================================
-            # LORA (Node 34 - LoraLoader)
+            # LORA (Node 136 - LoRa 1, Node 34 - LoRa 2)
+            # Chain: Base Model → Node 136 (LoRa 1) → Node 34 (LoRa 2) → ...
             # ============================================================
             lora_config = session_data.get('lora', {})
-            if lora_config.get('enabled', False) and lora_config.get('name') != 'NONE':
-                workflow_json["34"]["inputs"]["lora_name"] = lora_config['name']
-                workflow_json["34"]["inputs"]["strength_model"] = lora_config.get('strength_model', 0.8)
-                workflow_json["34"]["inputs"]["strength_clip"] = lora_config.get('strength_clip', 0.8)
-                print(f"[GCS] 🎨 LoRa enabled: {lora_config['name']}")
-                print(f"[GCS]    Strength: {lora_config.get('strength_model', 0.8):.2f}")
+            lora2_config = session_data.get('lora2', {})
+            
+            # LoRa 1 (Node 136 - first in chain, if node exists)
+            if "136" in workflow_json:
+                if lora_config.get('enabled', False) and lora_config.get('name') != 'NONE':
+                    workflow_json["136"]["inputs"]["lora_name"] = lora_config['name']
+                    workflow_json["136"]["inputs"]["strength_model"] = lora_config.get('strength_model', 0.8)
+                    workflow_json["136"]["inputs"]["strength_clip"] = lora_config.get('strength_clip', 0.8)
+                    print(f"[GCS] 🎨 LoRa 1 enabled: {lora_config['name']}")
+                    print(f"[GCS]    Strength 1: {lora_config.get('strength_model', 0.8):.2f}")
+                else:
+                    # Disable LoRa 1 by setting strength to 0
+                    workflow_json["136"]["inputs"]["strength_model"] = 0.0
+                    workflow_json["136"]["inputs"]["strength_clip"] = 0.0
+                    print(f"[GCS] LoRa 1 disabled")
             else:
-                # Disable LoRa by setting strength to 0
-                workflow_json["34"]["inputs"]["strength_model"] = 0.0
-                workflow_json["34"]["inputs"]["strength_clip"] = 0.0
-                print(f"[GCS] LoRa disabled")
+                # Fallback: Single-LoRa workflow uses Node 34 for LoRa 1
+                if lora_config.get('enabled', False) and lora_config.get('name') != 'NONE':
+                    workflow_json["34"]["inputs"]["lora_name"] = lora_config['name']
+                    workflow_json["34"]["inputs"]["strength_model"] = lora_config.get('strength_model', 0.8)
+                    workflow_json["34"]["inputs"]["strength_clip"] = lora_config.get('strength_clip', 0.8)
+                    print(f"[GCS] 🎨 LoRa 1 enabled: {lora_config['name']}")
+                    print(f"[GCS]    Strength 1: {lora_config.get('strength_model', 0.8):.2f}")
+                else:
+                    workflow_json["34"]["inputs"]["strength_model"] = 0.0
+                    workflow_json["34"]["inputs"]["strength_clip"] = 0.0
+                    print(f"[GCS] LoRa 1 disabled")
+            
+            # LoRa 2 (Node 34 - second in chain, only if workflow has dual LoRa)
+            if "136" in workflow_json:
+                if lora2_config.get('enabled', False) and lora2_config.get('name') != 'NONE':
+                    workflow_json["34"]["inputs"]["lora_name"] = lora2_config['name']
+                    workflow_json["34"]["inputs"]["strength_model"] = lora2_config.get('strength_model', 0.8)
+                    workflow_json["34"]["inputs"]["strength_clip"] = lora2_config.get('strength_clip', 0.8)
+                    print(f"[GCS] 🎨 LoRa 2 enabled: {lora2_config['name']}")
+                    print(f"[GCS]    Strength 2: {lora2_config.get('strength_model', 0.8):.2f}")
+                else:
+                    # Disable LoRa 2 by setting strength to 0
+                    workflow_json["34"]["inputs"]["strength_model"] = 0.0
+                    workflow_json["34"]["inputs"]["strength_clip"] = 0.0
+                    print(f"[GCS] LoRa 2 disabled")
+            elif lora2_config.get('enabled', False):
+                print(f"[GCS] ⚠️ LoRa 2 enabled but workflow only has single LoRa node - skipping")
             
             # ============================================================
             # RESOLUTION (Node 5 - EmptyLatentImage)
