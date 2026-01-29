@@ -309,6 +309,10 @@ class WM_OT_UVTexture(Operator):
                         new_obj.location.x += 2.0  # Offset to the right
                         
                         print(f"[UV Texture] ✓ Imported: {new_obj.name}")
+                        
+                        # Save mesh to Models library
+                        workspace_setup.save_mesh_to_library(bpy.context, download_path, mesh_type='uv_textured')
+                        
                         print(f"[UV Texture] ✅ UV textured mesh created: {new_obj.name}")
                     else:
                         print(f"[UV Texture] ⚠️ Mesh imported but not found in scene")
@@ -516,6 +520,10 @@ class WM_OT_CreateObject(Operator):
                         new_obj.location = (0, 0, 0)
                         
                         print(f"[Create Object] ✓ Imported: {new_obj.name}")
+                        
+                        # Save mesh to Models library
+                        workspace_setup.save_mesh_to_library(bpy.context, download_path, mesh_type='mesh')
+                        
                         print(f"[Create Object] ✅ 3D mesh created from AI!")
                     else:
                         print(f"[Create Object] ⚠️ Mesh imported but not found")
@@ -713,6 +721,10 @@ class WM_OT_CreateTexturedObject(Operator):
                             new_obj = newly_imported[0]
                             new_obj.name = f"AI_Textured_{int(time.time())}"
                             new_obj.location = (0, 0, 0)
+                            
+                            # Save mesh to Models library
+                            workspace_setup.save_mesh_to_library(bpy.context, download_path, mesh_type='textured')
+                            
                             print(f"[Create Textured] ✅ Textured 3D mesh created: {new_obj.name}")
                         
                         print(f"[Create Textured] ============================================")
@@ -977,6 +989,118 @@ class WM_OT_NextPrompt(Operator):
         
         self.report({'ERROR'}, "Failed to load prompt")
         return {'CANCELLED'}
+
+
+class WM_OT_PrevModel(Operator):
+    """Navigate to previous model in library"""
+    bl_idname = "style_engine.prev_model"
+    bl_label = "Previous Model"
+    bl_description = "Select previous model in library"
+    bl_options = {'REGISTER'}
+    
+    def execute(self, context):
+        from . import workspace_setup
+        
+        style_props = context.scene.style_engine_props
+        
+        # Get list of models
+        models = workspace_setup.get_model_list(context)
+        
+        if not models:
+            self.report({'WARNING'}, "No models found in library")
+            return {'CANCELLED'}
+        
+        # Handle index (-1 means latest/newest)
+        if style_props.current_model_index == -1:
+            # Currently at latest, go to second-to-last
+            new_index = len(models) - 2
+        else:
+            # Go one step back (older)
+            new_index = style_props.current_model_index - 1
+        
+        # Clamp to valid range
+        new_index = max(0, min(new_index, len(models) - 1))
+        
+        style_props.current_model_index = new_index
+        self.report({'INFO'}, f"Model {new_index + 1}/{len(models)}")
+        return {'FINISHED'}
+
+
+class WM_OT_NextModel(Operator):
+    """Navigate to next model in library"""
+    bl_idname = "style_engine.next_model"
+    bl_label = "Next Model"
+    bl_description = "Select next model in library"
+    bl_options = {'REGISTER'}
+    
+    def execute(self, context):
+        from . import workspace_setup
+        
+        style_props = context.scene.style_engine_props
+        
+        # Get list of models
+        models = workspace_setup.get_model_list(context)
+        
+        if not models:
+            self.report({'WARNING'}, "No models found in library")
+            return {'CANCELLED'}
+        
+        # Handle index (-1 means latest/newest)
+        if style_props.current_model_index == -1:
+            # Already at latest
+            self.report({'INFO'}, f"Already at latest model")
+            return {'CANCELLED'}
+        
+        # Go one step forward (newer)
+        new_index = style_props.current_model_index + 1
+        
+        # Check if we've reached the latest
+        if new_index >= len(models) - 1:
+            new_index = -1  # Back to "latest" mode
+        
+        style_props.current_model_index = new_index
+        if new_index == -1:
+            self.report({'INFO'}, f"Latest model")
+        else:
+            self.report({'INFO'}, f"Model {new_index + 1}/{len(models)}")
+        return {'FINISHED'}
+
+
+class WM_OT_SpawnModel(Operator):
+    """Spawn the currently selected model into the scene"""
+    bl_idname = "style_engine.spawn_model"
+    bl_label = "Spawn Model"
+    bl_description = "Import the selected model from library at 3D cursor location"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    def execute(self, context):
+        from . import workspace_setup
+        
+        style_props = context.scene.style_engine_props
+        
+        # Get list of models
+        models = workspace_setup.get_model_list(context)
+        
+        if not models:
+            self.report({'ERROR'}, "No models found in library")
+            return {'CANCELLED'}
+        
+        # Determine which model to spawn
+        if style_props.current_model_index == -1:
+            model_path = models[-1]  # Latest
+        else:
+            idx = min(style_props.current_model_index, len(models) - 1)
+            model_path = models[idx]
+        
+        # Spawn the model
+        new_obj = workspace_setup.spawn_model_from_library(context, model_path)
+        
+        if new_obj:
+            self.report({'INFO'}, f"Spawned: {new_obj.name}")
+            return {'FINISHED'}
+        else:
+            self.report({'ERROR'}, "Failed to spawn model")
+            return {'CANCELLED'}
 
 
 # ----------------------------------------------------------------
@@ -1306,6 +1430,9 @@ classes = (
     WM_OT_NextGeneration,
     WM_OT_PrevPrompt,
     WM_OT_NextPrompt,
+    WM_OT_PrevModel,
+    WM_OT_NextModel,
+    WM_OT_SpawnModel,
     STYLEENGINE_MT_pie_main,
 )
 

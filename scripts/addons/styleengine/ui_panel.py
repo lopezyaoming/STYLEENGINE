@@ -592,6 +592,14 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         min=-1
     )
     
+    # Model browser - track current model index
+    current_model_index: bpy.props.IntProperty(
+        name="Current Model",
+        description="Index of currently selected model (0 = oldest, -1 = latest)",
+        default=-1,  # -1 means "latest/newest"
+        min=-1
+    )
+    
     # ================================================================
     # REFERENCE IMAGE SYSTEM (15 slots: 5 per mode)
     # ================================================================
@@ -2648,6 +2656,52 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                 col.scale_y = 1.2
                 col.operator("style_engine.generate_mesh_multiview", text="Generate Mesh", icon='MESH_UVSPHERE')
                 col.operator("style_engine.generate_textured_mesh_multiview", text="Generate Textured Mesh", icon='SHADING_TEXTURE')
+            
+            # ────────────────────────────────────────────────────────────
+            # MODEL BROWSER
+            # ────────────────────────────────────────────────────────────
+            gen3d_box.separator()
+            col = gen3d_box.column(align=True)
+            col.label(text="Model Browser:", icon='FILE_3D')
+            
+            # Get model library info
+            from . import workspace_setup
+            models = workspace_setup.get_model_list(context)
+            
+            if models:
+                # Navigation buttons
+                row = col.row(align=True)
+                row.scale_y = 1.2
+                
+                # Check if at boundaries
+                at_oldest = (style_props.current_model_index == 0)
+                at_latest = (style_props.current_model_index == -1)
+                
+                # Previous button (go to older)
+                prev_row = row.row(align=True)
+                prev_row.enabled = not at_oldest
+                prev_row.operator("style_engine.prev_model", text="", icon='TRIA_LEFT')
+                
+                # Current model indicator
+                if at_latest:
+                    current_text = f"Latest ({len(models)})"
+                else:
+                    current_text = f"{style_props.current_model_index + 1}/{len(models)}"
+                
+                row.label(text=current_text)
+                
+                # Next button (go to newer)
+                next_row = row.row(align=True)
+                next_row.enabled = not at_latest
+                next_row.operator("style_engine.next_model", text="", icon='TRIA_RIGHT')
+                
+                # Spawn button
+                col.separator()
+                spawn_row = col.row(align=True)
+                spawn_row.scale_y = 1.3
+                spawn_row.operator("style_engine.spawn_model", text="Spawn Model", icon='IMPORT')
+            else:
+                col.label(text="No models yet", icon='INFO')
         
         # # --- Settings - COLLAPSIBLE --- COMMENTED OUT
         # layout.separator()

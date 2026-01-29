@@ -451,6 +451,136 @@ def load_prompt_to_editor(context, prompt_path):
         return False
 
 
+# ================================================================
+#    Mesh/Model Library System
+# ================================================================
+
+def get_models_directory(context):
+    """
+    Get the Models directory for storing 3D meshes.
+    
+    Returns:
+        Path: Directory for storing .glb files
+    """
+    project_lib = get_project_library(context)
+    if project_lib:
+        ensure_project_library(context)
+        return project_lib / "Models"
+    
+    # Fall back to session-based temp
+    import tempfile
+    session_id = get_session_id()
+    temp_base = Path(tempfile.gettempdir()) / "blender_styleengine" / "sessions"
+    models_dir = temp_base / session_id / "Models"
+    models_dir.mkdir(parents=True, exist_ok=True)
+    
+    return models_dir
+
+
+def get_model_list(context):
+    """
+    Get list of all saved models, sorted chronologically (oldest to newest).
+    
+    Returns:
+        list[Path]: List of model file paths (.glb), sorted by timestamp
+    """
+    models_dir = get_models_directory(context)
+    
+    if not models_dir.exists():
+        return []
+    
+    # Get all GLB files in Models folder
+    models = list(models_dir.glob("*.glb"))
+    
+    # Sort by filename (which includes timestamp, so chronological)
+    models.sort()
+    
+    return models
+
+
+def spawn_model_from_library(context, model_path):
+    """
+    Import a saved model from the library into the scene.
+    
+    Args:
+        context: Blender context
+        model_path: Path to the .glb file
+    
+    Returns:
+        bpy.types.Object or None: The imported object, or None if failed
+    """
+    import bpy
+    
+    if not model_path.exists():
+        print(f"[Style Engine] ⚠️ Model not found: {model_path}")
+        return None
+    
+    try:
+        # Store original selection
+        original_selected = list(bpy.context.selected_objects)
+        
+        # Import GLB
+        bpy.ops.import_scene.gltf(filepath=str(model_path))
+        
+        # Get newly imported objects
+        newly_imported = [o for o in bpy.context.selected_objects if o not in original_selected]
+        
+        if newly_imported:
+            new_obj = newly_imported[0]
+            # Name based on original filename (without timestamp prefix)
+            base_name = model_path.stem  # e.g., "20260126_143022_001_textured"
+            new_obj.name = f"Spawned_{base_name[-20:]}"  # Take last part
+            new_obj.location = bpy.context.scene.cursor.location  # Spawn at 3D cursor
+            
+            print(f"[Style Engine] 🧊 Spawned model: {new_obj.name}")
+            return new_obj
+        else:
+            print(f"[Style Engine] ⚠️ Model imported but no object found")
+            return None
+    
+    except Exception as e:
+        print(f"[Style Engine] ❌ Failed to spawn model: {e}")
+        return None
+
+
+def save_mesh_to_library(context, source_mesh_path, mesh_type='mesh'):
+    """
+    Save a generated 3D mesh to the project library Models folder.
+    
+    Args:
+        context: Blender context
+        source_mesh_path: Path to the downloaded .glb file
+        mesh_type: Type identifier ('mesh', 'textured', 'uv_textured')
+    
+    Returns:
+        Path: Path to the saved mesh file, or None if failed
+    """
+    source_path = Path(source_mesh_path)
+    
+    if not source_path.exists():
+        print(f"[Style Engine] ⚠️ Mesh file not found: {source_path}")
+        return None
+    
+    # Get Models directory
+    models_dir = get_models_directory(context)
+    models_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Generate timestamped filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    microseconds = datetime.now().microsecond // 1000
+    filename = f"{timestamp}_{microseconds:03d}_{mesh_type}.glb"
+    
+    dest_path = models_dir / filename
+    
+    try:
+        shutil.copy2(source_path, dest_path)
+        print(f"[Style Engine] 🧊 Saved mesh: {filename}")
+        return dest_path
+    except Exception as e:
+        print(f"[Style Engine] ❌ Failed to save mesh: {e}")
+        return None
+
+
 def save_generation_to_library(context, source_image_path, backend='unknown'):
     """
     Save a generated image to the project library with proper organization.
