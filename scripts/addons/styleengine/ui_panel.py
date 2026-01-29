@@ -180,13 +180,13 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
     show_workspace_setup: bpy.props.BoolProperty(
         name="Show Workspace Setup",
         description="Expand or collapse the workspace setup section",
-        default=True
+        default=False
     )
     
     show_image_generation: bpy.props.BoolProperty(
         name="Show Image Generation",
         description="Expand or collapse the image generation section",
-        default=True
+        default=False
     )
     
     show_settings: bpy.props.BoolProperty(
@@ -199,31 +199,31 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
     show_file_settings: bpy.props.BoolProperty(
         name="Show File Settings",
         description="Expand or collapse the File section",
-        default=True
+        default=False
     )
     
     show_view_settings: bpy.props.BoolProperty(
         name="Show View Settings",
         description="Expand or collapse the View section",
-        default=True
+        default=False
     )
     
     show_text_generation: bpy.props.BoolProperty(
         name="Show Text Generation",
         description="Expand or collapse the Text Generation section",
-        default=True
+        default=False
     )
     
     show_image_generation_main: bpy.props.BoolProperty(
         name="Show Image Generation",
         description="Expand or collapse the Image Generation section",
-        default=True
+        default=False
     )
     
     show_influence: bpy.props.BoolProperty(
         name="Show Influence",
         description="Expand or collapse the Influence section",
-        default=True
+        default=False
     )
     
     show_reference_images: bpy.props.BoolProperty(
@@ -241,13 +241,13 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
     show_3d_generation: bpy.props.BoolProperty(
         name="Show 3D Generation",
         description="Expand or collapse the 3D Generation section",
-        default=True
+        default=False
     )
     
     show_3d_single_image: bpy.props.BoolProperty(
         name="Show 3D from Single Image",
         description="Expand or collapse the 3D from Single Image section",
-        default=True
+        default=False
     )
     
     show_3d_multiview: bpy.props.BoolProperty(
@@ -259,7 +259,7 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
     show_groups: bpy.props.BoolProperty(
         name="Groups",
         description="Expand or collapse the groups section",
-        default=True
+        default=False
     )
 
     active_group_index: bpy.props.IntProperty(

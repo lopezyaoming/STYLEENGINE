@@ -2060,6 +2060,214 @@ def _switch_to_edit_mode_standalone():
 # The orphaned duplicate code below has been removed
 
 
+class WM_OT_PopulateAssets(bpy.types.Operator):
+    """Create essential Style Engine assets (ai_camera, prompt text) without changing workspace."""
+    bl_idname = "style_engine.populate_assets"
+    bl_label = "Populate Assets"
+    bl_description = "Create ai_camera and STYLEENGINE_Prompt without switching workspace layout"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    def execute(self, context):
+        from . import utils
+        
+        # Reset temp directory lock (allows re-determination if .blend was saved)
+        reset_temp_directory()
+        
+        # Create temp directory for AI images
+        temp_path = get_temp_directory(context)
+        temp_path.mkdir(parents=True, exist_ok=True)
+        print(f"[Style Engine] Temp directory: {temp_path}")
+        
+        # Create placeholder image if needed
+        placeholder_path = temp_path / "current_ai.png"
+        if not placeholder_path.exists():
+            self._create_placeholder_image(context, str(placeholder_path))
+        
+        # Create or get the AI camera
+        ai_camera = self._ensure_ai_camera(context)
+        
+        # Position camera at current view
+        self._align_camera_to_view(context, ai_camera)
+        
+        # Setup camera background image
+        self._setup_camera_background(context, ai_camera)
+        
+        # Create/get the prompt text block
+        prompt_text = utils.get_or_create_prompt_text()
+        print(f"[Style Engine] ✓ Prompt text block ready: {prompt_text.name}")
+        
+        # Write session.json
+        write_session_json(context)
+        
+        self.report({'INFO'}, "Assets populated: ai_camera + STYLEENGINE_Prompt")
+        return {'FINISHED'}
+    
+    def _create_placeholder_image(self, context, path):
+        """Create a placeholder image."""
+        props = context.scene.style_engine_props
+        res_str = props.ai_resolution
+        width, height = map(int, res_str.split('x'))
+        
+        img = bpy.data.images.new("ai_placeholder", width=width, height=height)
+        pixels = [0.0, 0.0, 0.0, 1.0] * (width * height)  # Black
+        img.pixels = pixels
+        img.filepath_raw = path
+        img.file_format = 'PNG'
+        img.save()
+        print(f"[Style Engine] 🖤 Created placeholder: {width}x{height}")
+    
+    def _ensure_ai_camera(self, context):
+        """Create or get the AI camera."""
+        if "ai_camera" in bpy.data.objects:
+            ai_camera = bpy.data.objects["ai_camera"]
+            print("[Style Engine] Using existing ai_camera")
+        else:
+            cam_data = bpy.data.cameras.new("ai_camera")
+            ai_camera = bpy.data.objects.new("ai_camera", cam_data)
+            context.scene.collection.objects.link(ai_camera)
+            print("[Style Engine] ✓ Created new ai_camera")
+        return ai_camera
+    
+    def _align_camera_to_view(self, context, camera):
+        """Align camera to current 3D view."""
+        for area in context.screen.areas:
+            if area.type == 'VIEW_3D':
+                for space in area.spaces:
+                    if space.type == 'VIEW_3D':
+                        view_matrix = space.region_3d.view_matrix.inverted()
+                        camera.matrix_world = view_matrix
+                        context.scene.camera = camera
+                        print(f"[Style Engine] ✓ Camera aligned to view at {camera.location}")
+                        return
+        print("[Style Engine] ⚠️ No 3D viewport found for camera alignment")
+    
+    def _setup_camera_background(self, context, camera):
+        """Setup the background image for the camera."""
+        cam_data = camera.data
+        cam_data.passepartout_alpha = 1.0
+        cam_data.show_background_images = True
+        
+        if len(cam_data.background_images) > 0:
+            bg_img = cam_data.background_images[0]
+        else:
+            bg_img = cam_data.background_images.new()
+        
+        temp_dir = get_temp_directory(context)
+        img_path = temp_dir / "current_ai.png"
+        
+        # Load or get the image
+        if "current_ai.png" in bpy.data.images:
+            img = bpy.data.images["current_ai.png"]
+        else:
+            img = bpy.data.images.load(str(img_path))
+            img.name = "current_ai.png"
+        
+        bg_img.image = img
+        props = context.scene.style_engine_props
+        bg_img.alpha = props.background_opacity if hasattr(props, 'background_opacity') else 0.7
+        bg_img.display_depth = 'FRONT'
+        bg_img.frame_method = 'STRETCH'
+        
+        print(f"[Style Engine] ✓ Camera background configured")
+
+
+class WM_OT_SetCamera(bpy.types.Operator):
+    """Copy camera transforms and properties from selected or active camera to ai_camera."""
+    bl_idname = "style_engine.set_camera"
+    bl_label = "Set Camera"
+    bl_description = "Copy transforms and properties from selected/active camera to ai_camera (resolution unchanged)"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    def execute(self, context):
+        # Find source camera (selected camera or scene active camera)
+        source_camera = None
+        
+        # First, check if active object is a camera
+        if context.active_object and context.active_object.type == 'CAMERA':
+            source_camera = context.active_object
+            print(f"[Style Engine] Using selected camera: {source_camera.name}")
+        # Otherwise, use scene's active camera
+        elif context.scene.camera and context.scene.camera.type == 'CAMERA':
+            source_camera = context.scene.camera
+            print(f"[Style Engine] Using scene active camera: {source_camera.name}")
+        else:
+            self.report({'ERROR'}, "No camera found. Select a camera or set an active camera.")
+            return {'CANCELLED'}
+        
+        # Ensure ai_camera exists
+        if "ai_camera" in bpy.data.objects:
+            ai_camera = bpy.data.objects["ai_camera"]
+            print(f"[Style Engine] Updating existing ai_camera")
+        else:
+            # Create new ai_camera
+            cam_data = bpy.data.cameras.new("ai_camera")
+            ai_camera = bpy.data.objects.new("ai_camera", cam_data)
+            context.scene.collection.objects.link(ai_camera)
+            print(f"[Style Engine] Created new ai_camera")
+        
+        # Copy object transforms (location, rotation, scale)
+        ai_camera.location = source_camera.location.copy()
+        ai_camera.rotation_euler = source_camera.rotation_euler.copy()
+        ai_camera.rotation_quaternion = source_camera.rotation_quaternion.copy()
+        ai_camera.rotation_axis_angle = source_camera.rotation_axis_angle[:]
+        ai_camera.rotation_mode = source_camera.rotation_mode
+        ai_camera.scale = source_camera.scale.copy()
+        
+        # Copy the full transformation matrix for accuracy
+        ai_camera.matrix_world = source_camera.matrix_world.copy()
+        
+        # Get source and destination camera data
+        src_cam = source_camera.data
+        dst_cam = ai_camera.data
+        
+        # Copy camera type (PERSP, ORTHO, PANO)
+        dst_cam.type = src_cam.type
+        
+        # Copy lens properties
+        dst_cam.lens = src_cam.lens  # Focal length (mm)
+        dst_cam.lens_unit = src_cam.lens_unit  # MILLIMETERS or FOV
+        dst_cam.angle = src_cam.angle  # Field of view (radians)
+        
+        # Copy orthographic scale (for ORTHO cameras)
+        dst_cam.ortho_scale = src_cam.ortho_scale
+        
+        # Copy shift (for architectural/tilt-shift)
+        dst_cam.shift_x = src_cam.shift_x
+        dst_cam.shift_y = src_cam.shift_y
+        
+        # Copy clip distances
+        dst_cam.clip_start = src_cam.clip_start
+        dst_cam.clip_end = src_cam.clip_end
+        
+        # Copy sensor properties
+        dst_cam.sensor_fit = src_cam.sensor_fit
+        dst_cam.sensor_width = src_cam.sensor_width
+        dst_cam.sensor_height = src_cam.sensor_height
+        
+        # Copy depth of field settings
+        dst_cam.dof.use_dof = src_cam.dof.use_dof
+        dst_cam.dof.focus_distance = src_cam.dof.focus_distance
+        dst_cam.dof.aperture_fstop = src_cam.dof.aperture_fstop
+        dst_cam.dof.aperture_blades = src_cam.dof.aperture_blades
+        dst_cam.dof.aperture_rotation = src_cam.dof.aperture_rotation
+        dst_cam.dof.aperture_ratio = src_cam.dof.aperture_ratio
+        # Note: focus_object is not copied (could reference deleted objects)
+        
+        # Copy passepartout settings (but keep our alpha)
+        dst_cam.show_passepartout = src_cam.show_passepartout
+        # Keep passepartout_alpha at 1.0 for Style Engine
+        dst_cam.passepartout_alpha = 1.0
+        
+        # Set ai_camera as scene camera
+        context.scene.camera = ai_camera
+        
+        self.report({'INFO'}, f"ai_camera set from: {source_camera.name}")
+        print(f"[Style Engine] ✓ Copied transforms and properties from {source_camera.name}")
+        print(f"[Style Engine]   Type: {dst_cam.type}, Lens: {dst_cam.lens}mm, Clip: {dst_cam.clip_start}-{dst_cam.clip_end}")
+        
+        return {'FINISHED'}
+
+
 class WM_OT_StopAutoRefresh(bpy.types.Operator):
     """Stop the auto-refresh timer for AI images."""
     bl_idname = "style_engine.stop_auto_refresh"
@@ -3315,6 +3523,8 @@ def start_generation_cycle():
 # ----------------------------------------------------------------
 classes = (
     WM_OT_SetupWorkspace,
+    WM_OT_PopulateAssets,
+    WM_OT_SetCamera,
     WM_OT_StopAutoRefresh,
     WM_OT_StartAutoRefresh,
 )

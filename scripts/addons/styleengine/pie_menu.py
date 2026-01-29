@@ -1159,7 +1159,7 @@ class STYLEENGINE_MT_pie_main(Menu):
         quality_col.prop(style_props, "object_quality", text="")
         
         # ═══════════════════════════════════════════════════
-        # Position 1: LEFT (WEST) - Setup Workspace
+        # Position 1: LEFT (WEST) - Workspace
         # ═══════════════════════════════════════════════════
         box = pie.box()
         col = box.column(align=True)
@@ -1167,15 +1167,30 @@ class STYLEENGINE_MT_pie_main(Menu):
         
         # Header
         row = col.row()
-        row.label(text="Setup Workspace", icon='WORKSPACE')
+        row.label(text="Workspace", icon='WORKSPACE')
         col.separator()
         
-        # Setup button
+        # Setup Workspace button (full setup with AI workspace)
         row = col.row()
-        row.scale_y = 1.5
+        row.scale_y = 2.5
         row.operator("style_engine.setup_workspace", 
                      text="Setup Workspace", 
                      icon='PLAY')
+        
+        # Populate Assets button (assets only, no workspace change)
+        col.separator()
+        row = col.row()
+        row.scale_y = 1.2
+        row.operator("style_engine.populate_assets", 
+                     text="Populate Assets", 
+                     icon='FILE_REFRESH')
+        
+        # Set Camera button (copy from selected/active camera)
+        row = col.row()
+        row.scale_y = 1.2
+        row.operator("style_engine.set_camera", 
+                     text="Set Camera", 
+                     icon='OUTLINER_OB_CAMERA')
         
         # # HIDDEN: Background opacity - moved to Visualization category
         # col.separator()
