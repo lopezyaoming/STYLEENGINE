@@ -916,10 +916,16 @@ class STYLEENGINE_MT_pie_main(Menu):
         row.label(text="Object", icon='OBJECT_DATA')
         col.separator()
         
-        # Buttons - Project Texture moved to separate category
-        # col.operator("style_engine.project_texture_scene", 
-        #              text="Project Texture", 
-        #              icon='TEXTURE')
+        # Big Project Texture button (same format as Generate Image)
+        row = col.row()
+        row.scale_y = 2.5
+        row.operator("style_engine.project_texture_scene", 
+                     text="Project Texture", 
+                     icon='TEXTURE')
+        
+        col.separator()
+        
+        # 3D Generation buttons
         # # HIDDEN: UV Texture - available in N panel
         # col.operator("style_engine.uv_texture", 
         #              text="UV Texture", 
@@ -1194,32 +1200,6 @@ class STYLEENGINE_MT_pie_main(Menu):
             col.label(text="Images' in GCS settings")
             col.label(text="to use this feature")
         
-        # ═══════════════════════════════════════════════════
-        # Position 4-6: Skip (Northwest, Northeast, Southwest)
-        # ═══════════════════════════════════════════════════
-        pie.separator()  # Position 4: Northwest - skip
-        pie.separator()  # Position 5: Northeast - skip
-        pie.separator()  # Position 6: Southwest - skip
-        
-        # ═══════════════════════════════════════════════════
-        # Position 7: SOUTHEAST - Project Texture
-        # (Between Generate Image and Setup Workspace)
-        # ═══════════════════════════════════════════════════
-        box = pie.box()
-        col = box.column(align=True)
-        col.scale_y = 1.1
-        
-        # Header
-        row = col.row()
-        row.label(text="Project Texture", icon='TEXTURE')
-        col.separator()
-        
-        # Project Texture button
-        row = col.row()
-        row.scale_y = 1.5
-        row.operator("style_engine.project_texture_scene", 
-                     text="Project Texture", 
-                     icon='TEXTURE')
 
 
 # ----------------------------------------------------------------

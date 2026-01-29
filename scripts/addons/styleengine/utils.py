@@ -215,6 +215,8 @@ def get_or_create_prompt_text():
         text.write("<p></p>\n")
         text.write("# Negative Prompt\n")
         text.write("<n></n>\n")
+        text.write("# Machine Vision\n")
+        text.write("<v></v>\n")
         
         print(f"[Style Engine] Created prompt text block: {text_name}")
     else:

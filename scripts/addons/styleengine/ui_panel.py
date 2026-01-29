@@ -2859,15 +2859,218 @@ class WM_OT_RefinePrompt(bpy.types.Operator):
 
 
 class WM_OT_GenerateImageDescription(bpy.types.Operator):
-    """Generate description from current AI image (Coming Soon)"""
+    """Generate description from current AI image using machine vision"""
     bl_idname = "style_engine.generate_image_description"
     bl_label = "Generate Image Description"
-    bl_description = "Use AI to generate a text description from current_ai.png (Coming Soon)"
+    bl_description = "Use AI machine vision to generate a text description from current_ai.png"
     bl_options = {'REGISTER'}
     
     def execute(self, context):
-        self.report({'INFO'}, "Generate Image Description - Coming Soon")
-        return {'FINISHED'}
+        import re
+        import json
+        from pathlib import Path
+        from . import runcomfy_deployment
+        from . import workspace_setup
+        
+        # 1. Check if in Server mode (GCS)
+        if not runcomfy_deployment.is_server_mode():
+            self.report({'ERROR'}, "Image description only works in Server mode (GCS)")
+            print("[Image Description] ❌ Not in Server mode - feature requires direct ComfyUI connection")
+            return {'CANCELLED'}
+        
+        # 2. Get path to current_ai.png
+        temp_dir = workspace_setup.get_temp_directory(context)
+        image_path = temp_dir / "current_ai.png"
+        
+        if not image_path.exists():
+            self.report({'ERROR'}, "current_ai.png not found - generate an image first")
+            print(f"[Image Description] ❌ Image not found: {image_path}")
+            return {'CANCELLED'}
+        
+        print(f"[Image Description] Using image: {image_path}")
+        
+        try:
+            # 3. Load ImageAgent.json workflow
+            addon_dir = Path(__file__).parent
+            workflow_file = addon_dir / "workflows" / "ImageAgent.json"
+            
+            if not workflow_file.exists():
+                self.report({'ERROR'}, "ImageAgent.json not found")
+                print(f"[Image Description] ❌ Workflow not found: {workflow_file}")
+                return {'CANCELLED'}
+            
+            with open(workflow_file, 'r') as f:
+                workflow = json.load(f)
+            
+            print(f"[Image Description] ✓ Loaded workflow: {workflow_file.name}")
+            
+            # 4. Upload image to ComfyUI server
+            server_client = runcomfy_deployment.get_server_client()
+            
+            print(f"[Image Description] Uploading image to ComfyUI server...")
+            upload_response = server_client.upload_image(str(image_path), overwrite=True)
+            uploaded_filename = upload_response.get("name", "")
+            
+            if not uploaded_filename:
+                self.report({'ERROR'}, "Failed to upload image to server")
+                print(f"[Image Description] ❌ Upload failed: {upload_response}")
+                return {'CANCELLED'}
+            
+            print(f"[Image Description] ✓ Uploaded image: {uploaded_filename}")
+            
+            # 5. Patch node 23 (LoadImage) with the uploaded filename
+            if "23" not in workflow:
+                self.report({'ERROR'}, "Invalid workflow structure (node 23 missing)")
+                print("[Image Description] ❌ Node 23 not found in workflow")
+                return {'CANCELLED'}
+            
+            workflow["23"]["inputs"]["image"] = uploaded_filename
+            print(f"[Image Description] ✓ Patched node 23 with image: {uploaded_filename}")
+            
+            # 6. Submit to ComfyUI server
+            print(f"[Image Description] Submitting to ComfyUI server...")
+            response = server_client.queue_prompt(workflow)
+            prompt_id = response['prompt_id']
+            print(f"[Image Description] ✓ Queued image description (ID: {prompt_id[:8]}...)")
+            
+            # 7. Poll for result (blocking - simple implementation)
+            import time
+            max_wait = 120  # 120 seconds timeout (vision can take longer)
+            poll_interval = 2  # Check every 2 seconds
+            elapsed = 0
+            
+            self.report({'INFO'}, "Generating image description... (this may take a moment)")
+            
+            while elapsed < max_wait:
+                history = server_client.get_history(prompt_id)
+                
+                if history and prompt_id in history:
+                    execution = history[prompt_id]
+                    status = execution.get('status', {})
+                    
+                    # Check if completed
+                    if status.get('completed', False):
+                        # Extract description from node 19 output (Griptape Display: Text)
+                        outputs = execution.get('outputs', {})
+                        
+                        print(f"[Image Description] DEBUG: Available output nodes: {list(outputs.keys())}")
+                        
+                        description_text = None
+                        
+                        # Try node 19 (Griptape Display: Text)
+                        if "19" in outputs:
+                            node_19_output = outputs["19"]
+                            print(f"[Image Description] DEBUG: Node 19 output type: {type(node_19_output)}")
+                            
+                            # Try various extraction methods (same as RefinePrompt)
+                            if isinstance(node_19_output, dict):
+                                # Try common keys
+                                for key in ["string", "text", "STRING", "INPUT"]:
+                                    if key in node_19_output:
+                                        val = node_19_output[key]
+                                        if isinstance(val, list) and len(val) > 0:
+                                            # Check if list of characters - join them
+                                            if all(isinstance(c, str) and len(c) <= 1 for c in val[:10]):
+                                                description_text = ''.join(val)
+                                            else:
+                                                description_text = val[0]
+                                        elif isinstance(val, str):
+                                            description_text = val
+                                        if description_text:
+                                            break
+                                # Try getting any string value
+                                if not description_text:
+                                    for key, value in node_19_output.items():
+                                        if isinstance(value, str) and len(value) > 10:
+                                            description_text = value
+                                            break
+                                        elif isinstance(value, list) and len(value) > 0:
+                                            if all(isinstance(c, str) and len(c) <= 1 for c in value[:10]):
+                                                description_text = ''.join(value)
+                                                break
+                                            elif isinstance(value[0], str):
+                                                description_text = value[0]
+                                                break
+                            elif isinstance(node_19_output, list) and len(node_19_output) > 0:
+                                description_text = node_19_output[0]
+                            elif isinstance(node_19_output, str):
+                                description_text = node_19_output
+                        
+                        # Also try node 20 (Griptape Run: Image Description)
+                        if not description_text and "20" in outputs:
+                            node_20_output = outputs["20"]
+                            print(f"[Image Description] DEBUG: Node 20 output: {node_20_output}")
+                            if isinstance(node_20_output, dict) and "string" in node_20_output:
+                                description_text = node_20_output["string"][0] if isinstance(node_20_output["string"], list) else node_20_output["string"]
+                            elif isinstance(node_20_output, str):
+                                description_text = node_20_output
+                        
+                        if not description_text:
+                            self.report({'ERROR'}, "Could not extract description from workflow output")
+                            print(f"[Image Description] ❌ No text output found")
+                            print(f"[Image Description] Available outputs: {list(outputs.keys())}")
+                            print(f"[Image Description] Full outputs structure: {outputs}")
+                            return {'CANCELLED'}
+                        
+                        # Clean up description text
+                        description_text = description_text.strip()
+                        print(f"[Image Description] ✓ Generated description: {description_text[:100]}...")
+                        
+                        # 8. Update <v> tag in text editor
+                        text_block = bpy.data.texts.get("STYLEENGINE_Prompt")
+                        if not text_block:
+                            self.report({'ERROR'}, "STYLEENGINE_Prompt text block not found")
+                            return {'CANCELLED'}
+                        
+                        current_content = text_block.as_string()
+                        
+                        # Check if <v> tag exists
+                        if re.search(r'<v>.*?</v>', current_content, re.DOTALL | re.IGNORECASE):
+                            # Replace existing <v> content
+                            new_content = re.sub(
+                                r'(<v>)(.*?)(</v>)',
+                                r'\1' + description_text + r'\3',
+                                current_content,
+                                flags=re.DOTALL | re.IGNORECASE
+                            )
+                        else:
+                            # Add <v> section at the end
+                            new_content = current_content.rstrip() + "\n# Machine Vision\n<v>" + description_text + "</v>\n"
+                        
+                        # Update text block
+                        text_block.clear()
+                        text_block.write(new_content)
+                        
+                        print(f"[Image Description] ✓ Updated text editor with description")
+                        self.report({'INFO'}, "Image description generated successfully!")
+                        return {'FINISHED'}
+                    
+                    # Check if failed
+                    if 'error' in status or status.get('status_str') == 'error':
+                        error_msg = status.get('error', 'Unknown error')
+                        self.report({'ERROR'}, f"Description generation failed: {error_msg}")
+                        print(f"[Image Description] ❌ Workflow failed: {error_msg}")
+                        return {'CANCELLED'}
+                
+                # Wait before next poll
+                time.sleep(poll_interval)
+                elapsed += poll_interval
+                
+                # Progress update
+                if elapsed % 10 == 0:
+                    print(f"[Image Description] Still waiting... ({elapsed}s elapsed)")
+            
+            # Timeout
+            self.report({'ERROR'}, "Image description timed out after 120 seconds")
+            print(f"[Image Description] ❌ Timeout waiting for result")
+            return {'CANCELLED'}
+            
+        except Exception as e:
+            self.report({'ERROR'}, f"Image description failed: {str(e)}")
+            print(f"[Image Description] ❌ Exception: {e}")
+            import traceback
+            traceback.print_exc()
+            return {'CANCELLED'}
 
 
 class WM_OT_GenerateMeshMultiview(bpy.types.Operator):
