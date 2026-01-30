@@ -1916,6 +1916,47 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
         style_props = context.scene.style_engine_props
 
         # ================================================================
+        # SERVER STATUS (Always visible, non-collapsible)
+        # ================================================================
+        from . import progress_bar
+        
+        status_box = layout.box()
+        
+        # Row 1: Connection status
+        row = status_box.row(align=True)
+        connection = progress_bar.get_connection_status()
+        progress = progress_bar.get_display_progress()
+        progress_pct = int(progress * 100)
+        
+        if connection == "connected":
+            row.label(text="Server: Online", icon='CHECKMARK')
+        else:
+            row.label(text="Server: Offline", icon='X')
+        
+        # Row 2: Progress bar using Unicode block characters (pure display, no property)
+        row = status_box.row(align=True)
+        bar_length = 20
+        filled = int(bar_length * progress)
+        empty = bar_length - filled
+        bar_text = "▓" * filled + "░" * empty
+        row.label(text=f"{bar_text} {progress_pct}%")
+        
+        # Row 3: Current node/status (only when processing)
+        node_name = progress_bar.get_display_node()
+        if node_name and node_name != "Idle" and progress > 0:
+            row = status_box.row(align=True)
+            row.scale_y = 0.8
+            row.label(text=f"  {node_name}", icon='NODE')
+        
+        # Row 4: Queue (only show if > 0)
+        last_status = progress_bar.get_last_status()
+        queue = last_status.get('queue_remaining', 0) if last_status else 0
+        if queue > 0:
+            row = status_box.row(align=True)
+            row.scale_y = 0.8
+            row.label(text=f"Queue: {queue}", icon='LINENUMBERS_ON')
+
+        # ================================================================
         # FILE CATEGORY (Collapsible)
         # ================================================================
         file_box = layout.box()
@@ -2023,39 +2064,6 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                     next_row.operator("style_engine.next_generation", text="", icon='TRIA_RIGHT')
                 else:
                     col.label(text="No generations yet", icon='INFO')
-
-        # --- Generation Status (MINIMAL) ---
-        try:
-            from . import runcomfy_polling
-            from . import runcomfy_deployment
-            
-            # Only show status if using GCS mode
-            prefs = context.preferences.addons['styleengine'].preferences
-            if hasattr(prefs, 'api_backend') and prefs.api_backend == 'GCS':
-                status = runcomfy_polling.RunComfyPoller.get_status_summary()
-                
-                # Only show box if generating or if we have last generation time
-                if status['is_generating'] or status['last_generation_time'] > 0:
-                    layout.separator()
-                    status_box = layout.box()
-                    row = status_box.row()
-                    
-                    if status['is_generating']:
-                        # Show current generation status
-                        icon = 'RENDER_ANIMATION' if status['status_text'] == 'Generating' else 'TIME'
-                        row.label(text=f"{status['status_text']}: {status['elapsed']}s", icon=icon)
-                    else:
-                        # Show idle status with last generation time
-                        row.label(text="Ready", icon='CHECKMARK')
-                    
-                    # Show last generation time if available
-                    if status['last_generation_time'] > 0:
-                        row = status_box.row()
-                        row.scale_y = 0.8
-                        row.label(text=f"Previous: {status['last_generation_time']}s", icon='SORTTIME')
-        except Exception as e:
-            # Silently fail if status unavailable
-            pass
 
         # ================================================================
         # TEXT GENERATION CATEGORY (Collapsible)
@@ -2375,14 +2383,14 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                 col.label(text="Steps:")
                 col.prop(style_props, "steps", text="", slider=True)
             
-            # Autogenerate toggle
-            img_gen_box.separator()
-            row = img_gen_box.row()
-            row.scale_y = 1.3
-            row.prop(style_props, "auto_generate", 
-                     text="Autogenerate", 
-                     toggle=True, 
-                     icon='FILE_REFRESH')
+            # Autogenerate toggle - HIDDEN (now redundant with progress bar)
+            # img_gen_box.separator()
+            # row = img_gen_box.row()
+            # row.scale_y = 1.3
+            # row.prop(style_props, "auto_generate", 
+            #          text="Autogenerate", 
+            #          toggle=True, 
+            #          icon='FILE_REFRESH')
             
             # ────────────────────────────────────────────────────────────
             # REFERENCE IMAGES SUB-CATEGORY (Collapsible, closed by default)

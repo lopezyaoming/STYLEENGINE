@@ -86,6 +86,20 @@ def get_bridge_url():
         return None
 
 
+def _tag_redraw():
+    """
+    Force UI redraw so progress bar updates in the N-panel.
+    Tags all VIEW_3D areas for redraw.
+    """
+    try:
+        for window in bpy.context.window_manager.windows:
+            for area in window.screen.areas:
+                if area.type == 'VIEW_3D':
+                    area.tag_redraw()
+    except Exception:
+        pass  # Silently fail if context is unavailable
+
+
 def fetch_bridge_status(bridge_url):
     """
     Fetch status from the bridge service.
@@ -231,6 +245,9 @@ def _poll_bridge_tick():
         BridgePollerState.display_progress = display_progress
         BridgePollerState.display_status = display_status
         BridgePollerState.display_node = display_node
+        
+        # Force UI redraw so progress bar updates
+        _tag_redraw()
         
         # Calculate percentage for display
         percent = int(display_progress * 100)
