@@ -1922,16 +1922,26 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
         
         status_box = layout.box()
         
-        # Row 1: Connection status
+        # Row 1: Connection status with colored indicators
+        # Green = idle/ready, Yellow = processing, Red = offline
         row = status_box.row(align=True)
         connection = progress_bar.get_connection_status()
         progress = progress_bar.get_display_progress()
+        display_status = progress_bar.get_display_status()
         progress_pct = int(progress * 100)
         
-        if connection == "connected":
-            row.label(text="Server: Online", icon='CHECKMARK')
+        if connection != "connected":
+            # RED: Offline/Disconnected
+            row.label(text="", icon='KEYTYPE_EXTREME_VEC')
+            row.label(text="Server: Offline")
+        elif progress > 0 or display_status in ("processing", "finishing"):
+            # YELLOW: Processing/Running/Downloading
+            row.label(text="", icon='KEYTYPE_KEYFRAME_VEC')
+            row.label(text="Server: Working...")
         else:
-            row.label(text="Server: Offline", icon='X')
+            # GREEN: Online and Idle
+            row.label(text="", icon='KEYTYPE_JITTER_VEC')
+            row.label(text="Server: Ready")
         
         # Row 2: Progress bar using Unicode block characters (pure display, no property)
         row = status_box.row(align=True)
