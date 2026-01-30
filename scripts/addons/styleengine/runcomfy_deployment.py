@@ -19,6 +19,54 @@ def get_addon_prefs():
     return bpy.context.preferences.addons['styleengine'].preferences
 
 
+def _build_server_url(base_url, prefs):
+    """
+    Build the final server URL from base URL and port settings.
+    
+    Priority:
+    1. Settings port (gcs_comfy_port) if not default or explicitly set
+    2. Port from URL if present
+    3. Default port 8188
+    
+    Args:
+        base_url: Base URL from preferences (may or may not include port)
+        prefs: Addon preferences object
+    
+    Returns:
+        str: Complete URL with port (e.g., "http://127.0.0.1:8188")
+    """
+    from urllib.parse import urlparse, urlunparse
+    
+    default_port = 8188
+    settings_port = getattr(prefs, 'gcs_comfy_port', default_port)
+    
+    # Parse the URL
+    parsed = urlparse(base_url)
+    
+    # Extract host and any existing port from URL
+    host = parsed.hostname or parsed.path.split('/')[0].split(':')[0]
+    url_port = parsed.port
+    
+    # Determine final port (settings takes priority over URL port)
+    if settings_port != default_port:
+        # User explicitly set a custom port in settings
+        final_port = settings_port
+    elif url_port:
+        # URL has a port specified, use it
+        final_port = url_port
+    else:
+        # No port specified anywhere, use default
+        final_port = default_port
+    
+    # Build scheme (default to http if not specified)
+    scheme = parsed.scheme if parsed.scheme else 'http'
+    
+    # Construct the final URL
+    final_url = f"{scheme}://{host}:{final_port}"
+    
+    return final_url
+
+
 def get_runcomfy_client():
     """
     Create RunComfy client from preferences (for Serverless API).
@@ -58,11 +106,14 @@ def get_server_client():
     """
     prefs = get_addon_prefs()
     
-    # Use GCS server URL (self-hosted) or fallback to old comfyui_server_url
-    server_url = prefs.gcs_server_url if hasattr(prefs, 'gcs_server_url') and prefs.gcs_server_url else prefs.comfyui_server_url
+    # Get base URL from preferences
+    base_url = prefs.gcs_server_url if hasattr(prefs, 'gcs_server_url') and prefs.gcs_server_url else ""
     
-    if not server_url:
+    if not base_url:
         raise ServerAPIError("ComfyUI Server URL not configured. Please set the server URL in addon preferences.")
+    
+    # Build final URL with port handling
+    server_url = _build_server_url(base_url, prefs)
     
     return ComfyUIServerClient(server_url, timeout=prefs.runcomfy_request_timeout)
 

@@ -82,6 +82,7 @@ try:
     from . import runcomfy_server_manager
     from . import runcomfy_deployment
     from . import runcomfy_polling
+    from . import progress_bar
     from . import heavypoly_integration
     from . import pie_menu
 except (ImportError, ValueError) as e:
@@ -200,6 +201,7 @@ modules = [
     prefs,
     workspace_setup,
     ui_panel,
+    progress_bar,  # Progress bridge polling system
     heavypoly_integration,  # HeavyPoly Z pie injection (paratrooper mode!)
     pie_menu,  # Main Style Engine pie menu (Shift+E)
 ]

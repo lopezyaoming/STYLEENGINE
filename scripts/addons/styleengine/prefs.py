@@ -245,9 +245,17 @@ class StyleEnginePreferences(AddonPreferences):
     )
     
     gcs_server_url: StringProperty(
-        name="Server URL",
-        description="URL of your ComfyUI instance (e.g., http://34.19.119.45:8188 or http://127.0.0.1:8188)",
-        default="http://127.0.0.1:8188"
+        name="Server Address",
+        description="IP address or hostname of your ComfyUI server (e.g., http://127.0.0.1 or http://34.19.119.45)",
+        default="http://127.0.0.1"
+    )
+    
+    gcs_comfy_port: IntProperty(
+        name="ComfyUI Port",
+        description="Port for ComfyUI backend (default: 8188). Only change if your server uses a different port",
+        default=8188,
+        min=1,
+        max=65535
     )
     
     gcs_server_status: StringProperty(
@@ -309,7 +317,7 @@ class StyleEnginePreferences(AddonPreferences):
         
         # Self-Hosted ComfyUI (GCS) - minimal setup
         if self.api_backend == 'GCS':
-            basic_box.prop(self, "gcs_server_url", text="Server URL")
+            basic_box.prop(self, "gcs_server_url", text="Server Address")
         
             # Test button
             row = basic_box.row()
@@ -502,18 +510,22 @@ class WM_OT_TestGCSConnection(bpy.types.Operator):
     def execute(self, context):
         prefs = context.preferences.addons['styleengine'].preferences
         
-        # Check if server URL is set
-        server_url = prefs.gcs_server_url
+        # Check if server address is set
+        base_url = prefs.gcs_server_url
         
-        if not server_url:
-            self.report({'ERROR'}, "Server URL is not set!")
-            print("[GCS] ❌ Test failed: Server URL not configured")
+        if not base_url:
+            self.report({'ERROR'}, "Server address is not set!")
+            print("[GCS] ❌ Test failed: Server address not configured")
             prefs.gcs_server_status = "Not Connected"
             return {'CANCELLED'}
         
         # Test connection
         try:
             from . import runcomfy_server_client
+            from . import runcomfy_deployment
+            
+            # Build the full URL using the shared helper
+            server_url = runcomfy_deployment._build_server_url(base_url, prefs)
             
             self.report({'INFO'}, f"Testing connection to: {server_url}...")
             print(f"[GCS] =========================================")
