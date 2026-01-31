@@ -30,6 +30,7 @@ class BridgePollerState:
     last_status = None
     connection_status = "disconnected"  # connected, disconnected
     error_count = 0
+    permanently_offline = False  # Once offline, stay offline until Blender restart
     
     # Display state (what we actually show, may differ from bridge)
     display_progress = 0.0
@@ -46,6 +47,7 @@ class BridgePollerState:
         cls.last_status = None
         cls.connection_status = "disconnected"
         cls.error_count = 0
+        cls.permanently_offline = False
         cls.display_progress = 0.0
         cls.display_status = "ready"
         cls.display_node = "Idle"
@@ -175,94 +177,118 @@ def _poll_bridge_tick():
     Returns:
         float: Interval for next poll, or None to stop timer
     """
-    # Check if polling should continue
-    if not BridgePollerState.is_polling:
-        print("[Progress Bridge] Polling stopped")
-        BridgePollerState.connection_status = "disconnected"
-        return None
-    
-    # Get bridge URL
-    bridge_url = get_bridge_url()
-    
-    if not bridge_url:
-        print("[Progress Bridge] ❌ No server address configured")
-        BridgePollerState.connection_status = "disconnected"
-        BridgePollerState.error_count += 1
-        return POLL_INTERVAL
-    
-    # Fetch status from bridge
-    status = fetch_bridge_status(bridge_url)
-    
-    if status is None:
-        # Connection failed
-        BridgePollerState.error_count += 1
-        BridgePollerState.connection_status = "disconnected"
-        BridgePollerState.last_status = None
+    try:
+        # CRITICAL: If permanently offline, stop polling immediately
+        if BridgePollerState.permanently_offline:
+            print("[Progress Bridge] ⛔ PERMANENTLY OFFLINE - Stopped polling (restart Blender to reconnect)")
+            BridgePollerState.is_polling = False
+            return None
         
-        print(f"[Progress Bridge] ❌ DISCONNECTED (error count: {BridgePollerState.error_count})")
-        print(f"[Progress Bridge]    Target: {bridge_url}/status")
+        # Check if polling should continue
+        if not BridgePollerState.is_polling:
+            print("[Progress Bridge] Polling stopped")
+            BridgePollerState.connection_status = "disconnected"
+            return None
         
-    else:
-        # Success! Parse and print the status
-        BridgePollerState.error_count = 0
-        BridgePollerState.connection_status = "connected"
-        BridgePollerState.last_status = status
+        # Get bridge URL
+        bridge_url = get_bridge_url()
         
-        # Extract fields from JSON
-        server_status = status.get('status', 'unknown')
-        bridge_progress = status.get('progress', 0.0)
-        node_name = status.get('node_name', '')
-        queue_remaining = status.get('queue_remaining', 0)
-        last_msg_type = status.get('last_msg_type', '')
+        if not bridge_url:
+            print("[Progress Bridge] ❌ No server address configured")
+            BridgePollerState.connection_status = "disconnected"
+            BridgePollerState.error_count += 1
+            # Mark as permanently offline to prevent crash
+            BridgePollerState.permanently_offline = True
+            return None
         
-        # Check if there are active requests in the polling system
-        has_active_requests = _has_active_requests()
+        # Fetch status from bridge
+        status = fetch_bridge_status(bridge_url)
         
-        # Track if we've seen progress (job was running)
-        if bridge_progress > 0:
-            BridgePollerState.saw_progress = True
-        
-        # Determine display progress with "hold at 100%" logic
-        if bridge_progress > 0:
-            # Job is actively running, show actual progress
-            display_progress = bridge_progress
-            display_node = node_name
-            display_status = server_status
-        elif BridgePollerState.saw_progress and has_active_requests:
-            # Bridge says 0% but we have active requests and saw progress
-            # Hold at 100% until request completes
-            display_progress = 1.0
-            display_node = "Downloading..."
-            display_status = "finishing"
+        if status is None:
+            # Connection failed - STOP POLLING PERMANENTLY
+            BridgePollerState.error_count += 1
+            BridgePollerState.connection_status = "disconnected"
+            BridgePollerState.last_status = None
+            BridgePollerState.permanently_offline = True
+            BridgePollerState.is_polling = False
+            
+            print(f"[Progress Bridge] ❌ DISCONNECTED (error count: {BridgePollerState.error_count})")
+            print(f"[Progress Bridge]    Target: {bridge_url}/status")
+            print(f"[Progress Bridge] ⛔ Marked as PERMANENTLY OFFLINE - Restart Blender to reconnect")
+            
+            # STOP TIMER IMMEDIATELY
+            return None
+            
         else:
-            # Truly idle - no active requests
-            display_progress = 0.0
-            display_node = "Idle"
-            display_status = "ready"
-            BridgePollerState.saw_progress = False  # Reset for next job
+            # Success! Parse and print the status
+            BridgePollerState.error_count = 0
+            BridgePollerState.connection_status = "connected"
+            BridgePollerState.last_status = status
+            
+            # Extract fields from JSON
+            server_status = status.get('status', 'unknown')
+            bridge_progress = status.get('progress', 0.0)
+            node_name = status.get('node_name', '')
+            queue_remaining = status.get('queue_remaining', 0)
+            last_msg_type = status.get('last_msg_type', '')
+            
+            # Check if there are active requests in the polling system
+            has_active_requests = _has_active_requests()
+            
+            # Track if we've seen progress (job was running)
+            if bridge_progress > 0:
+                BridgePollerState.saw_progress = True
+            
+            # Determine display progress with "hold at 100%" logic
+            if bridge_progress > 0:
+                # Job is actively running, show actual progress
+                display_progress = bridge_progress
+                display_node = node_name
+                display_status = server_status
+            elif BridgePollerState.saw_progress and has_active_requests:
+                # Bridge says 0% but we have active requests and saw progress
+                # Hold at 100% until request completes
+                display_progress = 1.0
+                display_node = "Downloading..."
+                display_status = "finishing"
+            else:
+                # Truly idle - no active requests
+                display_progress = 0.0
+                display_node = "Idle"
+                display_status = "ready"
+                BridgePollerState.saw_progress = False  # Reset for next job
+            
+            # Update display state
+            BridgePollerState.display_progress = display_progress
+            BridgePollerState.display_status = display_status
+            BridgePollerState.display_node = display_node
+            
+            # Force UI redraw so progress bar updates
+            _tag_redraw()
+            
+            # Calculate percentage for display
+            percent = int(display_progress * 100)
+            
+            # Print parsed JSON to console
+            print(f"[Progress Bridge] ✓ CONNECTED")
+            print(f"[Progress Bridge]    Status: {display_status}")
+            print(f"[Progress Bridge]    Progress: {percent}% ({display_progress:.2f})")
+            print(f"[Progress Bridge]    Node: {display_node}")
+            print(f"[Progress Bridge]    Queue: {queue_remaining}")
+            print(f"[Progress Bridge]    Active Requests: {has_active_requests}")
+            print(f"[Progress Bridge]    ---")
+            
+            # Continue polling
+            return POLL_INTERVAL
         
-        # Update display state
-        BridgePollerState.display_progress = display_progress
-        BridgePollerState.display_status = display_status
-        BridgePollerState.display_node = display_node
-        
-        # Force UI redraw so progress bar updates
-        _tag_redraw()
-        
-        # Calculate percentage for display
-        percent = int(display_progress * 100)
-        
-        # Print parsed JSON to console
-        print(f"[Progress Bridge] ✓ CONNECTED")
-        print(f"[Progress Bridge]    Status: {display_status}")
-        print(f"[Progress Bridge]    Progress: {percent}% ({display_progress:.2f})")
-        print(f"[Progress Bridge]    Node: {display_node}")
-        print(f"[Progress Bridge]    Queue: {queue_remaining}")
-        print(f"[Progress Bridge]    Active Requests: {has_active_requests}")
-        print(f"[Progress Bridge]    ---")
-    
-    # Continue polling
-    return POLL_INTERVAL
+    except Exception as e:
+        # CRITICAL ERROR - Stop polling to prevent crashes
+        print(f"[Progress Bridge] ⚠️ CRITICAL ERROR in polling: {e}")
+        BridgePollerState.permanently_offline = True
+        BridgePollerState.connection_status = "disconnected"
+        BridgePollerState.is_polling = False
+        print("[Progress Bridge] ⛔ Marked as PERMANENTLY OFFLINE - Restart Blender to reconnect")
+        return None
 
 
 # ----------------------------------------------------------------
