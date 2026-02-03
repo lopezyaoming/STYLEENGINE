@@ -15,6 +15,39 @@ import shutil
 # Get the addon directory (works both in dev and when installed from ZIP)
 ADDON_DIR = Path(__file__).parent
 
+
+# ================================================================
+#    BLENDER VERSION COMPATIBILITY
+# ================================================================
+
+def get_eevee_engine_name():
+    """
+    Get the correct EEVEE engine name for the current Blender version.
+    
+    Returns:
+        str: 'BLENDER_EEVEE' for Blender 5.0.1+ (renamed from EEVEE_NEXT)
+             'BLENDER_EEVEE_NEXT' for Blender 4.2-5.0
+             'BLENDER_EEVEE' for Blender 4.1 and below (legacy)
+    
+    Blender 5.0.1+ renamed EEVEE_NEXT → EEVEE (legacy EEVEE was removed)
+    Blender 4.2-5.0 uses EEVEE_NEXT
+    Blender 4.1 and below uses legacy EEVEE
+    """
+    version = bpy.app.version
+    
+    # Blender 5.0.1+ uses 'BLENDER_EEVEE' (EEVEE_NEXT was renamed)
+    if version >= (5, 0, 1):
+        return 'BLENDER_EEVEE'
+    
+    # Blender 4.2+ uses 'BLENDER_EEVEE_NEXT'
+    elif version >= (4, 2, 0):
+        return 'BLENDER_EEVEE_NEXT'
+    
+    # Older versions use legacy 'BLENDER_EEVEE'
+    else:
+        return 'BLENDER_EEVEE'
+
+
 # ================================================================
 #    Session Management - Per-Project Library System
 # ================================================================
@@ -1014,8 +1047,8 @@ def auto_render_passes():
         original_samples = scene.eevee.taa_render_samples
         original_file_format = scene.render.image_settings.file_format
         
-        # Configure render settings
-        scene.render.engine = 'BLENDER_EEVEE_NEXT'  # Blender 4.2+ uses EEVEE_NEXT
+        # Configure render settings (version-compatible)
+        scene.render.engine = get_eevee_engine_name()
         scene.eevee.taa_render_samples = 16
         scene.render.image_settings.file_format = 'PNG'  # Force PNG
         
@@ -2370,9 +2403,9 @@ def render_passes(context):
     try:
         # Configure render settings based on quality
         if render_quality == 'DETAILED':
-            # EEVEE Next for high quality (Blender 4.x)
-            scene.render.engine = 'BLENDER_EEVEE_NEXT'
-            # EEVEE Next settings for quality (using only properties that exist in 4.x)
+            # EEVEE for high quality (version-compatible)
+            scene.render.engine = get_eevee_engine_name()
+            # EEVEE settings for quality (using only properties that exist)
             if hasattr(scene.eevee, 'taa_render_samples'):
                 scene.eevee.taa_render_samples = 64  # Good quality, reasonable speed
             if hasattr(scene.eevee, 'use_gtao'):
@@ -2382,7 +2415,8 @@ def render_passes(context):
             if hasattr(scene.eevee, 'use_ssr_refraction'):
                 scene.eevee.use_ssr_refraction = True  # Refractions
             # Note: use_bloom removed in EEVEE Next - bloom is now always available but controlled differently
-            print(f"[Style Engine] EEVEE Next configured: 64 samples, AO, SSR")
+            engine_version = "EEVEE" if bpy.app.version >= (5, 0, 1) else "EEVEE Next"
+            print(f"[Style Engine] {engine_version} configured: 64 samples, AO, SSR")
         else:
             # WORKBENCH for speed
             scene.render.engine = 'BLENDER_WORKBENCH'
@@ -2443,7 +2477,10 @@ def render_passes(context):
             print(f"[Style Engine] Expected output: {combined_path}")
         
         # SURGICAL: Render from ai_camera without permanently changing scene.camera
-        engine_name = "EEVEE Next" if render_quality == 'DETAILED' else "Workbench"
+        if render_quality == 'DETAILED':
+            engine_name = "EEVEE" if bpy.app.version >= (5, 0, 1) else "EEVEE Next"
+        else:
+            engine_name = "Workbench"
         print(f"[Style Engine] 🎨 Rendering from {camera_name} ({engine_name})...")
         
         # Store timestamp before render
