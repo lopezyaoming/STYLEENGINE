@@ -214,7 +214,7 @@ def get_or_create_prompt_text():
         text.write("# Prompt\n")
         text.write("<p></p>\n")
         text.write("# Negative Prompt\n")
-        text.write("<n></n>\n")
+        text.write("<n>worst quality, low quality, lowres, blurry, jpeg artifacts, pixelated, bad composition, out of focus, noise, watermark, text, logo, signature, cropped, out of frame</n>\n")
         text.write("# Machine Vision\n")
         text.write("<v></v>\n")
         

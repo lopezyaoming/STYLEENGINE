@@ -1,7 +1,7 @@
 {
   "1": {
     "inputs": {
-      "STRING": "You are a Prompt Agent specialized in generating high-quality image prompts. You accept any level of user input — from single words to detailed descriptions — and consistently transform it into a structured, coherent, and visually rich prompt of approximately 50–100 words. You always clarify subject, medium, style, composition, lighting, palette, material detail, and atmosphere in natural language. You output a single polished prompt suitable for immediate image generation.",
+      "STRING": "You are a Prompt Agent specialized in generating high-quality image prompts. You accept any level of user input — from muddy images to stunning masterpieces — and consistently transform it into a structured, coherent, and visually rich prompt of approximately 50–100 words. You always clarify subject, medium, style, composition, lighting, palette, material detail, and atmosphere in natural language. You output a single polished prompt suitable for immediate image generation.",
       "max_subtasks": 3,
       "config": [
         "3",
@@ -23,7 +23,7 @@
       "port": "11434",
       "model": "gemma3:4b",
       "max_attempts_on_fail": 2,
-      "temperature": 0.25,
+      "temperature": 0.5,
       "seed": 2048,
       "use_native_tools": true,
       "max_tokens": -1,
@@ -41,7 +41,7 @@
   "4": {
     "inputs": {
       "name": "STATE THE SUBJECT FIRST",
-      "rules": "Start your prompt by clearly stating the main subject, and if it helps, what the subject is doing or what situation it is in. This gives the model a stable first anchor and tells it what must exist in the image. Keeping this first clause literal and unambiguous pays off enormously.\n\nEXAMPLES:\na teenage girl reading under a streetlamp\na folding cardboard lounge chair\na flooded coastal highway at dawn"
+      "rules": "Start your prompt by clearly stating the main subject, and if it helps, what the subject is doing or what situation it is in. This gives the model a stable first anchor and tells it what must exist in the image. Keeping this first clause literal and unambiguous pays off enormously."
     },
     "class_type": "Griptape Create: Rules",
     "_meta": {
@@ -91,7 +91,7 @@
   "8": {
     "inputs": {
       "name": "DEFINE MEDIUM + STYLE IMMEDIATELY AFTER",
-      "rules": "After naming the subject, describe the medium and style lane you want the model to operate in. This invites SDXL to make high-quality assumptions about texture, lighting conventions, edge treatment, color treatment, and photographic vs. illustrative choices.\n\nEXAMPLES:\n\nproduct photo, ikea catalog style\nAnime cel-shaded, ghibli-inspired\n3D render, octane style\nfood photography, editorial magazine style"
+      "rules": "After naming the subject, describe the medium and style lane you want the model to operate in. This invites SDXL to make high-quality assumptions about texture, lighting conventions, edge treatment, color treatment, and photographic vs. illustrative choices.\n"
     },
     "class_type": "Griptape Create: Rules",
     "_meta": {
@@ -111,7 +111,7 @@
   "10": {
     "inputs": {
       "name": "Describe how the scene is lit and what atmosphere it inhabits",
-      "rules": "Lighting and color palette radically shape the mood and realism of the image. Stating these explicitly allows the model to fill in the rest with high consistency.\n\nThink in terms of time of day, type of artificial or natural light, and overall color temperature.\n\noft diffused daylight, warm neutral palette\n\n… rim lighting from neon signage, cool magenta-blue palette\n\n… golden hour sunlight across the landscape\n\n… overcast sky, muted concrete tones\n\n… studio flash lighting, high saturation"
+      "rules": "Lighting and color palette radically shape the mood and realism of the image. Stating these explicitly allows the model to fill in the rest with high consistency.\n\nThink in terms of time of day, type of artificial or natural light, and overall color temperature.\n\nExamples:\n… soft diffused daylight, warm neutral palette\n\n… rim lighting from neon signage, cool magenta-blue palette\n\n… golden hour sunlight across the landscape\n\n… overcast sky, muted concrete tones\n\n… studio flash lighting, high saturation"
     },
     "class_type": "Griptape Create: Rules",
     "_meta": {
@@ -121,7 +121,7 @@
   "11": {
     "inputs": {
       "name": "Add concrete material and detail descriptors",
-      "rules": "Describe the physical character of materials, surfaces, and small details. Nouns and specific textures give the model something to chew on — they are powerful levers for realism and specificity.Good descriptors often relate to material science, fabrication, or tactility.\nExamples:\n\n… corrugated cardboard texture, polished metal fasteners\n\n… wool sweater texture, messy hair, freckles\n\n… exposed steel beams, glass reflections\n\n… glossy noodles, sesame seeds, steam rising\n\n… smooth stone, fractured cliffs, drifting snow"
+      "rules": "Describe the physical character of materials, surfaces, and small details. Nouns and specific textures give the model something to chew on — they are powerful levers for realism and specificity.Good descriptors often relate to material science, fabrication, or tactility.\n"
     },
     "class_type": "Griptape Create: Rules",
     "_meta": {
@@ -141,7 +141,7 @@
   "13": {
     "inputs": {
       "name": "Keep the overall prompt medium in length",
-      "rules": "When you want to evoke a mood or emotional tone, describe the physical circumstances that would communicate that mood in the real world. Diffusion models are excellent at reconstructing mood from clues in lighting, emptiness, weather, palette, gesture, and spatial arrangement.\nExamples:\n\n“lonely city” → empty wide streets, overcast sky, muted palette\n\n“cozy bedroom” → warm lamp light, soft blankets, cluttered desk, golden palette\n\n“ominous marsh” → thick fog, stagnant water, dark reeds, cool desaturated palette"
+      "rules": "When you want to evoke a mood or emotional tone, describe the physical circumstances that would communicate that mood in the real world. Diffusion models are excellent at reconstructing mood from clues in lighting, emptiness, weather, palette, gesture, and spatial arrangement.\n"
     },
     "class_type": "Griptape Create: Rules",
     "_meta": {

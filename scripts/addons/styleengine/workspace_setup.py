@@ -2737,12 +2737,18 @@ def generate_ai_image_cloud(context):
                     except Exception as e:
                         print(f"[GCS]   ✗ {label}: Upload failed - {e}")
             
+            # Determine if we should use reference image workflow
+            use_ref_images = ref_upload_count > 0
+            
             if ref_upload_count > 0:
                 print(f"[GCS] ✓ Uploaded {ref_upload_count} reference images")
+                print(f"[GCS] Using ImageRef workflow (with IPAdapter)")
+            else:
+                print(f"[GCS] No reference images - using basic Image workflow (faster)")
             print(f"[GCS]")
             
-            # Load workflow JSON file (StyleEngineTexture.json from addon's workflows/)
-            workflow_json = load_workflow_json_for_gcs()
+            # Load appropriate workflow JSON (Image.json or ImageRef.json)
+            workflow_json = load_workflow_json_for_gcs(use_ref_images=use_ref_images)
             if not workflow_json:
                 print("[GCS] Failed to load workflow JSON")
                 return
@@ -2759,6 +2765,13 @@ def generate_ai_image_cloud(context):
             # Prompt (Node 25 - PrimitiveString)
             workflow_json["25"]["inputs"]["value"] = session_data['global_prompt']
             
+            # Negative Prompt (Node 7 - CLIPTextEncode)
+            negative_prompt = session_data.get('negative_prompt', '')
+            if not negative_prompt:
+                negative_prompt = "text, watermark, blurry, deformed, ugly, bad anatomy, worst quality, low quality"
+            workflow_json["7"]["inputs"]["text"] = negative_prompt
+            print(f"[GCS]   - Negative prompt: {negative_prompt[:60]}...")
+            
             # Steps (Node 42 - PrimitiveInt)
             workflow_json["42"]["inputs"]["value"] = session_data.get('steps', 15)
             
@@ -2769,9 +2782,10 @@ def generate_ai_image_cloud(context):
             # Influence / Denoise Control (Node 135 - easy float)
             # UI shows: 1.0 = keep render, 0.0 = full AI
             # But workflow needs: denoise where 0.0 = keep render, 1.0 = full AI
-            # So we flip the value: denoise = 1.0 - influence
-            influence_value = session_data.get('texture_influence', 1.0)  # Default 1.0 (keep render)
-            denoise_value = 1.0 - influence_value  # Flip for workflow
+            # UI slider is 0-1 but actual working range is 0-0.7, so we scale
+            influence_value = session_data.get('texture_influence', 1.0)  # UI value 0-1
+            scaled_influence = influence_value * 0.7  # Scale to 0-0.7 for workflow
+            denoise_value = 1.0 - scaled_influence  # Flip for workflow
             workflow_json["135"]["inputs"]["value"] = denoise_value
             
             # ============================================================
@@ -2831,77 +2845,66 @@ def generate_ai_image_cloud(context):
             workflow_json["5"]["inputs"]["height"] = resolution.get('height', 1024)
             
             # ============================================================
-            # GLOBAL IPADAPTER STRENGTHS
+            # IPADAPTER REFERENCE IMAGES (only for ImageRef.json workflow)
             # ============================================================
-            ref_images = session_data.get('reference_images', {})
-            
-            # Style Transfer Strength (Node 52)
-            workflow_json["52"]["inputs"]["value"] = ref_images.get('style_transfer_strength', 0.0)
-            
-            # Composition Strength (Node 90)
-            workflow_json["90"]["inputs"]["value"] = ref_images.get('composition_strength', 1.0)
-            
-            # Force Transfer Strength (Node 91)
-            workflow_json["91"]["inputs"]["value"] = ref_images.get('force_transfer_strength', 0.0)
-            
-            # ============================================================
-            # STYLE TRANSFER (ST) - Individual Weights
-            # ============================================================
-            workflow_json["129"]["inputs"]["value"] = ref_images.get('st1_weight', 1.0)  # ST1W
-            workflow_json["126"]["inputs"]["value"] = ref_images.get('st2_weight', 1.0)  # ST2W
-            workflow_json["125"]["inputs"]["value"] = ref_images.get('st3_weight', 0.0)  # ST3W
-            workflow_json["124"]["inputs"]["value"] = ref_images.get('st4_weight', 0.0)  # ST4W
-            workflow_json["123"]["inputs"]["value"] = ref_images.get('st5_weight', 0.0)  # ST5W
-            
-            # ============================================================
-            # COMPOSITION (COMP) - Individual Weights
-            # ============================================================
-            workflow_json["122"]["inputs"]["value"] = ref_images.get('comp1_weight', 1.0)  # COMP1W
-            workflow_json["121"]["inputs"]["value"] = ref_images.get('comp2_weight', 1.0)  # COMP2W
-            workflow_json["120"]["inputs"]["value"] = ref_images.get('comp3_weight', 1.0)  # COMP3W
-            workflow_json["119"]["inputs"]["value"] = ref_images.get('comp4_weight', 1.0)  # COMP4W
-            workflow_json["118"]["inputs"]["value"] = ref_images.get('comp5_weight', 1.0)  # COMP5W
-            
-            # ============================================================
-            # STRONG STYLE TRANSFER (SST) - Individual Weights
-            # ============================================================
-            workflow_json["117"]["inputs"]["value"] = ref_images.get('sst1_weight', 1.0)  # SST1W
-            workflow_json["116"]["inputs"]["value"] = ref_images.get('sst2_weight', 1.0)  # SST2W
-            workflow_json["115"]["inputs"]["value"] = ref_images.get('sst3_weight', 1.0)  # SST3W
-            workflow_json["114"]["inputs"]["value"] = ref_images.get('sst4_weight', 1.0)  # SST4W
-            workflow_json["113"]["inputs"]["value"] = ref_images.get('sst5_weight', 1.0)  # SST5W
-            
-            # ============================================================
-            # REFERENCE IMAGE PATHS (LoadImage nodes)
-            # Use uploaded filenames from server, fallback to blank.png
-            # ============================================================
-            # Style Transfer images
-            workflow_json["65"]["inputs"]["image"] = uploaded_ref_images.get('st1_path', 'blank.png')  # ST1
-            workflow_json["63"]["inputs"]["image"] = uploaded_ref_images.get('st2_path', 'blank.png')  # ST2
-            workflow_json["64"]["inputs"]["image"] = uploaded_ref_images.get('st3_path', 'blank.png')  # ST3
-            workflow_json["94"]["inputs"]["image"] = uploaded_ref_images.get('st4_path', 'blank.png')  # ST4
-            workflow_json["97"]["inputs"]["image"] = uploaded_ref_images.get('st5_path', 'blank.png')  # ST5
-            
-            # Composition images
-            workflow_json["78"]["inputs"]["image"] = uploaded_ref_images.get('comp1_path', 'blank.png')  # COMP1
-            workflow_json["77"]["inputs"]["image"] = uploaded_ref_images.get('comp2_path', 'blank.png')  # COMP2
-            workflow_json["76"]["inputs"]["image"] = uploaded_ref_images.get('comp3_path', 'blank.png')  # COMP3
-            workflow_json["100"]["inputs"]["image"] = uploaded_ref_images.get('comp4_path', 'blank.png')  # COMP4
-            workflow_json["103"]["inputs"]["image"] = uploaded_ref_images.get('comp5_path', 'blank.png')  # COMP5
-            
-            # Strong Style Transfer images
-            workflow_json["89"]["inputs"]["image"] = uploaded_ref_images.get('sst1_path', 'blank.png')  # SST1
-            workflow_json["88"]["inputs"]["image"] = uploaded_ref_images.get('sst2_path', 'blank.png')  # SST2
-            workflow_json["87"]["inputs"]["image"] = uploaded_ref_images.get('sst3_path', 'blank.png')  # SST3
-            workflow_json["106"]["inputs"]["image"] = uploaded_ref_images.get('sst4_path', 'blank.png')  # SST4
-            workflow_json["109"]["inputs"]["image"] = uploaded_ref_images.get('sst5_path', 'blank.png')  # SST5
+            if use_ref_images:
+                ref_images = session_data.get('reference_images', {})
+                
+                # Global IPAdapter Strengths
+                workflow_json["52"]["inputs"]["value"] = ref_images.get('style_transfer_strength', 0.0)   # Style Transfer
+                workflow_json["90"]["inputs"]["value"] = ref_images.get('composition_strength', 1.0)      # Composition
+                workflow_json["91"]["inputs"]["value"] = ref_images.get('force_transfer_strength', 0.0)   # Force Transfer
+                
+                # Style Transfer (ST) - Individual Weights
+                workflow_json["129"]["inputs"]["value"] = ref_images.get('st1_weight', 1.0)  # ST1W
+                workflow_json["126"]["inputs"]["value"] = ref_images.get('st2_weight', 1.0)  # ST2W
+                workflow_json["125"]["inputs"]["value"] = ref_images.get('st3_weight', 0.0)  # ST3W
+                workflow_json["124"]["inputs"]["value"] = ref_images.get('st4_weight', 0.0)  # ST4W
+                workflow_json["123"]["inputs"]["value"] = ref_images.get('st5_weight', 0.0)  # ST5W
+                
+                # Composition (COMP) - Individual Weights
+                workflow_json["122"]["inputs"]["value"] = ref_images.get('comp1_weight', 1.0)  # COMP1W
+                workflow_json["121"]["inputs"]["value"] = ref_images.get('comp2_weight', 1.0)  # COMP2W
+                workflow_json["120"]["inputs"]["value"] = ref_images.get('comp3_weight', 1.0)  # COMP3W
+                workflow_json["119"]["inputs"]["value"] = ref_images.get('comp4_weight', 1.0)  # COMP4W
+                workflow_json["118"]["inputs"]["value"] = ref_images.get('comp5_weight', 1.0)  # COMP5W
+                
+                # Strong Style Transfer (SST) - Individual Weights
+                workflow_json["117"]["inputs"]["value"] = ref_images.get('sst1_weight', 1.0)  # SST1W
+                workflow_json["116"]["inputs"]["value"] = ref_images.get('sst2_weight', 1.0)  # SST2W
+                workflow_json["115"]["inputs"]["value"] = ref_images.get('sst3_weight', 1.0)  # SST3W
+                workflow_json["114"]["inputs"]["value"] = ref_images.get('sst4_weight', 1.0)  # SST4W
+                workflow_json["113"]["inputs"]["value"] = ref_images.get('sst5_weight', 1.0)  # SST5W
+                
+                # Reference Image Paths (LoadImage nodes)
+                # Style Transfer images
+                workflow_json["65"]["inputs"]["image"] = uploaded_ref_images.get('st1_path', 'blank.png')  # ST1
+                workflow_json["63"]["inputs"]["image"] = uploaded_ref_images.get('st2_path', 'blank.png')  # ST2
+                workflow_json["64"]["inputs"]["image"] = uploaded_ref_images.get('st3_path', 'blank.png')  # ST3
+                workflow_json["94"]["inputs"]["image"] = uploaded_ref_images.get('st4_path', 'blank.png')  # ST4
+                workflow_json["97"]["inputs"]["image"] = uploaded_ref_images.get('st5_path', 'blank.png')  # ST5
+                
+                # Composition images
+                workflow_json["78"]["inputs"]["image"] = uploaded_ref_images.get('comp1_path', 'blank.png')  # COMP1
+                workflow_json["77"]["inputs"]["image"] = uploaded_ref_images.get('comp2_path', 'blank.png')  # COMP2
+                workflow_json["76"]["inputs"]["image"] = uploaded_ref_images.get('comp3_path', 'blank.png')  # COMP3
+                workflow_json["100"]["inputs"]["image"] = uploaded_ref_images.get('comp4_path', 'blank.png')  # COMP4
+                workflow_json["103"]["inputs"]["image"] = uploaded_ref_images.get('comp5_path', 'blank.png')  # COMP5
+                
+                # Strong Style Transfer images
+                workflow_json["89"]["inputs"]["image"] = uploaded_ref_images.get('sst1_path', 'blank.png')  # SST1
+                workflow_json["88"]["inputs"]["image"] = uploaded_ref_images.get('sst2_path', 'blank.png')  # SST2
+                workflow_json["87"]["inputs"]["image"] = uploaded_ref_images.get('sst3_path', 'blank.png')  # SST3
+                workflow_json["106"]["inputs"]["image"] = uploaded_ref_images.get('sst4_path', 'blank.png')  # SST4
+                workflow_json["109"]["inputs"]["image"] = uploaded_ref_images.get('sst5_path', 'blank.png')  # SST5
+                
+                print(f"[GCS]   - IPAdapter: ST={ref_images.get('style_transfer_strength', 0.0):.2f}, Comp={ref_images.get('composition_strength', 1.0):.2f}, Force={ref_images.get('force_transfer_strength', 0.0):.2f}")
             
             print(f"[GCS] ✓ Workflow patched successfully")
             print(f"[GCS]   - Resolution: {resolution.get('width', 1024)}x{resolution.get('height', 1024)}")
             print(f"[GCS]   - Steps: {session_data.get('steps', 15)}")
             print(f"[GCS]   - ControlNet: Canny={session_data.get('silhouette_influence', 1.0):.2f}, Depth={session_data.get('depth_influence', 1.0):.2f}")
             print(f"[GCS]   - Influence: {influence_value:.2f} (1.0=keep render, 0.0=full AI) → denoise={denoise_value:.2f}")
-            print(f"[GCS]   - Global Strengths (scaled 1.5x): ST={ref_images.get('style_transfer_strength', 0.0):.2f}, Comp={ref_images.get('composition_strength', 1.0):.2f}, Force={ref_images.get('force_transfer_strength', 0.0):.2f}")
             
             # Time the submission operation
             submit_start = time.time()
@@ -3079,6 +3082,11 @@ def build_runcomfy_overrides(context, session_data, combined_b64, workflow_type)
             print(f"[Style Engine] 📝 POSITIVE PROMPT: {positive_prompt}")
             print(f"[Style Engine] 🚫 NEGATIVE PROMPT (default): {negative_prompt}")
         
+        # Viewport influence: UI is 0-1, scale to 0-0.7 for workflow, then flip for denoise
+        influence_value = session_data.get('texture_influence', 1.0)
+        scaled_influence = influence_value * 0.7  # Scale to 0-0.7
+        denoise_value = 1.0 - scaled_influence  # Flip: 0=keep render, 1=full AI
+        
         overrides = {
             "5": {"inputs": {"width": width, "height": height}},  # EmptyLatentImage
             "25": {"inputs": {"value": positive_prompt}},  # Positive Prompt (Node 25)
@@ -3087,6 +3095,7 @@ def build_runcomfy_overrides(context, session_data, combined_b64, workflow_type)
             "40": {"inputs": {"value": session_data.get('silhouette_influence', 0.75)}},  # Canny
             "41": {"inputs": {"value": session_data.get('depth_influence', 0.5)}},  # Depth
             "42": {"inputs": {"value": session_data.get('steps', 15)}},  # Steps
+            "135": {"inputs": {"value": denoise_value}},  # Viewport influence (denoise)
             # Global strengths
             "52": {"inputs": {"value": ref_data.get('style_transfer_strength', 0.0)}},
             "90": {"inputs": {"value": ref_data.get('composition_strength', 1.0)}},
@@ -3282,14 +3291,23 @@ def load_workflow_json_for_server(workflow_type):
         return None
 
 
-def load_workflow_json_for_gcs():
+def load_workflow_json_for_gcs(use_ref_images=False):
     """
     Load workflow JSON file for GCS mode (self-hosted ComfyUI).
-    Uses StyleEngineTexture.json from the addon's workflows/ directory.
-    This workflow includes:
+    
+    Selects the appropriate workflow based on whether reference images are used:
+    - Image/Image.json: Basic workflow (faster, no IPAdapter reference image nodes)
+    - Image/ImageRef.json: Full workflow with IPAdapter reference image support
+    
+    Both workflows include:
     - SaveImage nodes for Canny (133) and Depth (134) preview images
     - VAEEncode (132) for img2img workflow
     - Texture control (135) for denoise strength (0=keep render, 1=full AI)
+    - Dual LoRa support (Node 136 → Node 34 chain)
+    
+    Args:
+        use_ref_images: If True, load ImageRef.json (with IPAdapter). 
+                        If False, load Image.json (basic, faster).
     
     Returns:
         dict: Workflow JSON or None if failed
@@ -3299,19 +3317,24 @@ def load_workflow_json_for_gcs():
     
     # Determine workflow file path - workflows folder is inside the addon directory
     addon_dir = Path(__file__).parent  # This is scripts/addons/styleengine/
-    workflows_dir = addon_dir / "workflows"
+    workflows_dir = addon_dir / "workflows" / "Image"
     
-    # Use StyleEngineTexture.json for GCS mode (img2img with texture control)
-    workflow_file = workflows_dir / "StyleEngineTexture.json"
+    # Select workflow based on reference image usage
+    if use_ref_images:
+        workflow_file = workflows_dir / "ImageRef.json"
+        workflow_desc = "ImageRef.json (with IPAdapter reference images)"
+    else:
+        workflow_file = workflows_dir / "Image.json"
+        workflow_desc = "Image.json (basic, faster)"
     
     try:
         with open(workflow_file, 'r') as f:
             workflow_json = json.load(f)
-        print(f"[GCS] ✓ Loaded workflow: {workflow_file.name} from {workflows_dir}")
+        print(f"[GCS] ✓ Loaded workflow: {workflow_desc}")
         return workflow_json
     except Exception as e:
         print(f"[GCS] ❌ Failed to load workflow {workflow_file}: {e}")
-        print(f"[GCS] Make sure StyleEngineTexture.json exists at: {workflow_file}")
+        print(f"[GCS] Make sure {workflow_file.name} exists at: {workflow_file}")
         return None
 
 
@@ -3356,10 +3379,11 @@ def on_generation_complete_server(context, success, result, error, workflow_type
         if download_previews:
             print(f"[GCS] Preview images enabled - downloading all images")
         
-        # Download each image
-        # Note: Node IDs changed in StyleEngineTexture.json (133=canny, 134=depth)
+        # Build list of downloads to perform
+        # Note: Node IDs in Image.json/ImageRef.json (133=canny, 134=depth)
         # but filename_prefix values remain the same, so detection still works
-        main_image_downloaded = False
+        downloads_to_perform = []
+        
         for img_info in images:
             filename = img_info['filename']
             subfolder = img_info.get('subfolder', '')
@@ -3370,29 +3394,66 @@ def on_generation_complete_server(context, success, result, error, workflow_type
                 if not download_previews:
                     continue  # Skip preview images if disabled
                 save_name = 'canny.png'
-                print(f"[GCS] Downloading Canny edge map: {filename}")
             elif filename.startswith('depth'):
                 if not download_previews:
                     continue  # Skip preview images if disabled
                 save_name = 'depth.png'
-                print(f"[GCS] Downloading Depth map: {filename}")
             elif filename.startswith('StyleEngine'):
                 save_name = 'current_ai.png'
-                print(f"[GCS] Downloading final image: {filename}")
             else:
                 # Unknown image, skip
                 print(f"[GCS] Skipping unknown image: {filename}")
                 continue
             
-            save_path = temp_dir / save_name
+            downloads_to_perform.append({
+                'filename': filename,
+                'save_name': save_name,
+                'save_path': str(temp_dir / save_name),
+                'subfolder': subfolder,
+                'image_type': image_type
+            })
+        
+        # Download images in parallel using ThreadPoolExecutor
+        import time
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        
+        def download_single_image(task):
+            """Download a single image and return result."""
+            start = time.time()
+            success = server_client.download_image(
+                task['filename'], 
+                task['save_path'], 
+                task['subfolder'], 
+                task['image_type']
+            )
+            duration = time.time() - start
+            return {
+                'save_name': task['save_name'],
+                'success': success,
+                'duration': duration
+            }
+        
+        main_image_downloaded = False
+        
+        if downloads_to_perform:
+            download_start = time.time()
+            print(f"[GCS] Starting parallel download of {len(downloads_to_perform)} images...")
             
-            # Download image from server
-            if server_client.download_image(filename, str(save_path), subfolder, image_type):
-                print(f"[GCS] ✅ Saved: {save_name}")
-                if save_name == 'current_ai.png':
-                    main_image_downloaded = True
-            else:
-                print(f"[GCS] ❌ Failed to download: {save_name}")
+            # Use ThreadPoolExecutor for parallel downloads
+            with ThreadPoolExecutor(max_workers=min(len(downloads_to_perform), 4)) as executor:
+                futures = {executor.submit(download_single_image, task): task for task in downloads_to_perform}
+                
+                for future in as_completed(futures):
+                    result = future.result()
+                    if result['success']:
+                        print(f"[GCS] ✅ {result['save_name']} ({result['duration']:.3f}s)")
+                        if result['save_name'] == 'current_ai.png':
+                            main_image_downloaded = True
+                    else:
+                        print(f"[GCS] ❌ Failed: {result['save_name']}")
+            
+            total_duration = time.time() - download_start
+            print(f"[GCS] ⏱️ All downloads completed in {total_duration:.3f}s (parallel)")
         
         # Update camera background if main image was downloaded
         if main_image_downloaded:

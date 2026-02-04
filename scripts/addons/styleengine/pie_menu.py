@@ -166,7 +166,7 @@ class WM_OT_UVTexture(Operator):
             # Step 4: Load and configure workflow
             print(f"[UV Texture] Step 4: Loading workflow...")
             addon_dir = Path(__file__).parent
-            workflow_path = addon_dir / "workflows" / "objectUVTexture.json"
+            workflow_path = addon_dir / "workflows" / "Object" / "objectUVTexture.json"
             
             if not workflow_path.exists():
                 self.report({'ERROR'}, f"Workflow not found: {workflow_path.name}")
@@ -395,7 +395,7 @@ class WM_OT_CreateObject(Operator):
             # Step 3: Load workflow
             print(f"[Create Object] Step 3: Loading workflow...")
             addon_dir = Path(__file__).parent
-            workflow_path = addon_dir / "workflows" / "objectCreateObject.json"
+            workflow_path = addon_dir / "workflows" / "Object" / "objectCreateObject.json"
             
             if not workflow_path.exists():
                 self.report({'ERROR'}, f"Workflow not found: {workflow_path.name}")
@@ -605,7 +605,7 @@ class WM_OT_CreateTexturedObject(Operator):
             # Step 3: Load workflow
             print(f"[Create Textured] Step 3: Loading workflow...")
             addon_dir = Path(__file__).parent
-            workflow_path = addon_dir / "workflows" / "objectCreateTexturedObject.json"
+            workflow_path = addon_dir / "workflows" / "Object" / "objectCreateTexturedObject.json"
             
             if not workflow_path.exists():
                 self.report({'ERROR'}, f"Workflow not found: {workflow_path.name}")
@@ -1326,8 +1326,9 @@ class STYLEENGINE_MT_pie_main(Menu):
                              prefs.preferences.gcs_download_preview_images)
         
         if show_visualization:
-            # Show Visualization Type switcher
+            # Show Visualization Type switcher (compact width to match Generate Image)
             box = pie.box()
+            box.ui_units_x = 10  # Constrain width
             col = box.column(align=True)
             col.scale_y = 1.1
             
@@ -1336,7 +1337,7 @@ class STYLEENGINE_MT_pie_main(Menu):
             row.label(text="Visualization", icon='VIEW_CAMERA')
             col.separator()
             
-            # Visualization type buttons
+            # Visualization type buttons (icon-only for compact width)
             row = col.row(align=True)
             row.scale_y = 1.5
             
@@ -1349,14 +1350,14 @@ class STYLEENGINE_MT_pie_main(Menu):
             
             # Silhouette button
             op = row.operator("style_engine.set_visualization", 
-                             text="Silhouette", 
+                             text="", 
                              icon='MESH_PLANE',
                              depress=(style_props.visualization_type == 'CANNY'))
             op.viz_type = 'CANNY'
             
             # Depth button
             op = row.operator("style_engine.set_visualization", 
-                             text="Depth", 
+                             text="", 
                              icon='EMPTY_SINGLE_ARROW',
                              depress=(style_props.visualization_type == 'DEPTH'))
             op.viz_type = 'DEPTH'

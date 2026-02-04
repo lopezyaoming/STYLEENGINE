@@ -1,7 +1,7 @@
 {
   "3": {
     "inputs": {
-      "seed": 978489144455746,
+      "seed": 593901877915625,
       "steps": [
         "42",
         0
@@ -130,7 +130,7 @@
         0
       ],
       "image": [
-        "39",
+        "138",
         0
       ],
       "vae": [
@@ -145,7 +145,7 @@
   },
   "15": {
     "inputs": {
-      "image": "Screenshot 2025-11-20 at 8.02.15 AM (1).png"
+      "image": "combined0006.png"
     },
     "class_type": "LoadImage",
     "_meta": {
@@ -223,20 +223,6 @@
       "title": "Load ControlNet Model"
     }
   },
-  "39": {
-    "inputs": {
-      "ckpt_name": "depth_anything_vitl14.pth",
-      "resolution": 512,
-      "image": [
-        "15",
-        0
-      ]
-    },
-    "class_type": "DepthAnythingPreprocessor",
-    "_meta": {
-      "title": "Depth Anything"
-    }
-  },
   "40": {
     "inputs": {
       "value": 1
@@ -257,7 +243,7 @@
   },
   "42": {
     "inputs": {
-      "value": 20
+      "value": 25
     },
     "class_type": "PrimitiveInt",
     "_meta": {
@@ -485,7 +471,7 @@
   },
   "63": {
     "inputs": {
-      "image": "blank.png"
+      "image": "combined0004.png"
     },
     "class_type": "LoadImage",
     "_meta": {
@@ -503,7 +489,7 @@
   },
   "65": {
     "inputs": {
-      "image": "Screenshot 2025-11-20 at 8.02.15 AM (1).png"
+      "image": "blank.png"
     },
     "class_type": "LoadImage",
     "_meta": {
@@ -1394,7 +1380,7 @@
     "inputs": {
       "filename_prefix": "depth",
       "images": [
-        "39",
+        "138",
         0
       ]
     },
@@ -1405,7 +1391,7 @@
   },
   "135": {
     "inputs": {
-      "value": 0
+      "value": 1
     },
     "class_type": "easy float",
     "_meta": {
@@ -1443,6 +1429,20 @@
     "class_type": "LineArtPreprocessor",
     "_meta": {
       "title": "Realistic Lineart"
+    }
+  },
+  "138": {
+    "inputs": {
+      "ckpt_name": "depth_anything_v2_vitl.pth",
+      "resolution": 512,
+      "image": [
+        "15",
+        0
+      ]
+    },
+    "class_type": "DepthAnythingV2Preprocessor",
+    "_meta": {
+      "title": "Depth Anything V2 - Relative"
     }
   }
 }

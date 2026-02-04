@@ -208,6 +208,12 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         default=False
     )
     
+    show_visualization: bpy.props.BoolProperty(
+        name="Show Visualization",
+        description="Expand or collapse the Visualization section",
+        default=False
+    )
+    
     show_text_generation: bpy.props.BoolProperty(
         name="Show Text Generation",
         description="Expand or collapse the Text Generation section",
@@ -298,7 +304,7 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         description="Controls how much of the render to keep in img2img workflow (GCS mode). 1.0 = keep 100% of render, 0.0 = full AI generation ignoring render",
         default=0.0,
         min=0.0,
-        max=0.7,
+        max=1.0,  # UI shows 0-1, internally scaled to 0-0.7 when sent
         update=update_session_json
     )
     
@@ -1945,7 +1951,7 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
         
         # Row 2: Progress bar using Unicode block characters (pure display, no property)
         row = status_box.row(align=True)
-        bar_length = 20
+        bar_length = 15  # Reduced from 20 to fit panel width
         filled = int(bar_length * progress)
         empty = bar_length - filled
         bar_text = "▓" * filled + "░" * empty
@@ -2076,6 +2082,102 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                     col.label(text="No generations yet", icon='INFO')
 
         # ================================================================
+        # VISUALIZATION CATEGORY (Collapsible)
+        # ================================================================
+        layout.separator()
+        vis_box = layout.box()
+        vis_header = vis_box.row(align=True)
+        vis_icon = 'TRIA_DOWN' if style_props.show_visualization else 'TRIA_RIGHT'
+        vis_header.prop(style_props, "show_visualization", text="Visualization", icon=vis_icon, emboss=False, toggle=True)
+        vis_header.label(text="", icon='VIEW_CAMERA')
+        
+        if style_props.show_visualization:
+            # Check if preview images are enabled
+            prefs = context.preferences.addons.get('styleengine')
+            show_viz_controls = (prefs and 
+                                prefs.preferences.api_backend == 'GCS' and 
+                                prefs.preferences.gcs_download_preview_images)
+            
+            if show_viz_controls:
+                # Visualization type buttons
+                col = vis_box.column(align=True)
+                col.label(text="Display Mode:")
+                row = col.row(align=True)
+                row.scale_y = 1.3
+                
+                # Combined button
+                op = row.operator("style_engine.set_visualization", 
+                                 text="Combined", 
+                                 icon='IMAGE_DATA',
+                                 depress=(style_props.visualization_type == 'COMBINED'))
+                op.viz_type = 'COMBINED'
+                
+                # Silhouette button
+                op = row.operator("style_engine.set_visualization", 
+                                 text="Silhouette", 
+                                 icon='MESH_PLANE',
+                                 depress=(style_props.visualization_type == 'CANNY'))
+                op.viz_type = 'CANNY'
+                
+                # Depth button
+                op = row.operator("style_engine.set_visualization", 
+                                 text="Depth", 
+                                 icon='EMPTY_SINGLE_ARROW',
+                                 depress=(style_props.visualization_type == 'DEPTH'))
+                op.viz_type = 'DEPTH'
+                
+                # Current visualization
+                vis_box.separator()
+                col = vis_box.column(align=True)
+                col.label(text=f"Current: {style_props.visualization_type.title()}", icon='INFO')
+                
+                # Background opacity
+                vis_box.separator()
+                col = vis_box.column(align=True)
+                col.label(text="Background Opacity")
+                col.prop(style_props, "background_opacity", text="", slider=True)
+                
+                # Generation Browser
+                vis_box.separator()
+                col = vis_box.column(align=True)
+                col.label(text="Generation Browser", icon='RENDERLAYERS')
+                
+                # Get generation info
+                from . import workspace_setup
+                generations = workspace_setup.get_generation_list(context)
+                
+                if generations:
+                    # Navigation buttons
+                    row = col.row(align=True)
+                    row.scale_y = 1.2
+                    
+                    # Check current position
+                    current_gen = getattr(context.scene, 'styleengine_current_generation', len(generations) - 1)
+                    at_oldest = current_gen <= 0
+                    at_latest = current_gen >= len(generations) - 1
+                    
+                    # Prev button
+                    prev_row = row.row(align=True)
+                    prev_row.enabled = not at_oldest
+                    prev_row.operator("style_engine.prev_generation", text="", icon='TRIA_LEFT')
+                    
+                    # Current position label
+                    row.label(text=f"{current_gen + 1} / {len(generations)}")
+                    
+                    # Next button
+                    next_row = row.row(align=True)
+                    next_row.enabled = not at_latest
+                    next_row.operator("style_engine.next_generation", text="", icon='TRIA_RIGHT')
+                else:
+                    col.label(text="No generations yet", icon='INFO')
+            else:
+                # Show info about enabling preview images
+                col = vis_box.column(align=True)
+                col.label(text="Enable 'Download Preview", icon='INFO')
+                col.label(text="Images' in GCS settings")
+                col.label(text="to use this feature")
+
+        # ================================================================
         # TEXT GENERATION CATEGORY (Collapsible)
         # ================================================================
         layout.separator()
@@ -2086,10 +2188,19 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
         text_header.label(text="", icon='TEXT')
         
         if style_props.show_text_generation:
+            # Refine Prompt - main action (largest button)
+            row = text_box.row()
+            row.scale_y = 2.0
+            row.operator("style_engine.refine_prompt", text="Refine Prompt", icon='SORTALPHA')
+            
+            text_box.separator()
+            
+            # Other text generation actions (smaller buttons)
             col = text_box.column(align=True)
             col.scale_y = 1.2
-            col.operator("style_engine.refine_prompt", text="Refine Prompt", icon='SORTALPHA')
-            col.operator("style_engine.generate_image_description", text="Generate Image Description", icon='FILE_TEXT')
+            col.operator("style_engine.generate_image_description", text="Describe Current Image", icon='FILE_TEXT')
+            col.operator("style_engine.generate_image_description_from_file", text="Describe Image from File", icon='FILEBROWSER')
+            col.operator("style_engine.generate_image_description_from_viewport", text="Describe Viewport", icon='VIEW_CAMERA')
             
             # Prompt Browser
             text_box.separator()
@@ -2373,6 +2484,15 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
         img_gen_header.label(text="", icon='IMAGE_DATA')
         
         if style_props.show_image_generation_main:
+            # Generate Image button (main action)
+            row = img_gen_box.row()
+            row.scale_y = 2.0
+            row.operator("style_engine.generate_ai_quick", 
+                         text="Generate Image", 
+                         icon='IMAGE_DATA')
+            
+            img_gen_box.separator()
+            
             # ────────────────────────────────────────────────────────────
             # INFLUENCE SUB-CATEGORY (Collapsible)
             # ────────────────────────────────────────────────────────────
@@ -2788,12 +2908,12 @@ class WM_OT_RefinePrompt(bpy.types.Operator):
             return {'CANCELLED'}
         
         try:
-            # 4. Load PromptRefiner.json workflow
+            # 4. Load TextRefine.json workflow
             addon_dir = Path(__file__).parent
-            workflow_file = addon_dir / "workflows" / "PromptRefiner.json"
+            workflow_file = addon_dir / "workflows" / "Text" / "TextRefine.json"
             
             if not workflow_file.exists():
-                self.report({'ERROR'}, "PromptRefiner.json not found")
+                self.report({'ERROR'}, "TextRefine.json not found")
                 print(f"[Refine Prompt] ❌ Workflow not found: {workflow_file}")
                 return {'CANCELLED'}
             
@@ -3018,12 +3138,12 @@ class WM_OT_GenerateImageDescription(bpy.types.Operator):
         workspace_setup.save_prompt_snapshot(context, prefix="before_vision")
         
         try:
-            # 3. Load ImageAgent.json workflow
+            # 3. Load TextImage.json workflow (vision-based image description)
             addon_dir = Path(__file__).parent
-            workflow_file = addon_dir / "workflows" / "ImageAgent.json"
+            workflow_file = addon_dir / "workflows" / "Text" / "TextImage.json"
             
             if not workflow_file.exists():
-                self.report({'ERROR'}, "ImageAgent.json not found")
+                self.report({'ERROR'}, "TextImage.json not found")
                 print(f"[Image Description] ❌ Workflow not found: {workflow_file}")
                 return {'CANCELLED'}
             
@@ -3204,6 +3324,511 @@ class WM_OT_GenerateImageDescription(bpy.types.Operator):
             return {'CANCELLED'}
 
 
+class WM_OT_GenerateImageDescriptionFromFile(bpy.types.Operator):
+    """Generate description from any image file using machine vision"""
+    bl_idname = "style_engine.generate_image_description_from_file"
+    bl_label = "Describe Image from File"
+    bl_description = "Open file browser to select an image, then generate AI description and add to <v> tag"
+    bl_options = {'REGISTER'}
+    
+    # File browser properties
+    filepath: bpy.props.StringProperty(
+        subtype='FILE_PATH',
+        options={'HIDDEN', 'SKIP_SAVE'}
+    )
+    
+    filter_glob: bpy.props.StringProperty(
+        default="*.jpg;*.jpeg;*.png",
+        options={'HIDDEN'}
+    )
+    
+    def invoke(self, context, event):
+        # Open file browser
+        context.window_manager.fileselect_add(self)
+        return {'RUNNING_MODAL'}
+    
+    def execute(self, context):
+        import re
+        import json
+        from pathlib import Path
+        from . import runcomfy_deployment
+        from . import workspace_setup
+        
+        # Validate filepath
+        if not self.filepath:
+            self.report({'ERROR'}, "No file selected")
+            return {'CANCELLED'}
+        
+        image_path = Path(self.filepath)
+        if not image_path.exists():
+            self.report({'ERROR'}, f"File not found: {image_path}")
+            return {'CANCELLED'}
+        
+        # Check file extension
+        valid_extensions = {'.jpg', '.jpeg', '.png'}
+        if image_path.suffix.lower() not in valid_extensions:
+            self.report({'ERROR'}, f"Invalid file type. Use: {', '.join(valid_extensions)}")
+            return {'CANCELLED'}
+        
+        # 1. Check if in Server mode (GCS)
+        if not runcomfy_deployment.is_server_mode():
+            self.report({'ERROR'}, "Image description only works in Server mode (GCS)")
+            print("[Image Description] ❌ Not in Server mode - feature requires direct ComfyUI connection")
+            return {'CANCELLED'}
+        
+        print(f"[Image Description from File] Using image: {image_path}")
+        
+        # Save "before" snapshot
+        workspace_setup.save_prompt_snapshot(context, prefix="before_vision_file")
+        
+        try:
+            # 2. Load TextImage.json workflow
+            addon_dir = Path(__file__).parent
+            workflow_file = addon_dir / "workflows" / "Text" / "TextImage.json"
+            
+            if not workflow_file.exists():
+                self.report({'ERROR'}, "TextImage.json not found")
+                print(f"[Image Description from File] ❌ Workflow not found: {workflow_file}")
+                return {'CANCELLED'}
+            
+            with open(workflow_file, 'r') as f:
+                workflow = json.load(f)
+            
+            print(f"[Image Description from File] ✓ Loaded workflow: {workflow_file.name}")
+            
+            # 3. Upload image to ComfyUI server
+            server_client = runcomfy_deployment.get_server_client()
+            
+            print(f"[Image Description from File] Uploading image to ComfyUI server...")
+            upload_response = server_client.upload_image(str(image_path), overwrite=True)
+            uploaded_filename = upload_response.get("name", "")
+            
+            if not uploaded_filename:
+                self.report({'ERROR'}, "Failed to upload image to server")
+                print(f"[Image Description from File] ❌ Upload failed: {upload_response}")
+                return {'CANCELLED'}
+            
+            print(f"[Image Description from File] ✓ Uploaded image: {uploaded_filename}")
+            
+            # 4. Patch node 23 (LoadImage) with the uploaded filename
+            if "23" not in workflow:
+                self.report({'ERROR'}, "Invalid workflow structure (node 23 missing)")
+                print("[Image Description from File] ❌ Node 23 not found in workflow")
+                return {'CANCELLED'}
+            
+            workflow["23"]["inputs"]["image"] = uploaded_filename
+            print(f"[Image Description from File] ✓ Patched node 23 with image: {uploaded_filename}")
+            
+            # 5. Submit to ComfyUI server
+            print(f"[Image Description from File] Submitting to ComfyUI server...")
+            response = server_client.queue_prompt(workflow)
+            prompt_id = response['prompt_id']
+            print(f"[Image Description from File] ✓ Queued image description (ID: {prompt_id[:8]}...)")
+            
+            # 6. Poll for result (blocking)
+            import time
+            max_wait = 120
+            poll_interval = 2
+            elapsed = 0
+            
+            self.report({'INFO'}, "Generating image description... (this may take a moment)")
+            
+            while elapsed < max_wait:
+                history = server_client.get_history(prompt_id)
+                
+                if history and prompt_id in history:
+                    execution = history[prompt_id]
+                    status = execution.get('status', {})
+                    
+                    if status.get('completed', False):
+                        outputs = execution.get('outputs', {})
+                        description_text = None
+                        
+                        # Try node 19 (Griptape Display: Text)
+                        if "19" in outputs:
+                            node_19_output = outputs["19"]
+                            if isinstance(node_19_output, dict):
+                                for key in ["string", "text", "STRING", "INPUT"]:
+                                    if key in node_19_output:
+                                        val = node_19_output[key]
+                                        if isinstance(val, list) and len(val) > 0:
+                                            if all(isinstance(c, str) and len(c) <= 1 for c in val[:10]):
+                                                description_text = ''.join(val)
+                                            else:
+                                                description_text = val[0]
+                                        elif isinstance(val, str):
+                                            description_text = val
+                                        if description_text:
+                                            break
+                                if not description_text:
+                                    for key, value in node_19_output.items():
+                                        if isinstance(value, str) and len(value) > 10:
+                                            description_text = value
+                                            break
+                                        elif isinstance(value, list) and len(value) > 0:
+                                            if all(isinstance(c, str) and len(c) <= 1 for c in value[:10]):
+                                                description_text = ''.join(value)
+                                                break
+                                            elif isinstance(value[0], str):
+                                                description_text = value[0]
+                                                break
+                            elif isinstance(node_19_output, list) and len(node_19_output) > 0:
+                                description_text = node_19_output[0]
+                            elif isinstance(node_19_output, str):
+                                description_text = node_19_output
+                        
+                        # Also try node 20
+                        if not description_text and "20" in outputs:
+                            node_20_output = outputs["20"]
+                            if isinstance(node_20_output, dict) and "string" in node_20_output:
+                                description_text = node_20_output["string"][0] if isinstance(node_20_output["string"], list) else node_20_output["string"]
+                            elif isinstance(node_20_output, str):
+                                description_text = node_20_output
+                        
+                        if not description_text:
+                            self.report({'ERROR'}, "Could not extract description from workflow output")
+                            print(f"[Image Description from File] ❌ No text output found")
+                            return {'CANCELLED'}
+                        
+                        description_text = description_text.strip()
+                        print(f"[Image Description from File] ✓ Generated: {description_text[:100]}...")
+                        
+                        # 7. APPEND to <v> tag in text editor (not replace!)
+                        text_block = bpy.data.texts.get("STYLEENGINE_Prompt")
+                        if not text_block:
+                            self.report({'ERROR'}, "STYLEENGINE_Prompt text block not found")
+                            return {'CANCELLED'}
+                        
+                        current_content = text_block.as_string()
+                        
+                        # Check if <v> tag exists
+                        v_match = re.search(r'<v>(.*?)</v>', current_content, re.DOTALL | re.IGNORECASE)
+                        if v_match:
+                            existing_v = v_match.group(1).strip()
+                            if existing_v:
+                                # Append to existing content with separator
+                                new_v_content = existing_v + ". " + description_text
+                            else:
+                                new_v_content = description_text
+                            new_content = re.sub(
+                                r'(<v>)(.*?)(</v>)',
+                                r'\1' + new_v_content + r'\3',
+                                current_content,
+                                flags=re.DOTALL | re.IGNORECASE
+                            )
+                        else:
+                            # Add <v> section at the end
+                            new_content = current_content.rstrip() + "\n# Machine Vision\n<v>" + description_text + "</v>\n"
+                        
+                        # Update text block
+                        text_block.clear()
+                        text_block.write(new_content)
+                        
+                        # Save "after" snapshot
+                        workspace_setup.save_prompt_snapshot(context, prefix="after_vision_file")
+                        
+                        print(f"[Image Description from File] ✓ Appended to <v> tag in text editor")
+                        self.report({'INFO'}, f"Description added from: {image_path.name}")
+                        return {'FINISHED'}
+                    
+                    if 'error' in status or status.get('status_str') == 'error':
+                        error_msg = status.get('error', 'Unknown error')
+                        self.report({'ERROR'}, f"Description generation failed: {error_msg}")
+                        return {'CANCELLED'}
+                
+                time.sleep(poll_interval)
+                elapsed += poll_interval
+                
+                if elapsed % 10 == 0:
+                    print(f"[Image Description from File] Still waiting... ({elapsed}s elapsed)")
+            
+            self.report({'ERROR'}, "Image description timed out after 120 seconds")
+            return {'CANCELLED'}
+            
+        except Exception as e:
+            self.report({'ERROR'}, f"Image description failed: {str(e)}")
+            print(f"[Image Description from File] ❌ Exception: {e}")
+            import traceback
+            traceback.print_exc()
+            return {'CANCELLED'}
+
+
+class WM_OT_GenerateImageDescriptionFromViewport(bpy.types.Operator):
+    """Generate description from viewport camera view using machine vision"""
+    bl_idname = "style_engine.generate_image_description_from_viewport"
+    bl_label = "Describe Viewport"
+    bl_description = "Render viewport from active camera, then generate AI description and add to <v> tag"
+    bl_options = {'REGISTER'}
+    
+    def execute(self, context):
+        import re
+        import json
+        from pathlib import Path
+        from . import runcomfy_deployment
+        from . import workspace_setup
+        
+        # 1. Check if in Server mode (GCS)
+        if not runcomfy_deployment.is_server_mode():
+            self.report({'ERROR'}, "Image description only works in Server mode (GCS)")
+            print("[Viewport Description] ❌ Not in Server mode - feature requires direct ComfyUI connection")
+            return {'CANCELLED'}
+        
+        # 2. Get ai_camera
+        prefs = context.preferences.addons['styleengine'].preferences
+        camera_name = prefs.camera_name_override
+        
+        if camera_name not in bpy.data.objects:
+            self.report({'ERROR'}, f"{camera_name} not found - run 'Setup Workspace' first")
+            print(f"[Viewport Description] ❌ Camera not found: {camera_name}")
+            return {'CANCELLED'}
+        
+        ai_camera = bpy.data.objects[camera_name]
+        scene = context.scene
+        props = scene.style_engine_props
+        
+        print(f"[Viewport Description] Rendering viewport from {camera_name}...")
+        
+        # Save "before" snapshot
+        workspace_setup.save_prompt_snapshot(context, prefix="before_vision_viewport")
+        
+        try:
+            # 3. Render viewport screenshot with fast/detailed setting
+            temp_dir = workspace_setup.get_temp_directory(context)
+            viewport_image_path = temp_dir / "viewport_description.jpg"
+            
+            # Store original settings
+            original_engine = scene.render.engine
+            original_format = scene.render.image_settings.file_format
+            original_use_compositing = scene.render.use_compositing
+            original_resolution_x = scene.render.resolution_x
+            original_resolution_y = scene.render.resolution_y
+            
+            try:
+                # Get render quality preference
+                render_quality = props.render_quality if hasattr(props, 'render_quality') else 'FAST'
+                
+                # Configure render engine
+                if render_quality == 'DETAILED':
+                    scene.render.engine = workspace_setup.get_eevee_engine_name()
+                    print(f"[Viewport Description] Using EEVEE (detailed quality)")
+                else:
+                    scene.render.engine = 'BLENDER_WORKBENCH'
+                    print(f"[Viewport Description] Using Workbench (fast preview)")
+                
+                # Set to 512px max dimension (maintain aspect ratio)
+                current_width = scene.render.resolution_x
+                current_height = scene.render.resolution_y
+                
+                if current_width >= current_height:
+                    # Landscape or square
+                    scale_factor = 512.0 / current_width
+                else:
+                    # Portrait
+                    scale_factor = 512.0 / current_height
+                
+                scene.render.resolution_x = int(current_width * scale_factor)
+                scene.render.resolution_y = int(current_height * scale_factor)
+                
+                print(f"[Viewport Description] Scaled resolution: {scene.render.resolution_x}x{scene.render.resolution_y} (max 512px)")
+                
+                # Configure output
+                scene.render.image_settings.file_format = 'JPEG'
+                scene.render.image_settings.color_mode = 'RGB'
+                scene.render.image_settings.quality = 85
+                scene.render.use_compositing = False
+                scene.render.filepath = str(viewport_image_path.with_suffix(''))
+                
+                # Render from ai_camera
+                print(f"[Viewport Description] Rendering viewport screenshot...")
+                workspace_setup.render_from_camera_safe(scene, ai_camera, prefs)
+                
+                # Verify output
+                if not viewport_image_path.exists():
+                    self.report({'ERROR'}, "Failed to render viewport screenshot")
+                    print(f"[Viewport Description] ❌ Render output not found: {viewport_image_path}")
+                    return {'CANCELLED'}
+                
+                print(f"[Viewport Description] ✓ Rendered: {viewport_image_path.name}")
+                
+            finally:
+                # Restore original settings
+                scene.render.engine = original_engine
+                scene.render.image_settings.file_format = original_format
+                scene.render.use_compositing = original_use_compositing
+                scene.render.resolution_x = original_resolution_x
+                scene.render.resolution_y = original_resolution_y
+            
+            # 4. Load TextViewport.json workflow
+            addon_dir = Path(__file__).parent
+            workflow_file = addon_dir / "workflows" / "Text" / "TextViewport.json"
+            
+            if not workflow_file.exists():
+                self.report({'ERROR'}, "TextViewport.json not found")
+                print(f"[Viewport Description] ❌ Workflow not found: {workflow_file}")
+                return {'CANCELLED'}
+            
+            with open(workflow_file, 'r') as f:
+                workflow = json.load(f)
+            
+            print(f"[Viewport Description] ✓ Loaded workflow: {workflow_file.name}")
+            
+            # 5. Upload image to ComfyUI server
+            server_client = runcomfy_deployment.get_server_client()
+            
+            print(f"[Viewport Description] Uploading viewport screenshot to ComfyUI server...")
+            upload_response = server_client.upload_image(str(viewport_image_path), overwrite=True)
+            uploaded_filename = upload_response.get("name", "")
+            
+            if not uploaded_filename:
+                self.report({'ERROR'}, "Failed to upload image to server")
+                print(f"[Viewport Description] ❌ Upload failed: {upload_response}")
+                return {'CANCELLED'}
+            
+            print(f"[Viewport Description] ✓ Uploaded: {uploaded_filename}")
+            
+            # 6. Patch node 23 (LoadImage) with the uploaded filename
+            if "23" not in workflow:
+                self.report({'ERROR'}, "Invalid workflow structure (node 23 missing)")
+                print("[Viewport Description] ❌ Node 23 not found in workflow")
+                return {'CANCELLED'}
+            
+            workflow["23"]["inputs"]["image"] = uploaded_filename
+            print(f"[Viewport Description] ✓ Patched node 23 with image")
+            
+            # 7. Submit to ComfyUI server
+            print(f"[Viewport Description] Submitting to ComfyUI server...")
+            response = server_client.queue_prompt(workflow)
+            prompt_id = response['prompt_id']
+            print(f"[Viewport Description] ✓ Queued (ID: {prompt_id[:8]}...)")
+            
+            # 8. Poll for result (blocking)
+            import time
+            max_wait = 120
+            poll_interval = 2
+            elapsed = 0
+            
+            self.report({'INFO'}, "Generating viewport description... (this may take a moment)")
+            
+            while elapsed < max_wait:
+                history = server_client.get_history(prompt_id)
+                
+                if history and prompt_id in history:
+                    execution = history[prompt_id]
+                    status = execution.get('status', {})
+                    
+                    if status.get('completed', False):
+                        outputs = execution.get('outputs', {})
+                        description_text = None
+                        
+                        # Try node 19 (Griptape Display: Text)
+                        if "19" in outputs:
+                            node_19_output = outputs["19"]
+                            if isinstance(node_19_output, dict):
+                                for key in ["string", "text", "STRING", "INPUT"]:
+                                    if key in node_19_output:
+                                        val = node_19_output[key]
+                                        if isinstance(val, list) and len(val) > 0:
+                                            if all(isinstance(c, str) and len(c) <= 1 for c in val[:10]):
+                                                description_text = ''.join(val)
+                                            else:
+                                                description_text = val[0]
+                                        elif isinstance(val, str):
+                                            description_text = val
+                                        if description_text:
+                                            break
+                                if not description_text:
+                                    for key, value in node_19_output.items():
+                                        if isinstance(value, str) and len(value) > 10:
+                                            description_text = value
+                                            break
+                                        elif isinstance(value, list) and len(value) > 0:
+                                            if all(isinstance(c, str) and len(c) <= 1 for c in value[:10]):
+                                                description_text = ''.join(value)
+                                                break
+                                            elif isinstance(value[0], str):
+                                                description_text = value[0]
+                                                break
+                            elif isinstance(node_19_output, list) and len(node_19_output) > 0:
+                                description_text = node_19_output[0]
+                            elif isinstance(node_19_output, str):
+                                description_text = node_19_output
+                        
+                        # Also try node 20
+                        if not description_text and "20" in outputs:
+                            node_20_output = outputs["20"]
+                            if isinstance(node_20_output, dict) and "string" in node_20_output:
+                                description_text = node_20_output["string"][0] if isinstance(node_20_output["string"], list) else node_20_output["string"]
+                            elif isinstance(node_20_output, str):
+                                description_text = node_20_output
+                        
+                        if not description_text:
+                            self.report({'ERROR'}, "Could not extract description from workflow output")
+                            print(f"[Viewport Description] ❌ No text output found")
+                            return {'CANCELLED'}
+                        
+                        description_text = description_text.strip()
+                        print(f"[Viewport Description] ✓ Generated: {description_text[:100]}...")
+                        
+                        # 9. APPEND to <v> tag in text editor (not replace!)
+                        text_block = bpy.data.texts.get("STYLEENGINE_Prompt")
+                        if not text_block:
+                            self.report({'ERROR'}, "STYLEENGINE_Prompt text block not found")
+                            return {'CANCELLED'}
+                        
+                        current_content = text_block.as_string()
+                        
+                        # Check if <v> tag exists
+                        v_match = re.search(r'<v>(.*?)</v>', current_content, re.DOTALL | re.IGNORECASE)
+                        if v_match:
+                            existing_v = v_match.group(1).strip()
+                            if existing_v:
+                                # Append to existing content with separator
+                                new_v_content = existing_v + ". " + description_text
+                            else:
+                                new_v_content = description_text
+                            new_content = re.sub(
+                                r'(<v>)(.*?)(</v>)',
+                                r'\1' + new_v_content + r'\3',
+                                current_content,
+                                flags=re.DOTALL | re.IGNORECASE
+                            )
+                        else:
+                            # Add <v> section at the end
+                            new_content = current_content.rstrip() + "\n# Machine Vision\n<v>" + description_text + "</v>\n"
+                        
+                        # Update text block
+                        text_block.clear()
+                        text_block.write(new_content)
+                        
+                        # Save "after" snapshot
+                        workspace_setup.save_prompt_snapshot(context, prefix="after_vision_viewport")
+                        
+                        print(f"[Viewport Description] ✓ Appended to <v> tag in text editor")
+                        self.report({'INFO'}, f"Viewport description added!")
+                        return {'FINISHED'}
+                    
+                    if 'error' in status or status.get('status_str') == 'error':
+                        error_msg = status.get('error', 'Unknown error')
+                        self.report({'ERROR'}, f"Description generation failed: {error_msg}")
+                        return {'CANCELLED'}
+                
+                time.sleep(poll_interval)
+                elapsed += poll_interval
+                
+                if elapsed % 10 == 0:
+                    print(f"[Viewport Description] Still waiting... ({elapsed}s elapsed)")
+            
+            self.report({'ERROR'}, "Viewport description timed out after 120 seconds")
+            return {'CANCELLED'}
+            
+        except Exception as e:
+            self.report({'ERROR'}, f"Viewport description failed: {str(e)}")
+            print(f"[Viewport Description] ❌ Exception: {e}")
+            import traceback
+            traceback.print_exc()
+            return {'CANCELLED'}
+
+
 class WM_OT_GenerateMeshMultiview(bpy.types.Operator):
     """Generate 3D mesh from multiple view images (Coming Soon)"""
     bl_idname = "style_engine.generate_mesh_multiview"
@@ -3252,6 +3877,8 @@ classes = (
     WM_OT_TestCloudGeneration,
     WM_OT_RefinePrompt,
     WM_OT_GenerateImageDescription,
+    WM_OT_GenerateImageDescriptionFromFile,
+    WM_OT_GenerateImageDescriptionFromViewport,
     WM_OT_GenerateMeshMultiview,
     WM_OT_GenerateTexturedMeshMultiview,
     VIEW3D_PT_StyleEngine,
