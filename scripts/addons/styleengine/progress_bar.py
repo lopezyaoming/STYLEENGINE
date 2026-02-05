@@ -40,6 +40,9 @@ class BridgePollerState:
     # Track if we saw progress > 0 (job was running)
     saw_progress = False
     
+    # Current workflow JSON for node name lookup
+    current_workflow = None
+    
     @classmethod
     def reset(cls):
         """Reset all state"""
@@ -52,6 +55,7 @@ class BridgePollerState:
         cls.display_status = "ready"
         cls.display_node = "Idle"
         cls.saw_progress = False
+        cls.current_workflow = None
 
 
 # ----------------------------------------------------------------
@@ -170,6 +174,38 @@ def _has_active_requests():
         return False
 
 
+def _get_friendly_node_name(raw_node_name):
+    """
+    Convert raw node name (e.g., "Node 6") to friendly name (e.g., "KSampler").
+    Looks up the node ID in the current workflow JSON to get the class_type.
+    
+    Args:
+        raw_node_name: String like "Node 6" or "Node 123"
+    
+    Returns:
+        str: Friendly node name (class_type) or original name if lookup fails
+    """
+    if not raw_node_name or not BridgePollerState.current_workflow:
+        return raw_node_name
+    
+    try:
+        # Extract node ID from "Node 6" format
+        if raw_node_name.startswith("Node "):
+            node_id = raw_node_name.split(" ")[1]
+            
+            # Look up node in workflow JSON
+            workflow = BridgePollerState.current_workflow
+            if node_id in workflow:
+                class_type = workflow[node_id].get("class_type", raw_node_name)
+                return class_type
+        
+        return raw_node_name
+        
+    except Exception as e:
+        # If anything fails, return original name
+        return raw_node_name
+
+
 def _poll_bridge_tick():
     """
     Timer callback - polls the bridge service.
@@ -243,7 +279,8 @@ def _poll_bridge_tick():
             if bridge_progress > 0:
                 # Job is actively running, show actual progress
                 display_progress = bridge_progress
-                display_node = node_name
+                # Convert raw node name to friendly name using workflow lookup
+                display_node = _get_friendly_node_name(node_name)
                 display_status = server_status
             elif BridgePollerState.saw_progress and has_active_requests:
                 # Bridge says 0% but we have active requests and saw progress
@@ -257,6 +294,7 @@ def _poll_bridge_tick():
                 display_node = "Idle"
                 display_status = "ready"
                 BridgePollerState.saw_progress = False  # Reset for next job
+                BridgePollerState.current_workflow = None  # Clear workflow on job complete
             
             # Update display state
             BridgePollerState.display_progress = display_progress
@@ -368,6 +406,18 @@ def get_display_status():
 def get_display_node():
     """Get the display node name"""
     return BridgePollerState.display_node
+
+
+def set_current_workflow(workflow_json):
+    """
+    Set the current workflow JSON for node name lookups.
+    Call this immediately after submitting a workflow to ComfyUI.
+    
+    Args:
+        workflow_json: Dict containing the workflow JSON (with node IDs as keys)
+    """
+    BridgePollerState.current_workflow = workflow_json
+    print(f"[Progress Bridge] Stored workflow with {len(workflow_json)} nodes for name lookup")
 
 
 # ----------------------------------------------------------------

@@ -227,6 +227,11 @@ class WM_OT_UVTexture(Operator):
             result = server_client.queue_prompt(workflow_json)
             prompt_id = result['prompt_id']
             print(f"[UV Texture] ✓ Queued: {prompt_id}")
+            
+            # Store workflow for progress bar node name lookup
+            from . import progress_bar
+            progress_bar.set_current_workflow(workflow_json)
+            
             print(f"[UV Texture] ⏳ Processing in background (1-2 minutes)...")
             print(f"[UV Texture] Watch console for completion message")
             
@@ -439,6 +444,11 @@ class WM_OT_CreateObject(Operator):
             result = server_client.queue_prompt(workflow_json)
             prompt_id = result['prompt_id']
             print(f"[Create Object] ✓ Queued: {prompt_id}")
+            
+            # Store workflow for progress bar node name lookup
+            from . import progress_bar
+            progress_bar.set_current_workflow(workflow_json)
+            
             print(f"[Create Object] ⏳ Processing in background (1-2 minutes)...")
             
             # Capture variables for callback
@@ -653,6 +663,11 @@ class WM_OT_CreateTexturedObject(Operator):
             result = server_client.queue_prompt(workflow_json)
             prompt_id = result['prompt_id']
             print(f"[Create Textured] ✓ Queued: {prompt_id}")
+            
+            # Store workflow for progress bar node name lookup
+            from . import progress_bar
+            progress_bar.set_current_workflow(workflow_json)
+            
             print(f"[Create Textured] ⏳ Processing (includes mesh + texture generation)...")
             
             # Capture variables

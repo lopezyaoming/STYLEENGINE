@@ -153,12 +153,12 @@ class ComfyUIServerClient:
         Raises:
             ServerAPIError: If queueing fails
         """
-        # Note: We intentionally omit client_id so ComfyUI broadcasts
-        # progress/executing messages to ALL connected WebSocket clients.
-        # This allows our progress bridge to receive real-time updates.
+        # Include client_id to match the bridge's WebSocket connection
+        # so it receives progress updates for this workflow
         
         payload = {
-            "prompt": workflow_json
+            "prompt": workflow_json,
+            "client_id": "transposer_bridge_v1"
         }
         
         response = self._request('POST', '/prompt', data=payload)

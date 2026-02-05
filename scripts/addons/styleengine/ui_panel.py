@@ -1979,12 +1979,16 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
             # RED: Offline/Disconnected
             row.label(text="", icon='KEYTYPE_EXTREME_VEC')
             row.label(text="Server: Offline")
-        elif progress > 0 or display_status in ("processing", "finishing"):
-            # YELLOW: Processing/Running/Downloading
+        elif display_status == "ready" and (progress == 0 or progress >= 1.0):
+            # GREEN: Online and Idle (explicitly ready, or finished at 100%)
+            row.label(text="", icon='KEYTYPE_JITTER_VEC')
+            row.label(text="Server: Ready")
+        elif display_status in ("processing", "finishing") or (0 < progress < 1.0):
+            # YELLOW: Actively processing (status says so, or progress is between 0-100%)
             row.label(text="", icon='KEYTYPE_KEYFRAME_VEC')
             row.label(text="Server: Working...")
         else:
-            # GREEN: Online and Idle
+            # GREEN: Default to ready for any other case
             row.label(text="", icon='KEYTYPE_JITTER_VEC')
             row.label(text="Server: Ready")
         
@@ -3043,6 +3047,10 @@ class WM_OT_RefinePrompt(bpy.types.Operator):
             prompt_id = response['prompt_id']
             print(f"[Refine Prompt] ✓ Queued prompt refinement (ID: {prompt_id[:8]}...)")
             
+            # Store workflow for progress bar node name lookup
+            from . import progress_bar
+            progress_bar.set_current_workflow(workflow)
+            
             # 7. Start NON-BLOCKING polling with callback
             from . import runcomfy_polling
             
@@ -3193,6 +3201,10 @@ class WM_OT_GenerateImageDescription(bpy.types.Operator):
             response = server_client.queue_prompt(workflow)
             prompt_id = response['prompt_id']
             print(f"[Image Description] ✓ Queued image description (ID: {prompt_id[:8]}...)")
+            
+            # Store workflow for progress bar node name lookup
+            from . import progress_bar
+            progress_bar.set_current_workflow(workflow)
             
             # 7. Start NON-BLOCKING polling with callback
             from . import runcomfy_polling
@@ -3374,6 +3386,10 @@ class WM_OT_GenerateImageDescriptionFromFile(bpy.types.Operator):
             response = server_client.queue_prompt(workflow)
             prompt_id = response['prompt_id']
             print(f"[Image Description from File] ✓ Queued image description (ID: {prompt_id[:8]}...)")
+            
+            # Store workflow for progress bar node name lookup
+            from . import progress_bar
+            progress_bar.set_current_workflow(workflow)
             
             # 6. Start NON-BLOCKING polling with callback
             from . import runcomfy_polling
@@ -3612,6 +3628,10 @@ class WM_OT_GenerateImageDescriptionFromViewport(bpy.types.Operator):
             response = server_client.queue_prompt(workflow)
             prompt_id = response['prompt_id']
             print(f"[Viewport Description] ✓ Queued (ID: {prompt_id[:8]}...)")
+            
+            # Store workflow for progress bar node name lookup
+            from . import progress_bar
+            progress_bar.set_current_workflow(workflow)
             
             # 8. Start NON-BLOCKING polling with callback
             from . import runcomfy_polling

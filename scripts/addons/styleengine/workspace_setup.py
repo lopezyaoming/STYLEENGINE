@@ -2913,6 +2913,10 @@ def generate_ai_image_cloud(context):
             queue_response = server_client.queue_prompt(workflow_json)
             prompt_id = queue_response.get('prompt_id')
             
+            # Store workflow for progress bar node name lookup
+            from . import progress_bar
+            progress_bar.set_current_workflow(workflow_json)
+            
             submit_duration = time.time() - submit_start
             
             print(f"[GCS] ⏱️ Submission took {submit_duration:.3f}s")
