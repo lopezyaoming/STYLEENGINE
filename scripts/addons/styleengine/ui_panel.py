@@ -1271,6 +1271,9 @@ class WM_OT_ProjectTexture(bpy.types.Operator):
         original_mode = context.object.mode if context.object else 'OBJECT'
         original_camera = context.scene.camera
         
+        # Temporarily set ai_camera as scene camera for projection
+        context.scene.camera = ai_camera
+        
         # Make sure we're in object mode
         if context.object and context.object.mode != 'OBJECT':
             bpy.ops.object.mode_set(mode='OBJECT')
@@ -1361,27 +1364,63 @@ class WM_OT_ProjectTexture(bpy.types.Operator):
             # Select all faces
             bpy.ops.mesh.select_all(action='SELECT')
             
-            # Project from active view (user's current viewport)
-            # This is simpler and more intuitive than camera projection
+            # Find 3D viewport and temporarily switch to camera view for projection
+            viewport_3d = None
+            space_3d = None
+            original_view_perspective = None
+            
+            for area in context.screen.areas:
+                if area.type == 'VIEW_3D':
+                    viewport_3d = area
+                    for space in area.spaces:
+                        if space.type == 'VIEW_3D':
+                            space_3d = space
+                            original_view_perspective = space.region_3d.view_perspective
+                            break
+                    break
+            
+            if space_3d and original_view_perspective:
+                # Temporarily switch to camera view
+                space_3d.region_3d.view_perspective = 'CAMERA'
+                print(f"[Style Engine] Temporarily switched viewport to camera view for projection")
+            
+            # Project from ai_camera (matches the texture that was rendered from this camera)
             bpy.ops.uv.project_from_view(
-                camera_bounds=False,  # Use viewport, not camera
+                camera_bounds=True,  # Use camera projection bounds
                 correct_aspect=True,
                 scale_to_bounds=False
             )
             
+            # Restore original viewport perspective
+            if space_3d and original_view_perspective:
+                space_3d.region_3d.view_perspective = original_view_perspective
+                print(f"[Style Engine] Restored viewport to original view")
+            
             # Return to object mode
             bpy.ops.object.mode_set(mode='OBJECT')
             
-            print(f"[Style Engine] ✓ Projected texture from active view onto {projected_count} objects")
+            print(f"[Style Engine] ✓ Projected texture from ai_camera onto {projected_count} objects")
             
         except Exception as e:
             print(f"[Style Engine] ✗ Error during projection: {e}")
+            
+            # Restore viewport perspective if it was changed
+            if 'space_3d' in locals() and space_3d and 'original_view_perspective' in locals() and original_view_perspective:
+                try:
+                    space_3d.region_3d.view_perspective = original_view_perspective
+                    print(f"[Style Engine] Restored viewport after error")
+                except:
+                    pass
+            
             # Make sure we're back in object mode
             if context.object and context.object.mode != 'OBJECT':
                 try:
                     bpy.ops.object.mode_set(mode='OBJECT')
                 except:
                     pass
+        
+        # Restore original camera
+        context.scene.camera = original_camera
         
         # Restore original selection
         for o in context.selected_objects:
@@ -2862,6 +2901,71 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
 # 3.5 PROMPT REFINEMENT OPERATOR
 # ----------------------------------------------------------------
 
+def _extract_text_from_griptape_output(outputs):
+    """
+    Helper function to extract text from Griptape workflow outputs.
+    Tries multiple node IDs and output formats.
+    
+    Returns:
+        str: Extracted text or None if not found
+    """
+    refined_text = None
+    
+    # Try node 17 first (Griptape Run: Agent)
+    if "17" in outputs:
+        node_17_output = outputs["17"]
+        if isinstance(node_17_output, dict) and "string" in node_17_output:
+            refined_text = node_17_output["string"][0] if isinstance(node_17_output["string"], list) else node_17_output["string"]
+        elif isinstance(node_17_output, list) and len(node_17_output) > 0:
+            refined_text = node_17_output[0]
+    
+    # Try node 19 if node 17 didn't work (Griptape Display: Text)
+    if not refined_text and "19" in outputs:
+        node_19_output = outputs["19"]
+        if isinstance(node_19_output, dict):
+            # Try common keys
+            for key in ["string", "text", "STRING", "INPUT"]:
+                if key in node_19_output:
+                    val = node_19_output[key]
+                    if isinstance(val, list) and len(val) > 0:
+                        # Check if list of characters - join them
+                        if all(isinstance(c, str) and len(c) <= 1 for c in val[:10]):
+                            refined_text = ''.join(val)
+                        else:
+                            refined_text = val[0]
+                    elif isinstance(val, str):
+                        refined_text = val
+                    if refined_text:
+                        break
+            # Try getting any string value
+            if not refined_text:
+                for key, value in node_19_output.items():
+                    if isinstance(value, str) and len(value) > 10:
+                        refined_text = value
+                        break
+                    elif isinstance(value, list) and len(value) > 0:
+                        if all(isinstance(c, str) and len(c) <= 1 for c in value[:10]):
+                            refined_text = ''.join(value)
+                            break
+                        elif isinstance(value[0], str):
+                            refined_text = value[0]
+                            break
+        elif isinstance(node_19_output, list) and len(node_19_output) > 0:
+            refined_text = node_19_output[0]
+        elif isinstance(node_19_output, str):
+            refined_text = node_19_output
+    
+    # Try node 20 (fallback)
+    if not refined_text and "20" in outputs:
+        node_20_output = outputs["20"]
+        if isinstance(node_20_output, dict) and "string" in node_20_output:
+            refined_text = node_20_output["string"][0] if isinstance(node_20_output["string"], list) else node_20_output["string"]
+        elif isinstance(node_20_output, str):
+            refined_text = node_20_output
+    
+    return refined_text.strip() if refined_text else None
+
+
 class WM_OT_RefinePrompt(bpy.types.Operator):
     """Use local LLM to refine the prompt text (extracts <p> content, enhances it, and updates the text editor)"""
     bl_idname = "style_engine.refine_prompt"
@@ -2939,161 +3043,70 @@ class WM_OT_RefinePrompt(bpy.types.Operator):
             prompt_id = response['prompt_id']
             print(f"[Refine Prompt] ✓ Queued prompt refinement (ID: {prompt_id[:8]}...)")
             
-            # 7. Poll for result (blocking - simple implementation)
-            import time
-            max_wait = 60  # 60 seconds timeout
-            poll_interval = 2  # Check every 2 seconds
-            elapsed = 0
+            # 7. Start NON-BLOCKING polling with callback
+            from . import runcomfy_polling
             
-            self.report({'INFO'}, "Refining prompt... (this may take a moment)")
-            
-            while elapsed < max_wait:
-                history = server_client.get_history(prompt_id)
+            def on_refine_complete(success, result=None, error=None, workflow_type=None):
+                """Callback when refinement completes"""
+                print(f"[Refine Prompt] Callback triggered: success={success}")
                 
-                if history and prompt_id in history:
-                    execution = history[prompt_id]
-                    status = execution.get('status', {})
-                    
-                    # Check if completed
-                    if status.get('completed', False):
-                        # Extract refined text from node 17 output
-                        outputs = execution.get('outputs', {})
-                        
-                        # Try to find the text output (node 17 or 19)
-                        refined_text = None
-                        
-                        # Debug: Show available outputs
-                        print(f"[Refine Prompt] DEBUG: Available output nodes: {list(outputs.keys())}")
-                        
-                        # Try node 17 first (Griptape Run: Agent)
-                        if "17" in outputs:
-                            node_17_output = outputs["17"]
-                            print(f"[Refine Prompt] DEBUG: Node 17 output type: {type(node_17_output)}")
-                            print(f"[Refine Prompt] DEBUG: Node 17 output: {node_17_output}")
-                            
-                            if isinstance(node_17_output, dict) and "string" in node_17_output:
-                                refined_text = node_17_output["string"][0]
-                            elif isinstance(node_17_output, list) and len(node_17_output) > 0:
-                                refined_text = node_17_output[0]
-                        
-                        # Try node 19 if node 17 didn't work (Display: Text)
-                        if not refined_text and "19" in outputs:
-                            node_19_output = outputs["19"]
-                            print(f"[Refine Prompt] DEBUG: Node 19 output type: {type(node_19_output)}")
-                            print(f"[Refine Prompt] DEBUG: Node 19 output keys: {node_19_output.keys() if isinstance(node_19_output, dict) else 'not a dict'}")
-                            print(f"[Refine Prompt] DEBUG: Node 19 output: {node_19_output}")
-                            
-                            # Try various extraction methods
-                            if isinstance(node_19_output, dict):
-                                # Try "string" key
-                                if "string" in node_19_output:
-                                    string_val = node_19_output["string"]
-                                    if isinstance(string_val, list) and len(string_val) > 0:
-                                        # Check if list of characters - join them
-                                        if all(isinstance(c, str) and len(c) == 1 for c in string_val[:10]):
-                                            refined_text = ''.join(string_val)
-                                        else:
-                                            refined_text = string_val[0]
-                                    elif isinstance(string_val, str):
-                                        refined_text = string_val
-                                # Try "text" key
-                                elif "text" in node_19_output:
-                                    text_val = node_19_output["text"]
-                                    if isinstance(text_val, list) and len(text_val) > 0:
-                                        # Check if list of characters - join them
-                                        if all(isinstance(c, str) and len(c) == 1 for c in text_val[:10]):
-                                            refined_text = ''.join(text_val)
-                                        else:
-                                            refined_text = text_val[0]
-                                    elif isinstance(text_val, str):
-                                        refined_text = text_val
-                                # Try "STRING" key (uppercase)
-                                elif "STRING" in node_19_output:
-                                    string_val = node_19_output["STRING"]
-                                    if isinstance(string_val, list) and len(string_val) > 0:
-                                        # Check if list of characters - join them
-                                        if all(isinstance(c, str) and len(c) == 1 for c in string_val[:10]):
-                                            refined_text = ''.join(string_val)
-                                        else:
-                                            refined_text = string_val[0]
-                                    elif isinstance(string_val, str):
-                                        refined_text = string_val
-                                # Try "INPUT" key (from Griptape Display: Text)
-                                elif "INPUT" in node_19_output:
-                                    input_val = node_19_output["INPUT"]
-                                    if isinstance(input_val, list) and len(input_val) > 0:
-                                        # Check if list of characters - join them
-                                        if all(isinstance(c, str) and len(c) <= 1 for c in input_val[:10]):
-                                            refined_text = ''.join(input_val)
-                                        else:
-                                            refined_text = input_val[0]
-                                    elif isinstance(input_val, str):
-                                        refined_text = input_val
-                                # Try getting any string value
-                                else:
-                                    for key, value in node_19_output.items():
-                                        if isinstance(value, str) and len(value) > 10:
-                                            refined_text = value
-                                            break
-                                        elif isinstance(value, list) and len(value) > 0:
-                                            # Check if list of characters - join them
-                                            if all(isinstance(c, str) and len(c) <= 1 for c in value[:10]):
-                                                refined_text = ''.join(value)
-                                                break
-                                            elif isinstance(value[0], str):
-                                                refined_text = value[0]
-                                                break
-                            elif isinstance(node_19_output, list) and len(node_19_output) > 0:
-                                refined_text = node_19_output[0]
-                            elif isinstance(node_19_output, str):
-                                refined_text = node_19_output
-                        
-                        if not refined_text:
-                            self.report({'ERROR'}, "Could not extract refined text from workflow output")
-                            print(f"[Refine Prompt] ❌ No text output found in nodes 17 or 19")
-                            print(f"[Refine Prompt] Available outputs: {list(outputs.keys())}")
-                            print(f"[Refine Prompt] Full outputs structure: {outputs}")
-                            return {'CANCELLED'}
-                        
-                        # Clean up refined text
-                        refined_text = refined_text.strip()
-                        print(f"[Refine Prompt] ✓ Refined prompt: {refined_text}")
-                        
-                        # 8. Replace <p> content in text editor
-                        new_content = re.sub(
-                            r'(<p>)(.*?)(</p>)',
-                            r'\1' + refined_text + r'\3',
-                            current_content,
-                            flags=re.DOTALL | re.IGNORECASE
-                        )
-                        
-                        # Update text block
-                        text_block.clear()
-                        text_block.write(new_content)
-                        
-                        # Save "after" snapshot
-                        workspace_setup.save_prompt_snapshot(context, prefix="after_refine")
-                        
-                        print(f"[Refine Prompt] ✓ Updated text editor with refined prompt")
-                        self.report({'INFO'}, "Prompt refined successfully!")
-                        return {'FINISHED'}
-                    
-                    # Check if failed
-                    if 'error' in status or status.get('status_str') == 'error':
-                        error_msg = status.get('error', 'Unknown error')
-                        self.report({'ERROR'}, f"Refinement failed: {error_msg}")
-                        print(f"[Refine Prompt] ❌ Workflow failed: {error_msg}")
-                        return {'CANCELLED'}
+                if not success:
+                    print(f"[Refine Prompt] ❌ Failed: {error}")
+                    return
                 
-                # Wait before next poll
-                time.sleep(poll_interval)
-                elapsed += poll_interval
-                print(f"[Refine Prompt] Waiting... ({elapsed}s/{max_wait}s)")
+                try:
+                    # Extract outputs
+                    outputs = result.get('outputs', {})
+                    
+                    # Extract refined text using helper
+                    refined_text = _extract_text_from_griptape_output(outputs)
+                    
+                    if not refined_text:
+                        print(f"[Refine Prompt] ❌ No text output found")
+                        print(f"[Refine Prompt] Available outputs: {list(outputs.keys())}")
+                        return
+                    
+                    print(f"[Refine Prompt] ✓ Refined prompt: {refined_text[:100]}...")
+                    
+                    # Update text editor
+                    text_block = bpy.data.texts.get("STYLEENGINE_Prompt")
+                    if not text_block:
+                        print("[Refine Prompt] ❌ Text block not found")
+                        return
+                    
+                    current_content = text_block.as_string()
+                    new_content = re.sub(
+                        r'(<p>)(.*?)(</p>)',
+                        r'\1' + refined_text + r'\3',
+                        current_content,
+                        flags=re.DOTALL | re.IGNORECASE
+                    )
+                    
+                    text_block.clear()
+                    text_block.write(new_content)
+                    
+                    # Save "after" snapshot
+                    workspace_setup.save_prompt_snapshot(bpy.context, prefix="after_refine")
+                    
+                    print(f"[Refine Prompt] ✓ Updated text editor with refined prompt")
+                    
+                except Exception as e:
+                    print(f"[Refine Prompt] ❌ Callback error: {e}")
+                    import traceback
+                    traceback.print_exc()
             
-            # Timeout
-            self.report({'ERROR'}, "Prompt refinement timed out")
-            print(f"[Refine Prompt] ❌ Timed out after {max_wait}s")
-            return {'CANCELLED'}
+            # Register for non-blocking polling
+            runcomfy_polling.RunComfyPoller.start_polling(
+                deployment_id='server',
+                request_id=prompt_id,
+                callback=on_refine_complete,
+                workflow_type='text'
+            )
+            
+            self.report({'INFO'}, "Refining prompt... (watch progress bar)")
+            print(f"[Refine Prompt] ⏳ Processing in background...")
+            
+            return {'FINISHED'}
             
         except Exception as e:
             self.report({'ERROR'}, f"Failed to refine prompt: {str(e)}")
@@ -3181,140 +3194,77 @@ class WM_OT_GenerateImageDescription(bpy.types.Operator):
             prompt_id = response['prompt_id']
             print(f"[Image Description] ✓ Queued image description (ID: {prompt_id[:8]}...)")
             
-            # 7. Poll for result (blocking - simple implementation)
-            import time
-            max_wait = 120  # 120 seconds timeout (vision can take longer)
-            poll_interval = 2  # Check every 2 seconds
-            elapsed = 0
+            # 7. Start NON-BLOCKING polling with callback
+            from . import runcomfy_polling
             
-            self.report({'INFO'}, "Generating image description... (this may take a moment)")
-            
-            while elapsed < max_wait:
-                history = server_client.get_history(prompt_id)
+            def on_description_complete(success, result=None, error=None, workflow_type=None):
+                """Callback when description completes"""
+                print(f"[Image Description] Callback triggered: success={success}")
                 
-                if history and prompt_id in history:
-                    execution = history[prompt_id]
-                    status = execution.get('status', {})
+                if not success:
+                    print(f"[Image Description] ❌ Failed: {error}")
+                    return
+                
+                try:
+                    # Extract outputs
+                    outputs = result.get('outputs', {})
                     
-                    # Check if completed
-                    if status.get('completed', False):
-                        # Extract description from node 19 output (Griptape Display: Text)
-                        outputs = execution.get('outputs', {})
-                        
-                        print(f"[Image Description] DEBUG: Available output nodes: {list(outputs.keys())}")
-                        
-                        description_text = None
-                        
-                        # Try node 19 (Griptape Display: Text)
-                        if "19" in outputs:
-                            node_19_output = outputs["19"]
-                            print(f"[Image Description] DEBUG: Node 19 output type: {type(node_19_output)}")
-                            
-                            # Try various extraction methods (same as RefinePrompt)
-                            if isinstance(node_19_output, dict):
-                                # Try common keys
-                                for key in ["string", "text", "STRING", "INPUT"]:
-                                    if key in node_19_output:
-                                        val = node_19_output[key]
-                                        if isinstance(val, list) and len(val) > 0:
-                                            # Check if list of characters - join them
-                                            if all(isinstance(c, str) and len(c) <= 1 for c in val[:10]):
-                                                description_text = ''.join(val)
-                                            else:
-                                                description_text = val[0]
-                                        elif isinstance(val, str):
-                                            description_text = val
-                                        if description_text:
-                                            break
-                                # Try getting any string value
-                                if not description_text:
-                                    for key, value in node_19_output.items():
-                                        if isinstance(value, str) and len(value) > 10:
-                                            description_text = value
-                                            break
-                                        elif isinstance(value, list) and len(value) > 0:
-                                            if all(isinstance(c, str) and len(c) <= 1 for c in value[:10]):
-                                                description_text = ''.join(value)
-                                                break
-                                            elif isinstance(value[0], str):
-                                                description_text = value[0]
-                                                break
-                            elif isinstance(node_19_output, list) and len(node_19_output) > 0:
-                                description_text = node_19_output[0]
-                            elif isinstance(node_19_output, str):
-                                description_text = node_19_output
-                        
-                        # Also try node 20 (Griptape Run: Image Description)
-                        if not description_text and "20" in outputs:
-                            node_20_output = outputs["20"]
-                            print(f"[Image Description] DEBUG: Node 20 output: {node_20_output}")
-                            if isinstance(node_20_output, dict) and "string" in node_20_output:
-                                description_text = node_20_output["string"][0] if isinstance(node_20_output["string"], list) else node_20_output["string"]
-                            elif isinstance(node_20_output, str):
-                                description_text = node_20_output
-                        
-                        if not description_text:
-                            self.report({'ERROR'}, "Could not extract description from workflow output")
-                            print(f"[Image Description] ❌ No text output found")
-                            print(f"[Image Description] Available outputs: {list(outputs.keys())}")
-                            print(f"[Image Description] Full outputs structure: {outputs}")
-                            return {'CANCELLED'}
-                        
-                        # Clean up description text
-                        description_text = description_text.strip()
-                        print(f"[Image Description] ✓ Generated description: {description_text[:100]}...")
-                        
-                        # 8. Update <v> tag in text editor
-                        text_block = bpy.data.texts.get("STYLEENGINE_Prompt")
-                        if not text_block:
-                            self.report({'ERROR'}, "STYLEENGINE_Prompt text block not found")
-                            return {'CANCELLED'}
-                        
-                        current_content = text_block.as_string()
-                        
-                        # Check if <v> tag exists
-                        if re.search(r'<v>.*?</v>', current_content, re.DOTALL | re.IGNORECASE):
-                            # Replace existing <v> content
-                            new_content = re.sub(
-                                r'(<v>)(.*?)(</v>)',
-                                r'\1' + description_text + r'\3',
-                                current_content,
-                                flags=re.DOTALL | re.IGNORECASE
-                            )
-                        else:
-                            # Add <v> section at the end
-                            new_content = current_content.rstrip() + "\n# Machine Vision\n<v>" + description_text + "</v>\n"
-                        
-                        # Update text block
-                        text_block.clear()
-                        text_block.write(new_content)
-                        
-                        # Save "after" snapshot
-                        workspace_setup.save_prompt_snapshot(context, prefix="after_vision")
-                        
-                        print(f"[Image Description] ✓ Updated text editor with description")
-                        self.report({'INFO'}, "Image description generated successfully!")
-                        return {'FINISHED'}
+                    # Extract description using helper
+                    description_text = _extract_text_from_griptape_output(outputs)
                     
-                    # Check if failed
-                    if 'error' in status or status.get('status_str') == 'error':
-                        error_msg = status.get('error', 'Unknown error')
-                        self.report({'ERROR'}, f"Description generation failed: {error_msg}")
-                        print(f"[Image Description] ❌ Workflow failed: {error_msg}")
-                        return {'CANCELLED'}
-                
-                # Wait before next poll
-                time.sleep(poll_interval)
-                elapsed += poll_interval
-                
-                # Progress update
-                if elapsed % 10 == 0:
-                    print(f"[Image Description] Still waiting... ({elapsed}s elapsed)")
+                    if not description_text:
+                        print(f"[Image Description] ❌ No text output found")
+                        return
+                    
+                    print(f"[Image Description] ✓ Generated: {description_text[:100]}...")
+                    
+                    # Update <v> tag in text editor
+                    text_block = bpy.data.texts.get("STYLEENGINE_Prompt")
+                    if not text_block:
+                        print("[Image Description] ❌ Text block not found")
+                        return
+                    
+                    current_content = text_block.as_string()
+                    
+                    # Check if <v> tag exists
+                    if re.search(r'<v>.*?</v>', current_content, re.DOTALL | re.IGNORECASE):
+                        # Replace existing <v> content
+                        new_content = re.sub(
+                            r'(<v>)(.*?)(</v>)',
+                            r'\1' + description_text + r'\3',
+                            current_content,
+                            flags=re.DOTALL | re.IGNORECASE
+                        )
+                    else:
+                        # Add <v> section at the end
+                        new_content = current_content.rstrip() + "\n# Machine Vision\n<v>" + description_text + "</v>\n"
+                    
+                    # Update text block
+                    text_block.clear()
+                    text_block.write(new_content)
+                    
+                    # Save "after" snapshot
+                    workspace_setup.save_prompt_snapshot(bpy.context, prefix="after_vision")
+                    
+                    print(f"[Image Description] ✓ Updated text editor with description")
+                    
+                except Exception as e:
+                    print(f"[Image Description] ❌ Callback error: {e}")
+                    import traceback
+                    traceback.print_exc()
             
-            # Timeout
-            self.report({'ERROR'}, "Image description timed out after 120 seconds")
-            print(f"[Image Description] ❌ Timeout waiting for result")
-            return {'CANCELLED'}
+            # Register for non-blocking polling
+            runcomfy_polling.RunComfyPoller.start_polling(
+                deployment_id='server',
+                request_id=prompt_id,
+                callback=on_description_complete,
+                workflow_type='text'
+            )
+            
+            self.report({'INFO'}, "Generating image description... (watch progress bar)")
+            print(f"[Image Description] ⏳ Processing in background...")
+            
+            return {'FINISHED'}
             
         except Exception as e:
             self.report({'ERROR'}, f"Image description failed: {str(e)}")
@@ -3425,125 +3375,87 @@ class WM_OT_GenerateImageDescriptionFromFile(bpy.types.Operator):
             prompt_id = response['prompt_id']
             print(f"[Image Description from File] ✓ Queued image description (ID: {prompt_id[:8]}...)")
             
-            # 6. Poll for result (blocking)
-            import time
-            max_wait = 120
-            poll_interval = 2
-            elapsed = 0
+            # 6. Start NON-BLOCKING polling with callback
+            from . import runcomfy_polling
             
-            self.report({'INFO'}, "Generating image description... (this may take a moment)")
+            # Capture image_path.name for callback
+            image_name = image_path.name
             
-            while elapsed < max_wait:
-                history = server_client.get_history(prompt_id)
+            def on_description_complete(success, result=None, error=None, workflow_type=None):
+                """Callback when description completes"""
+                print(f"[Image Description from File] Callback triggered: success={success}")
                 
-                if history and prompt_id in history:
-                    execution = history[prompt_id]
-                    status = execution.get('status', {})
+                if not success:
+                    print(f"[Image Description from File] ❌ Failed: {error}")
+                    return
+                
+                try:
+                    # Extract outputs
+                    outputs = result.get('outputs', {})
                     
-                    if status.get('completed', False):
-                        outputs = execution.get('outputs', {})
-                        description_text = None
-                        
-                        # Try node 19 (Griptape Display: Text)
-                        if "19" in outputs:
-                            node_19_output = outputs["19"]
-                            if isinstance(node_19_output, dict):
-                                for key in ["string", "text", "STRING", "INPUT"]:
-                                    if key in node_19_output:
-                                        val = node_19_output[key]
-                                        if isinstance(val, list) and len(val) > 0:
-                                            if all(isinstance(c, str) and len(c) <= 1 for c in val[:10]):
-                                                description_text = ''.join(val)
-                                            else:
-                                                description_text = val[0]
-                                        elif isinstance(val, str):
-                                            description_text = val
-                                        if description_text:
-                                            break
-                                if not description_text:
-                                    for key, value in node_19_output.items():
-                                        if isinstance(value, str) and len(value) > 10:
-                                            description_text = value
-                                            break
-                                        elif isinstance(value, list) and len(value) > 0:
-                                            if all(isinstance(c, str) and len(c) <= 1 for c in value[:10]):
-                                                description_text = ''.join(value)
-                                                break
-                                            elif isinstance(value[0], str):
-                                                description_text = value[0]
-                                                break
-                            elif isinstance(node_19_output, list) and len(node_19_output) > 0:
-                                description_text = node_19_output[0]
-                            elif isinstance(node_19_output, str):
-                                description_text = node_19_output
-                        
-                        # Also try node 20
-                        if not description_text and "20" in outputs:
-                            node_20_output = outputs["20"]
-                            if isinstance(node_20_output, dict) and "string" in node_20_output:
-                                description_text = node_20_output["string"][0] if isinstance(node_20_output["string"], list) else node_20_output["string"]
-                            elif isinstance(node_20_output, str):
-                                description_text = node_20_output
-                        
-                        if not description_text:
-                            self.report({'ERROR'}, "Could not extract description from workflow output")
-                            print(f"[Image Description from File] ❌ No text output found")
-                            return {'CANCELLED'}
-                        
-                        description_text = description_text.strip()
-                        print(f"[Image Description from File] ✓ Generated: {description_text[:100]}...")
-                        
-                        # 7. APPEND to <v> tag in text editor (not replace!)
-                        text_block = bpy.data.texts.get("STYLEENGINE_Prompt")
-                        if not text_block:
-                            self.report({'ERROR'}, "STYLEENGINE_Prompt text block not found")
-                            return {'CANCELLED'}
-                        
-                        current_content = text_block.as_string()
-                        
-                        # Check if <v> tag exists
-                        v_match = re.search(r'<v>(.*?)</v>', current_content, re.DOTALL | re.IGNORECASE)
-                        if v_match:
-                            existing_v = v_match.group(1).strip()
-                            if existing_v:
-                                # Append to existing content with separator
-                                new_v_content = existing_v + ". " + description_text
-                            else:
-                                new_v_content = description_text
-                            new_content = re.sub(
-                                r'(<v>)(.*?)(</v>)',
-                                r'\1' + new_v_content + r'\3',
-                                current_content,
-                                flags=re.DOTALL | re.IGNORECASE
-                            )
+                    # Extract description using helper
+                    description_text = _extract_text_from_griptape_output(outputs)
+                    
+                    if not description_text:
+                        print(f"[Image Description from File] ❌ No text output found")
+                        return
+                    
+                    print(f"[Image Description from File] ✓ Generated: {description_text[:100]}...")
+                    
+                    # APPEND to <v> tag in text editor (not replace!)
+                    text_block = bpy.data.texts.get("STYLEENGINE_Prompt")
+                    if not text_block:
+                        print("[Image Description from File] ❌ Text block not found")
+                        return
+                    
+                    current_content = text_block.as_string()
+                    
+                    # Check if <v> tag exists
+                    v_match = re.search(r'<v>(.*?)</v>', current_content, re.DOTALL | re.IGNORECASE)
+                    if v_match:
+                        existing_v = v_match.group(1).strip()
+                        if existing_v:
+                            # Append to existing content with separator
+                            new_v_content = existing_v + ". " + description_text
                         else:
-                            # Add <v> section at the end
-                            new_content = current_content.rstrip() + "\n# Machine Vision\n<v>" + description_text + "</v>\n"
-                        
-                        # Update text block
-                        text_block.clear()
-                        text_block.write(new_content)
-                        
-                        # Save "after" snapshot
-                        workspace_setup.save_prompt_snapshot(context, prefix="after_vision_file")
-                        
-                        print(f"[Image Description from File] ✓ Appended to <v> tag in text editor")
-                        self.report({'INFO'}, f"Description added from: {image_path.name}")
-                        return {'FINISHED'}
+                            new_v_content = description_text
+                        new_content = re.sub(
+                            r'(<v>)(.*?)(</v>)',
+                            r'\1' + new_v_content + r'\3',
+                            current_content,
+                            flags=re.DOTALL | re.IGNORECASE
+                        )
+                    else:
+                        # Add <v> section at the end
+                        new_content = current_content.rstrip() + "\n# Machine Vision\n<v>" + description_text + "</v>\n"
                     
-                    if 'error' in status or status.get('status_str') == 'error':
-                        error_msg = status.get('error', 'Unknown error')
-                        self.report({'ERROR'}, f"Description generation failed: {error_msg}")
-                        return {'CANCELLED'}
-                
-                time.sleep(poll_interval)
-                elapsed += poll_interval
-                
-                if elapsed % 10 == 0:
-                    print(f"[Image Description from File] Still waiting... ({elapsed}s elapsed)")
+                    # Update text block
+                    text_block.clear()
+                    text_block.write(new_content)
+                    
+                    # Save "after" snapshot
+                    workspace_setup.save_prompt_snapshot(bpy.context, prefix="after_vision_file")
+                    
+                    print(f"[Image Description from File] ✓ Appended to <v> tag in text editor")
+                    print(f"[Image Description from File] ✅ Description added from: {image_name}")
+                    
+                except Exception as e:
+                    print(f"[Image Description from File] ❌ Callback error: {e}")
+                    import traceback
+                    traceback.print_exc()
             
-            self.report({'ERROR'}, "Image description timed out after 120 seconds")
-            return {'CANCELLED'}
+            # Register for non-blocking polling
+            runcomfy_polling.RunComfyPoller.start_polling(
+                deployment_id='server',
+                request_id=prompt_id,
+                callback=on_description_complete,
+                workflow_type='text'
+            )
+            
+            self.report({'INFO'}, f"Generating description from: {image_path.name} (watch progress bar)")
+            print(f"[Image Description from File] ⏳ Processing in background...")
+            
+            return {'FINISHED'}
             
         except Exception as e:
             self.report({'ERROR'}, f"Image description failed: {str(e)}")
@@ -3701,125 +3613,84 @@ class WM_OT_GenerateImageDescriptionFromViewport(bpy.types.Operator):
             prompt_id = response['prompt_id']
             print(f"[Viewport Description] ✓ Queued (ID: {prompt_id[:8]}...)")
             
-            # 8. Poll for result (blocking)
-            import time
-            max_wait = 120
-            poll_interval = 2
-            elapsed = 0
+            # 8. Start NON-BLOCKING polling with callback
+            from . import runcomfy_polling
             
-            self.report({'INFO'}, "Generating viewport description... (this may take a moment)")
-            
-            while elapsed < max_wait:
-                history = server_client.get_history(prompt_id)
+            def on_description_complete(success, result=None, error=None, workflow_type=None):
+                """Callback when description completes"""
+                print(f"[Viewport Description] Callback triggered: success={success}")
                 
-                if history and prompt_id in history:
-                    execution = history[prompt_id]
-                    status = execution.get('status', {})
+                if not success:
+                    print(f"[Viewport Description] ❌ Failed: {error}")
+                    return
+                
+                try:
+                    # Extract outputs
+                    outputs = result.get('outputs', {})
                     
-                    if status.get('completed', False):
-                        outputs = execution.get('outputs', {})
-                        description_text = None
-                        
-                        # Try node 19 (Griptape Display: Text)
-                        if "19" in outputs:
-                            node_19_output = outputs["19"]
-                            if isinstance(node_19_output, dict):
-                                for key in ["string", "text", "STRING", "INPUT"]:
-                                    if key in node_19_output:
-                                        val = node_19_output[key]
-                                        if isinstance(val, list) and len(val) > 0:
-                                            if all(isinstance(c, str) and len(c) <= 1 for c in val[:10]):
-                                                description_text = ''.join(val)
-                                            else:
-                                                description_text = val[0]
-                                        elif isinstance(val, str):
-                                            description_text = val
-                                        if description_text:
-                                            break
-                                if not description_text:
-                                    for key, value in node_19_output.items():
-                                        if isinstance(value, str) and len(value) > 10:
-                                            description_text = value
-                                            break
-                                        elif isinstance(value, list) and len(value) > 0:
-                                            if all(isinstance(c, str) and len(c) <= 1 for c in value[:10]):
-                                                description_text = ''.join(value)
-                                                break
-                                            elif isinstance(value[0], str):
-                                                description_text = value[0]
-                                                break
-                            elif isinstance(node_19_output, list) and len(node_19_output) > 0:
-                                description_text = node_19_output[0]
-                            elif isinstance(node_19_output, str):
-                                description_text = node_19_output
-                        
-                        # Also try node 20
-                        if not description_text and "20" in outputs:
-                            node_20_output = outputs["20"]
-                            if isinstance(node_20_output, dict) and "string" in node_20_output:
-                                description_text = node_20_output["string"][0] if isinstance(node_20_output["string"], list) else node_20_output["string"]
-                            elif isinstance(node_20_output, str):
-                                description_text = node_20_output
-                        
-                        if not description_text:
-                            self.report({'ERROR'}, "Could not extract description from workflow output")
-                            print(f"[Viewport Description] ❌ No text output found")
-                            return {'CANCELLED'}
-                        
-                        description_text = description_text.strip()
-                        print(f"[Viewport Description] ✓ Generated: {description_text[:100]}...")
-                        
-                        # 9. APPEND to <v> tag in text editor (not replace!)
-                        text_block = bpy.data.texts.get("STYLEENGINE_Prompt")
-                        if not text_block:
-                            self.report({'ERROR'}, "STYLEENGINE_Prompt text block not found")
-                            return {'CANCELLED'}
-                        
-                        current_content = text_block.as_string()
-                        
-                        # Check if <v> tag exists
-                        v_match = re.search(r'<v>(.*?)</v>', current_content, re.DOTALL | re.IGNORECASE)
-                        if v_match:
-                            existing_v = v_match.group(1).strip()
-                            if existing_v:
-                                # Append to existing content with separator
-                                new_v_content = existing_v + ". " + description_text
-                            else:
-                                new_v_content = description_text
-                            new_content = re.sub(
-                                r'(<v>)(.*?)(</v>)',
-                                r'\1' + new_v_content + r'\3',
-                                current_content,
-                                flags=re.DOTALL | re.IGNORECASE
-                            )
+                    # Extract description using helper
+                    description_text = _extract_text_from_griptape_output(outputs)
+                    
+                    if not description_text:
+                        print(f"[Viewport Description] ❌ No text output found")
+                        return
+                    
+                    print(f"[Viewport Description] ✓ Generated: {description_text[:100]}...")
+                    
+                    # APPEND to <v> tag in text editor (not replace!)
+                    text_block = bpy.data.texts.get("STYLEENGINE_Prompt")
+                    if not text_block:
+                        print("[Viewport Description] ❌ Text block not found")
+                        return
+                    
+                    current_content = text_block.as_string()
+                    
+                    # Check if <v> tag exists
+                    v_match = re.search(r'<v>(.*?)</v>', current_content, re.DOTALL | re.IGNORECASE)
+                    if v_match:
+                        existing_v = v_match.group(1).strip()
+                        if existing_v:
+                            # Append to existing content with separator
+                            new_v_content = existing_v + ". " + description_text
                         else:
-                            # Add <v> section at the end
-                            new_content = current_content.rstrip() + "\n# Machine Vision\n<v>" + description_text + "</v>\n"
-                        
-                        # Update text block
-                        text_block.clear()
-                        text_block.write(new_content)
-                        
-                        # Save "after" snapshot
-                        workspace_setup.save_prompt_snapshot(context, prefix="after_vision_viewport")
-                        
-                        print(f"[Viewport Description] ✓ Appended to <v> tag in text editor")
-                        self.report({'INFO'}, f"Viewport description added!")
-                        return {'FINISHED'}
+                            new_v_content = description_text
+                        new_content = re.sub(
+                            r'(<v>)(.*?)(</v>)',
+                            r'\1' + new_v_content + r'\3',
+                            current_content,
+                            flags=re.DOTALL | re.IGNORECASE
+                        )
+                    else:
+                        # Add <v> section at the end
+                        new_content = current_content.rstrip() + "\n# Machine Vision\n<v>" + description_text + "</v>\n"
                     
-                    if 'error' in status or status.get('status_str') == 'error':
-                        error_msg = status.get('error', 'Unknown error')
-                        self.report({'ERROR'}, f"Description generation failed: {error_msg}")
-                        return {'CANCELLED'}
-                
-                time.sleep(poll_interval)
-                elapsed += poll_interval
-                
-                if elapsed % 10 == 0:
-                    print(f"[Viewport Description] Still waiting... ({elapsed}s elapsed)")
+                    # Update text block
+                    text_block.clear()
+                    text_block.write(new_content)
+                    
+                    # Save "after" snapshot
+                    workspace_setup.save_prompt_snapshot(bpy.context, prefix="after_vision_viewport")
+                    
+                    print(f"[Viewport Description] ✓ Appended to <v> tag in text editor")
+                    print(f"[Viewport Description] ✅ Viewport description added!")
+                    
+                except Exception as e:
+                    print(f"[Viewport Description] ❌ Callback error: {e}")
+                    import traceback
+                    traceback.print_exc()
             
-            self.report({'ERROR'}, "Viewport description timed out after 120 seconds")
-            return {'CANCELLED'}
+            # Register for non-blocking polling
+            runcomfy_polling.RunComfyPoller.start_polling(
+                deployment_id='server',
+                request_id=prompt_id,
+                callback=on_description_complete,
+                workflow_type='text'
+            )
+            
+            self.report({'INFO'}, "Generating viewport description... (watch progress bar)")
+            print(f"[Viewport Description] ⏳ Processing in background...")
+            
+            return {'FINISHED'}
             
         except Exception as e:
             self.report({'ERROR'}, f"Viewport description failed: {str(e)}")
