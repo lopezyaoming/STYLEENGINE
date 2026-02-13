@@ -276,14 +276,19 @@ def _poll_bridge_tick():
                 BridgePollerState.saw_progress = True
             
             # Determine display progress with "hold at 100%" logic
-            if bridge_progress > 0:
-                # Job is actively running, show actual progress
+            if bridge_progress >= 1.0 and has_active_requests:
+                # At 100%, still have active requests (downloading results)
+                display_progress = 1.0
+                display_node = "Downloading..."
+                display_status = "finishing"
+            elif 0 < bridge_progress < 1.0:
+                # Job is actively processing (between 0% and 100%)
                 display_progress = bridge_progress
                 # Convert raw node name to friendly name using workflow lookup
                 display_node = _get_friendly_node_name(node_name)
                 display_status = server_status
             elif BridgePollerState.saw_progress and has_active_requests:
-                # Bridge says 0% but we have active requests and saw progress
+                # Fallback: Bridge reset to 0% but we have active requests
                 # Hold at 100% until request completes
                 display_progress = 1.0
                 display_node = "Downloading..."
@@ -307,14 +312,14 @@ def _poll_bridge_tick():
             # Calculate percentage for display
             percent = int(display_progress * 100)
             
-            # Print parsed JSON to console
-            print(f"[Progress Bridge] ✓ CONNECTED")
-            print(f"[Progress Bridge]    Status: {display_status}")
-            print(f"[Progress Bridge]    Progress: {percent}% ({display_progress:.2f})")
-            print(f"[Progress Bridge]    Node: {display_node}")
-            print(f"[Progress Bridge]    Queue: {queue_remaining}")
-            print(f"[Progress Bridge]    Active Requests: {has_active_requests}")
-            print(f"[Progress Bridge]    ---")
+            # Print parsed JSON to console (disabled for cleaner debug output)
+            # print(f"[Progress Bridge] ✓ CONNECTED")
+            # print(f"[Progress Bridge]    Status: {display_status}")
+            # print(f"[Progress Bridge]    Progress: {percent}% ({display_progress:.2f})")
+            # print(f"[Progress Bridge]    Node: {display_node}")
+            # print(f"[Progress Bridge]    Queue: {queue_remaining}")
+            # print(f"[Progress Bridge]    Active Requests: {has_active_requests}")
+            # print(f"[Progress Bridge]    ---")
             
             # Continue polling
             return POLL_INTERVAL

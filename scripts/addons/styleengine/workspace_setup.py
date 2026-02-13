@@ -932,10 +932,19 @@ def refresh_ai_image():
             img = bpy.data.images["current_ai.png"]
             img.reload()
             
-            # OPTIMIZED: Only redraw 3D viewports in current screen (not all windows!)
-            for area in bpy.context.screen.areas:
-                if area.type == 'VIEW_3D':
-                    area.tag_redraw()
+            # Redraw ALL 3D viewports across ALL windows/screens
+            # Using only bpy.context.screen can miss viewports if the user
+            # switched workspaces or the callback runs in a different context
+            try:
+                for window in bpy.context.window_manager.windows:
+                    for area in window.screen.areas:
+                        if area.type == 'VIEW_3D':
+                            area.tag_redraw()
+            except Exception:
+                # Fallback: at minimum redraw current screen
+                for area in bpy.context.screen.areas:
+                    if area.type == 'VIEW_3D':
+                        area.tag_redraw()
             
             print(f"[Style Engine] ✓ Image reloaded: {os.path.basename(img_path)}")
         else:
@@ -1526,6 +1535,10 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
             
             # Switch to the workspace
             context.window.workspace = workspace
+            
+            # Initialize seed with a random value
+            import random
+            context.scene.style_engine_props.seed_value = random.randint(0, 2147483647)
             
             # For HeavyPoly mode: Switch main 3D viewport to Edit mode (delayed, after layout setup)
             from . import utils
@@ -2788,6 +2801,10 @@ def generate_ai_image_cloud(context):
             denoise_value = 1.0 - scaled_influence  # Flip for workflow
             workflow_json["135"]["inputs"]["value"] = denoise_value
             
+            # Seed (Node 4 - KSampler) - unified seed from UI
+            seed = context.scene.style_engine_props.seed_value
+            workflow_json["4"]["inputs"]["seed"] = seed
+            
             # ============================================================
             # LORA (Node 136 - LoRa 1, Node 34 - LoRa 2)
             # Chain: Base Model → Node 136 (LoRa 1) → Node 34 (LoRa 2) → ...
@@ -3394,20 +3411,21 @@ def on_generation_complete_server(context, success, result, error, workflow_type
             image_type = img_info.get('type', 'output')
             
             # Determine save name based on filename prefix
-            if filename.startswith('canny'):
+            # Uses blacklist approach: canny/depth are preview images,
+            # everything else is treated as the main output (current_ai.png).
+            # This is resilient to workflow prefix changes.
+            filename_lower = filename.lower()
+            if filename_lower.startswith('canny'):
                 if not download_previews:
                     continue  # Skip preview images if disabled
                 save_name = 'canny.png'
-            elif filename.startswith('depth'):
+            elif filename_lower.startswith('depth'):
                 if not download_previews:
                     continue  # Skip preview images if disabled
                 save_name = 'depth.png'
-            elif filename.startswith('StyleEngine'):
-                save_name = 'current_ai.png'
             else:
-                # Unknown image, skip
-                print(f"[GCS] Skipping unknown image: {filename}")
-                continue
+                # Any non-preview image is the main AI output
+                save_name = 'current_ai.png'
             
             downloads_to_perform.append({
                 'filename': filename,
@@ -3421,19 +3439,54 @@ def on_generation_complete_server(context, success, result, error, workflow_type
         import time
         from concurrent.futures import ThreadPoolExecutor, as_completed
         
-        def download_single_image(task):
-            """Download a single image and return result."""
+        def download_single_image(task, max_retries=2):
+            """Download a single image with retry and atomic write."""
             start = time.time()
-            success = server_client.download_image(
-                task['filename'], 
-                task['save_path'], 
-                task['subfolder'], 
-                task['image_type']
-            )
+            save_path = task['save_path']
+            tmp_path = save_path + '.tmp'
+            
+            for attempt in range(max_retries + 1):
+                try:
+                    # Download to temp file first (atomic write)
+                    success = server_client.download_image(
+                        task['filename'], 
+                        tmp_path, 
+                        task['subfolder'], 
+                        task['image_type']
+                    )
+                    
+                    if success and os.path.exists(tmp_path):
+                        # Verify file has valid content (> 1KB)
+                        file_size = os.path.getsize(tmp_path)
+                        if file_size > 1024:
+                            # Atomic rename to final path
+                            os.replace(tmp_path, save_path)
+                            duration = time.time() - start
+                            return {
+                                'save_name': task['save_name'],
+                                'success': True,
+                                'duration': duration
+                            }
+                        else:
+                            print(f"[GCS] ⚠️ {task['save_name']}: file too small ({file_size}B), retry {attempt + 1}/{max_retries + 1}")
+                except Exception as e:
+                    print(f"[GCS] ⚠️ {task['save_name']}: download error (attempt {attempt + 1}): {e}")
+                
+                # Brief pause before retry
+                if attempt < max_retries:
+                    time.sleep(0.5)
+            
+            # Clean up temp file on failure
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+            
             duration = time.time() - start
             return {
                 'save_name': task['save_name'],
-                'success': success,
+                'success': False,
                 'duration': duration
             }
         

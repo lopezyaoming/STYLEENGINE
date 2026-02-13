@@ -21,10 +21,55 @@ _lora_cache = {
 }
 
 
+def _load_lora_ignore_list():
+    """
+    Load LoRa ignore list from loras/ignore.txt.
+    Returns a set of patterns to exclude from dropdown.
+    Supports both full paths and filenames.
+    """
+    from pathlib import Path
+    
+    try:
+        addon_dir = Path(__file__).parent
+        ignore_file = addon_dir / "loras" / "ignore.txt"
+        
+        print(f"[Style Engine] Looking for ignore list at: {ignore_file}")
+        
+        if not ignore_file.exists():
+            print(f"[Style Engine] ignore.txt not found, no LoRAs will be filtered")
+            return set()
+        
+        ignored = set()
+        with open(ignore_file, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                # Skip empty lines and comments
+                if line and not line.startswith('#'):
+                    # Add both the full path AND just the filename
+                    # This handles both "file.safetensors" and "LoRAs/subfolder/file.safetensors"
+                    ignored.add(line)  # Full path
+                    filename = line.split('/')[-1]
+                    ignored.add(filename)  # Just filename
+        
+        if ignored:
+            print(f"[Style Engine] Loaded {len(ignored)} ignore patterns from ignore.txt")
+        else:
+            print(f"[Style Engine] ignore.txt is empty, no LoRAs filtered")
+        
+        return ignored
+        
+    except Exception as e:
+        print(f"[Style Engine] ⚠️ Error loading ignore.txt: {e}")
+        import traceback
+        traceback.print_exc()
+        return set()
+
+
 def get_lora_items(self, context):
     """
     Dynamic callback to fetch available LoRa models from ComfyUI server.
     Caches results for 5 minutes to avoid excessive API calls.
+    Filters out LoRAs listed in loras/ignore.txt.
     """
     import time
     from . import runcomfy_deployment
@@ -42,6 +87,9 @@ def get_lora_items(self, context):
     # Return cached if valid
     if _lora_cache['items'] and cache_age < _lora_cache['cache_duration']:
         return _lora_cache['items']
+    
+    # Load ignore list
+    ignored_loras = _load_lora_ignore_list()
     
     # Check if in GCS mode (self-hosted ComfyUI)
     try:
@@ -69,8 +117,15 @@ def get_lora_items(self, context):
                             if isinstance(lora_list, list) and lora_list:
                                 # Build items from server response
                                 items = [('NONE', "None", "No LoRa")]
+                                filtered_count = 0
                                 
                                 for lora_file in lora_list:
+                                    # Skip if in ignore list
+                                    if lora_file in ignored_loras:
+                                        filtered_count += 1
+                                        print(f"[Style Engine]   ✗ Filtered: {lora_file}")
+                                        continue
+                                    
                                     # Create readable display name
                                     display_name = lora_file.replace('.safetensors', '').replace('_', ' ').replace('-', ' ')
                                     display_name = ' '.join(word.capitalize() for word in display_name.split())
@@ -89,7 +144,7 @@ def get_lora_items(self, context):
                                 _lora_cache['items'] = items
                                 _lora_cache['timestamp'] = current_time
                                 
-                                print(f"[Style Engine] ✓ Found {len(items)-1} LoRa models on server")
+                                print(f"[Style Engine] ✓ Found {len(items)-1} LoRa models on server ({filtered_count} filtered)")
                                 return items
                 
             except Exception as e:
@@ -200,6 +255,15 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         name="Show File Settings",
         description="Expand or collapse the File section",
         default=False
+    )
+    
+    # Unified seed for all AI workflows
+    seed_value: bpy.props.IntProperty(
+        name="Seed",
+        description="Random seed for all AI workflows (image, PBR, 3D generation)",
+        default=0,
+        min=0,
+        max=2147483647,
     )
     
     show_view_settings: bpy.props.BoolProperty(
@@ -989,6 +1053,18 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
 # Legacy operators removed - no longer needed
 
 
+class WM_OT_RerollSeed(bpy.types.Operator):
+    """Randomize the seed for AI workflows"""
+    bl_idname = "style_engine.reroll_seed"
+    bl_label = "Reroll Seed"
+    bl_options = {'REGISTER'}
+    
+    def execute(self, context):
+        import random
+        context.scene.style_engine_props.seed_value = random.randint(0, 2147483647)
+        return {'FINISHED'}
+
+
 class WM_OT_AlignAICameraToView(bpy.types.Operator):
     """Align AI camera to current 3D viewport."""
     bl_idname = "style_engine.align_camera_to_view"
@@ -1659,6 +1735,685 @@ class WM_OT_ProjectTexture(bpy.types.Operator):
 
 
 # ================================================================
+# PBR FROM PROJECTED TEXTURE OPERATOR
+# ================================================================
+
+class WM_OT_PBRFromProjectedTexture(bpy.types.Operator):
+    """Generate PBR material maps from a projected iteration texture using chord_v1"""
+    bl_idname = "style_engine.pbr_from_projected"
+    bl_label = "PBR from Projected Texture"
+    bl_description = "Generate PBR maps (basecolor, normal, roughness, metalness) from the projected texture"
+    bl_options = {'REGISTER'}
+    
+    def execute(self, context):
+        import json
+        import re
+        from pathlib import Path
+        from . import runcomfy_deployment
+        from . import workspace_setup
+        from . import progress_bar
+        from . import runcomfy_polling
+        from .runcomfy_server_client import extract_output_images
+        
+        # 1. Validate: active object must have an iteration material
+        obj = context.active_object
+        if not obj or obj.type != 'MESH' or not obj.data.materials:
+            self.report({'ERROR'}, "Select a mesh with a projected iteration texture")
+            return {'CANCELLED'}
+        
+        # Find the HIGHEST numbered iteration material on this object
+        # This ensures we process newest first: iteration_002 before iteration_001
+        best_slot = -1
+        best_num = -1
+        iteration_mat = None
+        for slot_idx, mat in enumerate(obj.data.materials):
+            if mat and mat.name.startswith('iteration_'):
+                m = re.match(r'iteration_(\d+)', mat.name)
+                if m:
+                    num = int(m.group(1))
+                    if num > best_num:
+                        best_num = num
+                        best_slot = slot_idx
+                        iteration_mat = mat
+        
+        if not iteration_mat or best_slot < 0:
+            self.report({'ERROR'}, "Selected object has no iteration_XXX material")
+            return {'CANCELLED'}
+        
+        iter_num = f"{best_num:03d}"
+        print(f"[PBR] Starting PBR generation for {iteration_mat.name} (iter {iter_num}, slot {best_slot})")
+        
+        # 2. Check server mode
+        if not runcomfy_deployment.is_server_mode():
+            self.report({'ERROR'}, "PBR generation only works in Server mode (GCS)")
+            return {'CANCELLED'}
+        
+        # 3. Extract the iteration texture directly from the material's node tree.
+        # This is the single source of truth -- the packed image that was projected.
+        # Disk files can be stale across sessions, so we never search disk paths.
+        import time
+        
+        blender_img = None
+        for node in iteration_mat.node_tree.nodes:
+            if node.type == 'TEX_IMAGE' and node.image:
+                blender_img = node.image
+                break
+        
+        if not blender_img:
+            self.report({'ERROR'}, f"No image found in {iteration_mat.name} node tree")
+            return {'CANCELLED'}
+        
+        # Save the packed image to a unique temp file for upload
+        temp_dir = workspace_setup.get_temp_directory(context)
+        timestamp = int(time.time())
+        unique_name = f"pbr_input_{iter_num}_{timestamp}.png"
+        iteration_image_path = temp_dir / unique_name
+        blender_img.save_render(str(iteration_image_path))
+        
+        print(f"[PBR] Extracted from material node tree: {blender_img.name} -> {unique_name}")
+        
+        try:
+            # 4. Upload texture to ComfyUI
+            # File is already uniquely named (timestamped) to prevent ComfyUI cache issues
+            server_client = runcomfy_deployment.get_server_client()
+            
+            print(f"[PBR] Uploading {unique_name} to ComfyUI...")
+            upload_response = server_client.upload_image(str(iteration_image_path), overwrite=True)
+            uploaded_filename = upload_response.get("name", "")
+            
+            if not uploaded_filename:
+                self.report({'ERROR'}, "Failed to upload texture to server")
+                return {'CANCELLED'}
+            
+            print(f"[PBR] Uploaded: {uploaded_filename}")
+            
+            # 5. Load and patch workflow
+            addon_dir = Path(__file__).parent
+            workflow_file = addon_dir / "workflows" / "Object" / "objectPBRproject.json"
+            
+            if not workflow_file.exists():
+                self.report({'ERROR'}, "objectPBRproject.json not found")
+                return {'CANCELLED'}
+            
+            with open(workflow_file, 'r') as f:
+                workflow = json.load(f)
+            
+            print(f"[PBR] Loaded workflow: {workflow_file.name}")
+            
+            # Patch Node 22 (LoadImage) with uploaded texture
+            if "22" not in workflow:
+                self.report({'ERROR'}, "Invalid workflow (node 22 missing)")
+                return {'CANCELLED'}
+            
+            workflow["22"]["inputs"]["image"] = uploaded_filename
+            print(f"[PBR] Patched node 22 with: {uploaded_filename}")
+            
+            # 6. Submit to ComfyUI
+            print(f"[PBR] Submitting workflow...")
+            response = server_client.queue_prompt(workflow)
+            prompt_id = response['prompt_id']
+            print(f"[PBR] Queued (ID: {prompt_id[:8]}...)")
+            
+            # 7. Store workflow for progress bar
+            progress_bar.set_current_workflow(workflow)
+            
+            # 8. Capture variables for callback
+            obj_name = obj.name
+            target_slot = best_slot
+            pbr_name = f"pbrmaterial_{iter_num}"
+            pbr_dir_name = f"pbr_{iter_num}"
+            
+            def on_pbr_complete(success, result=None, error=None, workflow_type=None):
+                """Callback when PBR generation completes"""
+                print(f"[PBR] ============================================")
+                print(f"[PBR] PBR GENERATION COMPLETE")
+                print(f"[PBR] ============================================")
+                
+                if not success:
+                    print(f"[PBR] Failed: {error}")
+                    return
+                
+                try:
+                    from concurrent.futures import ThreadPoolExecutor
+                    
+                    # Extract output images
+                    images = extract_output_images(result)
+                    print(f"[PBR] Found {len(images)} output images")
+                    
+                    if not images:
+                        print(f"[PBR] No output images found")
+                        return
+                    
+                    # Create PBR directory
+                    pbr_save_dir = None
+                    proj_lib = workspace_setup.get_project_library(bpy.context)
+                    if proj_lib:
+                        pbr_save_dir = proj_lib / "Textures" / pbr_dir_name
+                    else:
+                        temp = workspace_setup.get_temp_directory(bpy.context)
+                        pbr_save_dir = temp / pbr_dir_name
+                    
+                    pbr_save_dir.mkdir(parents=True, exist_ok=True)
+                    print(f"[PBR] Saving PBR maps to: {pbr_save_dir}")
+                    
+                    # Map prefix to PBR channel
+                    pbr_prefixes = {
+                        'basecolor': 'basecolor',
+                        'normal': 'normal',
+                        'roughness': 'roughness',
+                        'metalness': 'metalness',
+                        'height': 'height',
+                    }
+                    
+                    # Download all maps in parallel
+                    download_tasks = []
+                    for img_info in images:
+                        filename = img_info['filename']
+                        subfolder = img_info.get('subfolder', '')
+                        
+                        # Match filename prefix to PBR channel
+                        for prefix, channel in pbr_prefixes.items():
+                            if filename.lower().startswith(prefix):
+                                save_name = f"pbr_{iter_num}_{channel}.png"
+                                save_path = pbr_save_dir / save_name
+                                download_tasks.append({
+                                    'filename': filename,
+                                    'subfolder': subfolder,
+                                    'save_path': save_path,
+                                    'channel': channel,
+                                })
+                                break
+                    
+                    print(f"[PBR] Downloading {len(download_tasks)} PBR maps...")
+                    
+                    def download_one(task):
+                        try:
+                            server_client.download_image(
+                                task['filename'],
+                                str(task['save_path']),
+                                subfolder=task['subfolder'],
+                            )
+                            print(f"[PBR] Downloaded: {task['channel']} -> {task['save_path'].name}")
+                            return task
+                        except Exception as e:
+                            print(f"[PBR] Failed to download {task['channel']}: {e}")
+                            return None
+                    
+                    downloaded = {}
+                    with ThreadPoolExecutor(max_workers=4) as executor:
+                        results = list(executor.map(download_one, download_tasks))
+                    
+                    for task in results:
+                        if task:
+                            downloaded[task['channel']] = task['save_path']
+                    
+                    print(f"[PBR] Downloaded {len(downloaded)}/{len(download_tasks)} maps")
+                    
+                    # Check minimum required maps
+                    required = ['basecolor', 'normal', 'roughness', 'metalness']
+                    missing = [r for r in required if r not in downloaded]
+                    if missing:
+                        print(f"[PBR] Missing required maps: {missing}")
+                        return
+                    
+                    # ================================================
+                    # CREATE PBR MATERIAL
+                    # ================================================
+                    print(f"[PBR] Creating material: {pbr_name}")
+                    
+                    mat = bpy.data.materials.new(name=pbr_name)
+                    mat.use_nodes = True
+                    nodes = mat.node_tree.nodes
+                    links = mat.node_tree.links
+                    nodes.clear()
+                    
+                    # -- Texture Coordinate --
+                    tex_coord = nodes.new(type='ShaderNodeTexCoord')
+                    tex_coord.location = (-900, 0)
+                    
+                    # -- Mapping --
+                    mapping = nodes.new(type='ShaderNodeMapping')
+                    mapping.location = (-700, 0)
+                    links.new(tex_coord.outputs['UV'], mapping.inputs['Vector'])
+                    
+                    # -- Base Color --
+                    img_basecolor = bpy.data.images.load(str(downloaded['basecolor']))
+                    img_basecolor.name = f"pbr_{iter_num}_basecolor"
+                    tex_basecolor = nodes.new(type='ShaderNodeTexImage')
+                    tex_basecolor.location = (-400, 300)
+                    tex_basecolor.image = img_basecolor
+                    tex_basecolor.label = "Base Color"
+                    links.new(mapping.outputs['Vector'], tex_basecolor.inputs['Vector'])
+                    
+                    # -- Metalness --
+                    img_metalness = bpy.data.images.load(str(downloaded['metalness']))
+                    img_metalness.name = f"pbr_{iter_num}_metalness"
+                    img_metalness.colorspace_settings.name = 'Non-Color'
+                    tex_metalness = nodes.new(type='ShaderNodeTexImage')
+                    tex_metalness.location = (-400, 0)
+                    tex_metalness.image = img_metalness
+                    tex_metalness.label = "Metalness"
+                    links.new(mapping.outputs['Vector'], tex_metalness.inputs['Vector'])
+                    
+                    # -- Roughness --
+                    img_roughness = bpy.data.images.load(str(downloaded['roughness']))
+                    img_roughness.name = f"pbr_{iter_num}_roughness"
+                    img_roughness.colorspace_settings.name = 'Non-Color'
+                    tex_roughness = nodes.new(type='ShaderNodeTexImage')
+                    tex_roughness.location = (-400, -300)
+                    tex_roughness.image = img_roughness
+                    tex_roughness.label = "Roughness"
+                    links.new(mapping.outputs['Vector'], tex_roughness.inputs['Vector'])
+                    
+                    # -- Normal --
+                    img_normal = bpy.data.images.load(str(downloaded['normal']))
+                    img_normal.name = f"pbr_{iter_num}_normal"
+                    img_normal.colorspace_settings.name = 'Non-Color'
+                    tex_normal = nodes.new(type='ShaderNodeTexImage')
+                    tex_normal.location = (-400, -600)
+                    tex_normal.image = img_normal
+                    tex_normal.label = "Normal"
+                    links.new(mapping.outputs['Vector'], tex_normal.inputs['Vector'])
+                    
+                    # -- Normal Map node --
+                    normal_map = nodes.new(type='ShaderNodeNormalMap')
+                    normal_map.location = (-100, -600)
+                    normal_map.space = 'TANGENT'
+                    normal_map.inputs['Strength'].default_value = 1.0
+                    links.new(tex_normal.outputs['Color'], normal_map.inputs['Color'])
+                    
+                    # -- Principled BSDF --
+                    bsdf = nodes.new(type='ShaderNodeBsdfPrincipled')
+                    bsdf.location = (200, 0)
+                    
+                    links.new(tex_basecolor.outputs['Color'], bsdf.inputs['Base Color'])
+                    links.new(tex_metalness.outputs['Color'], bsdf.inputs['Metallic'])
+                    links.new(tex_roughness.outputs['Color'], bsdf.inputs['Roughness'])
+                    links.new(normal_map.outputs['Normal'], bsdf.inputs['Normal'])
+                    
+                    # -- Material Output --
+                    output = nodes.new(type='ShaderNodeOutputMaterial')
+                    output.location = (500, 0)
+                    links.new(bsdf.outputs['BSDF'], output.inputs['Surface'])
+                    
+                    # ================================================
+                    # ASSIGN MATERIAL TO OBJECT (replace same slot)
+                    # ================================================
+                    target_obj = bpy.data.objects.get(obj_name)
+                    if target_obj and target_obj.type == 'MESH':
+                        # Replace the exact slot where iteration_XXX was
+                        if target_obj.data.materials and target_slot < len(target_obj.data.materials):
+                            target_obj.data.materials[target_slot] = mat
+                            print(f"[PBR] Replaced slot {target_slot} on {target_obj.name} with {pbr_name}")
+                        else:
+                            target_obj.data.materials.append(mat)
+                            print(f"[PBR] Appended {pbr_name} to {target_obj.name}")
+                    else:
+                        print(f"[PBR] Object '{obj_name}' not found, material created but not assigned")
+                    
+                    print(f"[PBR] ============================================")
+                    print(f"[PBR] PBR MATERIAL CREATED: {pbr_name}")
+                    print(f"[PBR]   Base Color: {downloaded['basecolor'].name}")
+                    print(f"[PBR]   Metalness:  {downloaded['metalness'].name}")
+                    print(f"[PBR]   Roughness:  {downloaded['roughness'].name}")
+                    print(f"[PBR]   Normal:     {downloaded['normal'].name}")
+                    if 'height' in downloaded:
+                        print(f"[PBR]   Height:     {downloaded['height'].name} (saved, not used in shader)")
+                    print(f"[PBR] ============================================")
+                    
+                except Exception as e:
+                    print(f"[PBR] Error in callback: {e}")
+                    import traceback
+                    traceback.print_exc()
+            
+            # Register for non-blocking polling
+            runcomfy_polling.RunComfyPoller.start_polling(
+                deployment_id='server',
+                request_id=prompt_id,
+                callback=on_pbr_complete,
+                workflow_type='pbr'
+            )
+            
+            self.report({'INFO'}, f"Generating PBR maps for iteration_{iter_num}... (watch progress bar)")
+            print(f"[PBR] Processing in background...")
+            
+            return {'FINISHED'}
+            
+        except Exception as e:
+            self.report({'ERROR'}, f"PBR generation failed: {str(e)}")
+            print(f"[PBR] Error: {e}")
+            import traceback
+            traceback.print_exc()
+            return {'CANCELLED'}
+
+
+# ================================================================
+# PBR FROM TEXT PROMPT OPERATOR
+# ================================================================
+
+class WM_OT_PBRFromText(bpy.types.Operator):
+    """Generate a PBR material from a text prompt using chord_v1"""
+    bl_idname = "style_engine.pbr_from_text"
+    bl_label = "Generate PBR Material"
+    bl_description = "Generate PBR maps (basecolor, normal, roughness, metalness) from a text description"
+    bl_options = {'REGISTER'}
+    
+    def execute(self, context):
+        import json
+        from pathlib import Path
+        from . import runcomfy_deployment
+        from . import workspace_setup
+        from . import progress_bar
+        from . import runcomfy_polling
+        from . import utils
+        from .runcomfy_server_client import extract_output_images
+        
+        # 1. Check server mode
+        if not runcomfy_deployment.is_server_mode():
+            self.report({'ERROR'}, "PBR generation only works in Server mode (GCS)")
+            return {'CANCELLED'}
+        
+        # 2. Parse prompts from text editor
+        prompt_from_editor = utils.get_prompt_from_text_editor()
+        if not prompt_from_editor:
+            self.report({'ERROR'}, "No prompt found in STYLEENGINE_Prompt text block")
+            return {'CANCELLED'}
+        
+        positive_prompt, negative_prompt = utils.process_prompt_builder(prompt_from_editor)
+        
+        if not positive_prompt:
+            self.report({'ERROR'}, "No positive prompt found. Write a texture description in the <p> tag.")
+            return {'CANCELLED'}
+        
+        print(f"[PBR Text] Positive: {positive_prompt[:80]}...")
+        print(f"[PBR Text] Negative: {negative_prompt[:80]}..." if negative_prompt else "[PBR Text] Negative: (none)")
+        
+        try:
+            server_client = runcomfy_deployment.get_server_client()
+            
+            # 3. Load and patch workflow
+            addon_dir = Path(__file__).parent
+            workflow_file = addon_dir / "workflows" / "Object" / "objectPBRtext.json"
+            
+            if not workflow_file.exists():
+                self.report({'ERROR'}, "objectPBRtext.json not found")
+                return {'CANCELLED'}
+            
+            with open(workflow_file, 'r') as f:
+                workflow = json.load(f)
+            
+            print(f"[PBR Text] Loaded workflow: {workflow_file.name}")
+            
+            # Patch Node 38 (Text Multiline) with positive prompt
+            if "38" in workflow:
+                workflow["38"]["inputs"]["text"] = positive_prompt
+                print(f"[PBR Text] Patched node 38 (prompt): {positive_prompt[:60]}...")
+            
+            # Patch Node 25 (CLIPTextEncode) with negative prompt
+            if "25" in workflow:
+                workflow["25"]["inputs"]["text"] = negative_prompt or ""
+                print(f"[PBR Text] Patched node 25 (negative): {negative_prompt[:60]}..." if negative_prompt else "[PBR Text] Patched node 25 (negative): empty")
+            
+            # Patch seed (Node 26 - KSampler)
+            seed = context.scene.style_engine_props.seed_value
+            if "26" in workflow:
+                workflow["26"]["inputs"]["seed"] = seed
+                print(f"[PBR Text] Patched node 26 (seed): {seed}")
+            
+            # 4. Submit to ComfyUI
+            print(f"[PBR Text] Submitting workflow...")
+            response = server_client.queue_prompt(workflow)
+            prompt_id = response['prompt_id']
+            print(f"[PBR Text] Queued (ID: {prompt_id[:8]}...)")
+            
+            # 5. Store workflow for progress bar
+            progress_bar.set_current_workflow(workflow)
+            
+            # 6. Capture variables for callback
+            obj_name = None
+            obj = context.active_object
+            if obj and obj.type == 'MESH':
+                obj_name = obj.name
+            
+            def on_pbr_text_complete(success, result=None, error=None, workflow_type=None):
+                """Callback when text-to-PBR generation completes"""
+                print(f"[PBR Text] ============================================")
+                print(f"[PBR Text] TEXT-TO-PBR GENERATION COMPLETE")
+                print(f"[PBR Text] ============================================")
+                
+                if not success:
+                    print(f"[PBR Text] Failed: {error}")
+                    return
+                
+                try:
+                    from concurrent.futures import ThreadPoolExecutor
+                    
+                    # Extract output images
+                    images = extract_output_images(result)
+                    print(f"[PBR Text] Found {len(images)} output images")
+                    
+                    if not images:
+                        print(f"[PBR Text] No output images found")
+                        return
+                    
+                    # Auto-increment naming: find next available pbr_text_XXX
+                    pbr_num = 0
+                    while f"pbrmaterial_text_{pbr_num:03d}" in bpy.data.materials:
+                        pbr_num += 1
+                    
+                    iter_num = f"{pbr_num:03d}"
+                    pbr_name = f"pbrmaterial_text_{iter_num}"
+                    pbr_dir_name = f"pbr_text_{iter_num}"
+                    
+                    print(f"[PBR Text] Using name: {pbr_name}")
+                    
+                    # Create PBR directory
+                    pbr_save_dir = None
+                    proj_lib = workspace_setup.get_project_library(bpy.context)
+                    if proj_lib:
+                        pbr_save_dir = proj_lib / "Textures" / pbr_dir_name
+                    else:
+                        temp = workspace_setup.get_temp_directory(bpy.context)
+                        pbr_save_dir = temp / pbr_dir_name
+                    
+                    pbr_save_dir.mkdir(parents=True, exist_ok=True)
+                    print(f"[PBR Text] Saving PBR maps to: {pbr_save_dir}")
+                    
+                    # Map prefix to PBR channel
+                    pbr_prefixes = {
+                        'texture_image': 'texture_image',
+                        'basecolor': 'basecolor',
+                        'normal': 'normal',
+                        'roughness': 'roughness',
+                        'metalness': 'metalness',
+                        'height': 'height',
+                    }
+                    
+                    # Download all maps in parallel
+                    download_tasks = []
+                    for img_info in images:
+                        filename = img_info['filename']
+                        subfolder = img_info.get('subfolder', '')
+                        
+                        for prefix, channel in pbr_prefixes.items():
+                            if filename.lower().startswith(prefix):
+                                save_name = f"pbr_text_{iter_num}_{channel}.png"
+                                save_path = pbr_save_dir / save_name
+                                download_tasks.append({
+                                    'filename': filename,
+                                    'subfolder': subfolder,
+                                    'save_path': save_path,
+                                    'channel': channel,
+                                })
+                                break
+                    
+                    print(f"[PBR Text] Downloading {len(download_tasks)} maps...")
+                    
+                    def download_one(task):
+                        try:
+                            server_client.download_image(
+                                task['filename'],
+                                str(task['save_path']),
+                                subfolder=task['subfolder'],
+                            )
+                            print(f"[PBR Text] Downloaded: {task['channel']} -> {task['save_path'].name}")
+                            return task
+                        except Exception as e:
+                            print(f"[PBR Text] Failed to download {task['channel']}: {e}")
+                            return None
+                    
+                    downloaded = {}
+                    with ThreadPoolExecutor(max_workers=4) as executor:
+                        results = list(executor.map(download_one, download_tasks))
+                    
+                    for task in results:
+                        if task:
+                            downloaded[task['channel']] = task['save_path']
+                    
+                    print(f"[PBR Text] Downloaded {len(downloaded)}/{len(download_tasks)} maps")
+                    
+                    # Check minimum required maps
+                    required = ['basecolor', 'normal', 'roughness', 'metalness']
+                    missing = [r for r in required if r not in downloaded]
+                    if missing:
+                        print(f"[PBR Text] Missing required maps: {missing}")
+                        return
+                    
+                    # ================================================
+                    # CREATE PBR MATERIAL
+                    # ================================================
+                    print(f"[PBR Text] Creating material: {pbr_name}")
+                    
+                    mat = bpy.data.materials.new(name=pbr_name)
+                    mat.use_nodes = True
+                    nodes = mat.node_tree.nodes
+                    links = mat.node_tree.links
+                    nodes.clear()
+                    
+                    # -- Texture Coordinate --
+                    tex_coord = nodes.new(type='ShaderNodeTexCoord')
+                    tex_coord.location = (-900, 0)
+                    
+                    # -- Mapping --
+                    mapping = nodes.new(type='ShaderNodeMapping')
+                    mapping.location = (-700, 0)
+                    links.new(tex_coord.outputs['UV'], mapping.inputs['Vector'])
+                    
+                    # -- Base Color --
+                    img_basecolor = bpy.data.images.load(str(downloaded['basecolor']))
+                    img_basecolor.name = f"pbr_text_{iter_num}_basecolor"
+                    tex_basecolor = nodes.new(type='ShaderNodeTexImage')
+                    tex_basecolor.location = (-400, 300)
+                    tex_basecolor.image = img_basecolor
+                    tex_basecolor.label = "Base Color"
+                    links.new(mapping.outputs['Vector'], tex_basecolor.inputs['Vector'])
+                    
+                    # -- Metalness --
+                    img_metalness = bpy.data.images.load(str(downloaded['metalness']))
+                    img_metalness.name = f"pbr_text_{iter_num}_metalness"
+                    img_metalness.colorspace_settings.name = 'Non-Color'
+                    tex_metalness = nodes.new(type='ShaderNodeTexImage')
+                    tex_metalness.location = (-400, 0)
+                    tex_metalness.image = img_metalness
+                    tex_metalness.label = "Metalness"
+                    links.new(mapping.outputs['Vector'], tex_metalness.inputs['Vector'])
+                    
+                    # -- Roughness --
+                    img_roughness = bpy.data.images.load(str(downloaded['roughness']))
+                    img_roughness.name = f"pbr_text_{iter_num}_roughness"
+                    img_roughness.colorspace_settings.name = 'Non-Color'
+                    tex_roughness = nodes.new(type='ShaderNodeTexImage')
+                    tex_roughness.location = (-400, -300)
+                    tex_roughness.image = img_roughness
+                    tex_roughness.label = "Roughness"
+                    links.new(mapping.outputs['Vector'], tex_roughness.inputs['Vector'])
+                    
+                    # -- Normal --
+                    img_normal = bpy.data.images.load(str(downloaded['normal']))
+                    img_normal.name = f"pbr_text_{iter_num}_normal"
+                    img_normal.colorspace_settings.name = 'Non-Color'
+                    tex_normal = nodes.new(type='ShaderNodeTexImage')
+                    tex_normal.location = (-400, -600)
+                    tex_normal.image = img_normal
+                    tex_normal.label = "Normal"
+                    links.new(mapping.outputs['Vector'], tex_normal.inputs['Vector'])
+                    
+                    # -- Normal Map node --
+                    normal_map = nodes.new(type='ShaderNodeNormalMap')
+                    normal_map.location = (-100, -600)
+                    normal_map.space = 'TANGENT'
+                    normal_map.inputs['Strength'].default_value = 1.0
+                    links.new(tex_normal.outputs['Color'], normal_map.inputs['Color'])
+                    
+                    # -- Principled BSDF --
+                    bsdf = nodes.new(type='ShaderNodeBsdfPrincipled')
+                    bsdf.location = (200, 0)
+                    
+                    links.new(tex_basecolor.outputs['Color'], bsdf.inputs['Base Color'])
+                    links.new(tex_metalness.outputs['Color'], bsdf.inputs['Metallic'])
+                    links.new(tex_roughness.outputs['Color'], bsdf.inputs['Roughness'])
+                    links.new(normal_map.outputs['Normal'], bsdf.inputs['Normal'])
+                    
+                    # -- Material Output --
+                    output = nodes.new(type='ShaderNodeOutputMaterial')
+                    output.location = (500, 0)
+                    links.new(bsdf.outputs['BSDF'], output.inputs['Surface'])
+                    
+                    # ================================================
+                    # ASSIGN MATERIAL TO ACTIVE MESH (if any)
+                    # ================================================
+                    if obj_name:
+                        target_obj = bpy.data.objects.get(obj_name)
+                        if target_obj and target_obj.type == 'MESH':
+                            if target_obj.data.materials:
+                                target_obj.data.materials[0] = mat
+                            else:
+                                target_obj.data.materials.append(mat)
+                            print(f"[PBR Text] Assigned {pbr_name} to {target_obj.name}")
+                        else:
+                            print(f"[PBR Text] Object '{obj_name}' not found, material created but not assigned")
+                    else:
+                        print(f"[PBR Text] No active mesh, material '{pbr_name}' created (assign manually)")
+                    
+                    print(f"[PBR Text] ============================================")
+                    print(f"[PBR Text] PBR MATERIAL CREATED: {pbr_name}")
+                    print(f"[PBR Text]   Base Color: {downloaded['basecolor'].name}")
+                    print(f"[PBR Text]   Metalness:  {downloaded['metalness'].name}")
+                    print(f"[PBR Text]   Roughness:  {downloaded['roughness'].name}")
+                    print(f"[PBR Text]   Normal:     {downloaded['normal'].name}")
+                    if 'height' in downloaded:
+                        print(f"[PBR Text]   Height:     {downloaded['height'].name} (saved, not used in shader)")
+                    if 'texture_image' in downloaded:
+                        print(f"[PBR Text]   Texture:    {downloaded['texture_image'].name} (raw generated, saved)")
+                    print(f"[PBR Text] ============================================")
+                    
+                except Exception as e:
+                    print(f"[PBR Text] Error in callback: {e}")
+                    import traceback
+                    traceback.print_exc()
+            
+            # Register for non-blocking polling
+            runcomfy_polling.RunComfyPoller.start_polling(
+                deployment_id='server',
+                request_id=prompt_id,
+                callback=on_pbr_text_complete,
+                workflow_type='pbr'
+            )
+            
+            self.report({'INFO'}, f"Generating PBR material from text... (watch progress bar)")
+            print(f"[PBR Text] Processing in background...")
+            
+            return {'FINISHED'}
+            
+        except Exception as e:
+            self.report({'ERROR'}, f"PBR text generation failed: {str(e)}")
+            print(f"[PBR Text] Error: {e}")
+            import traceback
+            traceback.print_exc()
+            return {'CANCELLED'}
+
+
+# ================================================================
 # REFERENCE IMAGE OPERATORS
 # ================================================================
 
@@ -1926,6 +2681,112 @@ class WM_OT_RefreshLoraList(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class WM_OT_LoadLoraKeywords(bpy.types.Operator):
+    """Load trigger keywords for the selected LoRa into the <k> tag"""
+    bl_idname = "style_engine.load_lora_keywords"
+    bl_label = "Load Keywords"
+    bl_description = "Load trigger keywords for the selected LoRa(s) into the <k> tag in the prompt editor"
+    
+    def execute(self, context):
+        import re
+        from pathlib import Path
+        from . import workspace_setup
+        
+        props = context.scene.style_engine_props
+        
+        # 1. Load keywords.txt
+        addon_dir = Path(__file__).parent
+        keywords_file = addon_dir / "loras" / "keywords.txt"
+        
+        if not keywords_file.exists():
+            self.report({'ERROR'}, "keywords.txt not found")
+            print(f"[Load Keywords] ❌ File not found: {keywords_file}")
+            return {'CANCELLED'}
+        
+        # Parse keywords.txt (format: "filename.safetensors: "keywords here"")
+        keyword_map = {}
+        with open(keywords_file, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                # Split on first colon
+                if ':' in line:
+                    parts = line.split(':', 1)
+                    lora_name = parts[0].strip()
+                    keywords_raw = parts[1].strip().strip('"').strip()
+                    if lora_name and keywords_raw:
+                        keyword_map[lora_name] = keywords_raw
+        
+        if not keyword_map:
+            self.report({'ERROR'}, "keywords.txt is empty or has no valid entries")
+            return {'CANCELLED'}
+        
+        print(f"[Load Keywords] Loaded {len(keyword_map)} keyword entries")
+        
+        # 2. Collect keywords from active LoRAs
+        collected_keywords = []
+        
+        if props.lora_enabled and props.lora_name != 'NONE':
+            if props.lora_name in keyword_map:
+                collected_keywords.append(keyword_map[props.lora_name])
+                print(f"[Load Keywords] LoRa 1 ({props.lora_name}): {keyword_map[props.lora_name]}")
+            else:
+                print(f"[Load Keywords] LoRa 1 ({props.lora_name}): No keywords found")
+        
+        if props.lora2_enabled and props.lora2_name != 'NONE':
+            if props.lora2_name in keyword_map:
+                collected_keywords.append(keyword_map[props.lora2_name])
+                print(f"[Load Keywords] LoRa 2 ({props.lora2_name}): {keyword_map[props.lora2_name]}")
+            else:
+                print(f"[Load Keywords] LoRa 2 ({props.lora2_name}): No keywords found")
+        
+        if not collected_keywords:
+            self.report({'WARNING'}, "No keywords found for selected LoRa(s)")
+            return {'CANCELLED'}
+        
+        # 3. Get text editor
+        text_block = bpy.data.texts.get("STYLEENGINE_Prompt")
+        if not text_block:
+            self.report({'ERROR'}, "STYLEENGINE_Prompt text block not found")
+            return {'CANCELLED'}
+        
+        # Save before snapshot
+        workspace_setup.save_prompt_snapshot(context, prefix="before_keywords")
+        
+        # 4. Insert into <k> tag
+        current_content = text_block.as_string()
+        new_keywords = ', '.join(collected_keywords)
+        
+        k_match = re.search(r'<k>(.*?)</k>', current_content, re.DOTALL | re.IGNORECASE)
+        if k_match:
+            existing_k = k_match.group(1).strip()
+            if existing_k:
+                # Append to existing keywords
+                final_keywords = existing_k + ', ' + new_keywords
+            else:
+                final_keywords = new_keywords
+            new_content = re.sub(
+                r'(<k>)(.*?)(</k>)',
+                r'\1' + final_keywords + r'\3',
+                current_content,
+                flags=re.DOTALL | re.IGNORECASE
+            )
+        else:
+            # No <k> tag, add one at the top
+            new_content = f"<k>{new_keywords}</k>\n" + current_content
+        
+        text_block.clear()
+        text_block.write(new_content)
+        
+        # Save after snapshot
+        workspace_setup.save_prompt_snapshot(context, prefix="after_keywords")
+        
+        self.report({'INFO'}, f"Keywords loaded: {new_keywords[:60]}...")
+        print(f"[Load Keywords] ✓ Inserted into <k> tag: {new_keywords}")
+        return {'FINISHED'}
+
+
 class WM_OT_TestCloudGeneration(bpy.types.Operator):
     """Test workflow with current settings (dev tool)"""
     bl_idname = "style_engine.test_cloud_generation"
@@ -2041,6 +2902,12 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
             col = file_box.column(align=True)
             col.label(text="Render Quality:")
             col.prop(style_props, "render_quality", text="")
+            
+            # Seed
+            file_box.separator()
+            row = file_box.row(align=True)
+            row.prop(style_props, "seed_value", text="Seed")
+            row.operator("style_engine.reroll_seed", text="", icon='FILE_REFRESH')
             
             # ────────────────────────────────────────────────────────────
             # VIEW SUB-CATEGORY (Collapsible)
@@ -2733,51 +3600,54 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
             lora_header.label(text="", icon='MODIFIER')
             
             if style_props.show_loras:
-                lora_col = lora_box.column(align=True)
+                lora_col = lora_box.column(align=False)
                 
-                # Enable checkbox
-                lora_col.prop(style_props, "lora_enabled", 
+                # ── LoRa 1 ──────────────────────────────────
+                lora1_box = lora_col.box()
+                lora1_col = lora1_box.column(align=True)
+                
+                # Enable toggle (prominent)
+                row = lora1_col.row()
+                row.scale_y = 1.4
+                row.prop(style_props, "lora_enabled", 
                               text="Use LoRa", 
-                              toggle=True)
+                              toggle=True, icon='MODIFIER')
                 
                 # Only show controls if enabled
                 if style_props.lora_enabled:
-                    lora_col.separator(factor=0.5)
+                    lora1_col.separator(factor=0.3)
                     
                     # LoRa dropdown with refresh button
-                    lora_col.label(text="Model:", icon='FILE')
-                    refresh_row = lora_col.row(align=True)
+                    refresh_row = lora1_col.row(align=True)
                     refresh_row.prop(style_props, "lora_name", text="")
                     refresh_row.operator("style_engine.refresh_lora_list", text="", icon='FILE_REFRESH')
                     
-                    lora_col.separator(factor=0.5)
-                    
                     # Strength slider
-                    lora_col.label(text="Strength:", icon='FORCE_FORCE')
-                    lora_col.prop(style_props, "lora_strength_model", 
-                                  text="", 
+                    lora1_col.prop(style_props, "lora_strength_model", 
+                                  text="Strength", 
                                   slider=True)
                 
-                # LoRa 2 Enable
-                lora_col.separator(factor=0.5)
-                lora_col.prop(style_props, "lora2_enabled", text="Use LoRa 2", toggle=True)
+                # ── LoRa 2 ──────────────────────────────────
+                lora2_box = lora_col.box()
+                lora2_col = lora2_box.column(align=True)
+                
+                lora2_col.prop(style_props, "lora2_enabled", text="Use LoRa 2", toggle=True, icon='MODIFIER')
                 
                 # Show LoRa 2 controls if enabled
                 if style_props.lora2_enabled:
-                    lora_col.separator(factor=0.5)
+                    lora2_col.separator(factor=0.3)
                     
                     # LoRa 2 dropdown
-                    lora_col.label(text="LoRa 2:", icon='FILE')
-                    lora_col.prop(style_props, "lora2_name", text="")
-                    
-                    lora_col.separator(factor=0.5)
+                    lora2_col.prop(style_props, "lora2_name", text="")
                     
                     # LoRa 2 Strength
-                    lora_col.label(text="Strength 2:", icon='FORCE_FORCE')
-                    lora_col.prop(style_props, "lora2_strength_model", text="", slider=True)
+                    lora2_col.prop(style_props, "lora2_strength_model", text="Strength", slider=True)
+                
+                # ── Load Keywords Button ────────────────────
+                lora_col.separator(factor=0.3)
+                lora_col.operator("style_engine.load_lora_keywords", text="Load Keywords", icon='TEXT')
                 
                 # Show active LoRas summary
-                lora_col.separator(factor=0.3)
                 active_loras = []
                 if style_props.lora_enabled and style_props.lora_name != 'NONE':
                     active_loras.append(f"L1: {style_props.lora_name.replace('.safetensors', '')[:12]}")
@@ -2788,6 +3658,30 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                     info_row = lora_col.row()
                     info_row.scale_y = 0.7
                     info_row.label(text=", ".join(active_loras), icon='CHECKMARK')
+            
+            # ────────────────────────────────────────────────────────────
+            # PROJECT TEXTURE & PBR BUTTONS
+            # ────────────────────────────────────────────────────────────
+            img_gen_box.separator()
+            row = img_gen_box.row()
+            row.scale_y = 1.3
+            row.operator("style_engine.project_texture", text="Project Texture", icon='UV')
+            
+            # PBR from Projected Texture (conditional: only when active mesh has iteration_XXX material)
+            obj = context.active_object
+            has_iteration_mat = (
+                obj and obj.type == 'MESH' and obj.data.materials and
+                any(m and m.name.startswith('iteration_') for m in obj.data.materials)
+            )
+            if has_iteration_mat:
+                row = img_gen_box.row()
+                row.scale_y = 1.2
+                row.operator("style_engine.pbr_from_projected", text="PBR from Projected Texture", icon='MATSHADERBALL')
+            
+            # Generate PBR Material from text (always visible)
+            row = img_gen_box.row()
+            row.scale_y = 1.2
+            row.operator("style_engine.pbr_from_text", text="Generate PBR Material", icon='MATSHADERBALL')
         
         # ================================================================
         # 3D GENERATION CATEGORY (Collapsible)
@@ -3750,6 +4644,7 @@ class WM_OT_GenerateTexturedMeshMultiview(bpy.types.Operator):
 classes = (
     ObjectGroup,
     StyleEngineProperties,
+    WM_OT_RerollSeed,
     WM_OT_AlignAICameraToView,
     WM_OT_BringBackgroundForward,
     WM_OT_SendBackgroundBack,
@@ -3760,11 +4655,14 @@ classes = (
     WM_OT_SelectGroup,
     WM_OT_DeleteGroup,
     WM_OT_ProjectTexture,
+    WM_OT_PBRFromProjectedTexture,
+    WM_OT_PBRFromText,
     WM_OT_LoadReferenceImage,
     WM_OT_ClearReferenceImage,
     WM_OT_ReloadReferenceImage,
     WM_OT_CancelGeneration,
     WM_OT_RefreshLoraList,
+    WM_OT_LoadLoraKeywords,
     WM_OT_TestCloudGeneration,
     WM_OT_RefinePrompt,
     WM_OT_GenerateImageDescription,

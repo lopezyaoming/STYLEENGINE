@@ -192,6 +192,11 @@ class WM_OT_UVTexture(Operator):
             workflow_json["20"]["inputs"]["steps"] = params['texture_steps']
             workflow_json["20"]["inputs"]["texture_size"] = params['texture_size']
             
+            # Seed (Node 30 - Hy3D21TextureMesh) - unified seed from UI
+            seed = style_props.seed_value
+            if "30" in workflow_json:
+                workflow_json["30"]["inputs"]["seed"] = seed
+            
             print(f"[UV Texture] ✓ Quality: {quality}")
             print(f"[UV Texture] ✓ Texture: view={params['view_size']}, steps={params['texture_steps']}, size={params['texture_size']}")
             
@@ -423,7 +428,7 @@ class WM_OT_CreateObject(Operator):
             
             workflow_json["14"]["inputs"]["image"] = uploaded_img_name
             workflow_json["32"]["inputs"]["string"] = f"StyleEngine_Mesh_{int(time.time())}"
-            workflow_json["37"]["inputs"]["seed"] = int(time.time() * 1000) % 999999999999
+            workflow_json["37"]["inputs"]["seed"] = style_props.seed_value
             
             # Apply quality parameters
             workflow_json["37"]["inputs"]["steps"] = params['mesh_steps']
@@ -471,7 +476,7 @@ class WM_OT_CreateObject(Operator):
                 
                 try:
                     # Find output GLB from Node 44 (saves untextured mesh)
-                    print(f"[Create Object] Step 6: Downloading mesh...")
+                    print(f"[Create Object] Step 6: Resolving output filename...")
                     outputs = result.get('outputs', {})
                     print(f"[Create Object] DEBUG: Available nodes: {list(outputs.keys())}")
                     
@@ -497,50 +502,60 @@ class WM_OT_CreateObject(Operator):
                         output_filename = f"{output_name}_00001_.glb"
                         print(f"[Create Object] ⚠️ Using constructed filename: {output_filename}")
                     
-                    # Download
-                    download_success = server_client.download_mesh(
-                        output_filename,
-                        str(download_path),
-                        subfolder=subfolder,
-                        file_type="output"
-                    )
+                    # Download in background thread to avoid freezing UI
+                    import threading
                     
-                    if not download_success:
-                        print(f"[Create Object] ❌ Download failed")
-                        return
+                    def _download_thread():
+                        try:
+                            print(f"[Create Object] Downloading in background...")
+                            dl_success = server_client.download_mesh(
+                                output_filename,
+                                str(download_path),
+                                subfolder=subfolder,
+                                file_type="output"
+                            )
+                            
+                            if not dl_success:
+                                print(f"[Create Object] ❌ Download failed")
+                                return
+                            
+                            print(f"[Create Object] ✓ Downloaded: {download_path.name}")
+                            
+                            # Schedule import on main thread (bpy requires it)
+                            def _do_import():
+                                try:
+                                    print(f"[Create Object] Step 7: Importing mesh into scene...")
+                                    original_selected = list(bpy.context.selected_objects)
+                                    bpy.ops.import_scene.gltf(filepath=str(download_path))
+                                    newly_imported = [o for o in bpy.context.selected_objects if o not in original_selected]
+                                    
+                                    if newly_imported:
+                                        new_obj = newly_imported[0]
+                                        new_obj.name = f"AI_Mesh_{int(time.time())}"
+                                        new_obj.location = (0, 0, 0)
+                                        print(f"[Create Object] ✓ Imported: {new_obj.name}")
+                                        workspace_setup.save_mesh_to_library(bpy.context, download_path, mesh_type='mesh')
+                                        print(f"[Create Object] ✅ 3D mesh created from AI!")
+                                    else:
+                                        print(f"[Create Object] ⚠️ Mesh imported but not found")
+                                    
+                                    print(f"[Create Object] ============================================")
+                                    print(f"[Create Object] MESH GENERATION COMPLETE")
+                                    print(f"[Create Object] ============================================")
+                                except Exception as e:
+                                    print(f"[Create Object] ❌ Import error: {e}")
+                                    import traceback
+                                    traceback.print_exc()
+                                return None  # Don't repeat timer
+                            
+                            bpy.app.timers.register(_do_import, first_interval=0.1)
+                            
+                        except Exception as e:
+                            print(f"[Create Object] ❌ Download error: {e}")
+                            import traceback
+                            traceback.print_exc()
                     
-                    print(f"[Create Object] ✓ Downloaded: {download_path.name}")
-                    
-                    # Step 7: Import into Blender
-                    print(f"[Create Object] Step 7: Importing mesh into scene...")
-                    
-                    original_selected = list(bpy.context.selected_objects)
-                    
-                    # Import GLB
-                    bpy.ops.import_scene.gltf(filepath=str(download_path))
-                    
-                    # Get newly imported
-                    newly_imported = [o for o in bpy.context.selected_objects if o not in original_selected]
-                    
-                    if newly_imported:
-                        new_obj = newly_imported[0]
-                        new_obj.name = f"AI_Mesh_{int(time.time())}"
-                        
-                        # Position at world origin
-                        new_obj.location = (0, 0, 0)
-                        
-                        print(f"[Create Object] ✓ Imported: {new_obj.name}")
-                        
-                        # Save mesh to Models library
-                        workspace_setup.save_mesh_to_library(bpy.context, download_path, mesh_type='mesh')
-                        
-                        print(f"[Create Object] ✅ 3D mesh created from AI!")
-                    else:
-                        print(f"[Create Object] ⚠️ Mesh imported but not found")
-                    
-                    print(f"[Create Object] ============================================")
-                    print(f"[Create Object] MESH GENERATION COMPLETE")
-                    print(f"[Create Object] ============================================")
+                    threading.Thread(target=_download_thread, daemon=True).start()
                     
                 except Exception as e:
                     print(f"[Create Object] ❌ Error: {e}")
@@ -638,7 +653,7 @@ class WM_OT_CreateTexturedObject(Operator):
             
             workflow_json["14"]["inputs"]["image"] = uploaded_img_name
             workflow_json["32"]["inputs"]["string"] = f"StyleEngine_Textured_{int(time.time())}"
-            workflow_json["37"]["inputs"]["seed"] = int(time.time() * 1000) % 999999999999
+            workflow_json["37"]["inputs"]["seed"] = style_props.seed_value
             
             # Apply quality parameters (mesh + texture)
             workflow_json["37"]["inputs"]["steps"] = params['mesh_steps']
@@ -684,77 +699,76 @@ class WM_OT_CreateTexturedObject(Operator):
                     print(f"[Create Textured] ❌ Generation failed: {error}")
                     return
                 
-                print(f"[Create Textured] ✓ Generation complete! Scheduling download/import...")
+                print(f"[Create Textured] ✓ Generation complete! Starting background download...")
                 
-                # Schedule heavy operations separately (keeps callback fast!)
-                def do_download_and_import():
-                    """Heavy operations - download and import GLB"""
+                # Resolve output filename first (lightweight, no I/O)
+                outputs = result.get('outputs', {})
+                output_filename = None
+                subfolder = ""
+                
+                if '62' in outputs:
+                    node_62_output = outputs['62']
+                    if isinstance(node_62_output, dict) and 'result' in node_62_output:
+                        result_data = node_62_output['result']
+                        if isinstance(result_data, list) and len(result_data) > 0:
+                            full_path = result_data[0]
+                            if full_path and full_path.endswith('.glb'):
+                                if '/' in full_path:
+                                    subfolder, output_filename = full_path.rsplit('/', 1)
+                                else:
+                                    output_filename = full_path
+                                print(f"[Create Textured] ✓ Found: {subfolder}/{output_filename}" if subfolder else f"[Create Textured] ✓ Found: {output_filename}")
+                
+                if not output_filename:
+                    print(f"[Create Textured] ❌ No GLB found!")
+                    return
+                
+                # Download in background thread to avoid freezing UI
+                import threading
+                
+                def _download_thread():
                     try:
-                        print(f"[Create Textured] ============================================")
-                        print(f"[Create Textured] Starting download & import...")
-                        print(f"[Create Textured] ============================================")
+                        print(f"[Create Textured] Downloading in background...")
+                        dl_success = server_client.download_mesh(output_filename, str(download_path), subfolder=subfolder, file_type="output")
                         
-                        outputs = result.get('outputs', {})
-                        output_filename = None
-                        subfolder = ""
-                        
-                        # Get filename from Node 62
-                        if '62' in outputs:
-                            node_62_output = outputs['62']
-                            if isinstance(node_62_output, dict) and 'result' in node_62_output:
-                                result_data = node_62_output['result']
-                                if isinstance(result_data, list) and len(result_data) > 0:
-                                    full_path = result_data[0]
-                                    if full_path and full_path.endswith('.glb'):
-                                        if '/' in full_path:
-                                            subfolder, output_filename = full_path.rsplit('/', 1)
-                                        else:
-                                            output_filename = full_path
-                                        print(f"[Create Textured] ✓ Found: {subfolder}/{output_filename}" if subfolder else f"✓ Found: {output_filename}")
-                        
-                        if not output_filename:
-                            print(f"[Create Textured] ❌ No GLB found!")
-                            return None
-                        
-                        # Download
-                        print(f"[Create Textured] Downloading...")
-                        download_success = server_client.download_mesh(output_filename, str(download_path), subfolder=subfolder, file_type="output")
-                        
-                        if not download_success:
+                        if not dl_success:
                             print(f"[Create Textured] ❌ Download failed")
-                            return None
+                            return
                         
                         print(f"[Create Textured] ✓ Downloaded ({download_path.stat().st_size / 1024:.1f} KB)")
                         
-                        # Import (heavy operation)
-                        print(f"[Create Textured] Importing...")
-                        original_selected = list(bpy.context.selected_objects)
-                        bpy.ops.import_scene.gltf(filepath=str(download_path))
-                        newly_imported = [o for o in bpy.context.selected_objects if o not in original_selected]
+                        # Schedule import on main thread (bpy requires it)
+                        def _do_import():
+                            try:
+                                print(f"[Create Textured] Importing...")
+                                original_selected = list(bpy.context.selected_objects)
+                                bpy.ops.import_scene.gltf(filepath=str(download_path))
+                                newly_imported = [o for o in bpy.context.selected_objects if o not in original_selected]
+                                
+                                if newly_imported:
+                                    new_obj = newly_imported[0]
+                                    new_obj.name = f"AI_Textured_{int(time.time())}"
+                                    new_obj.location = (0, 0, 0)
+                                    workspace_setup.save_mesh_to_library(bpy.context, download_path, mesh_type='textured')
+                                    print(f"[Create Textured] ✅ Textured 3D mesh created: {new_obj.name}")
+                                
+                                print(f"[Create Textured] ============================================")
+                                print(f"[Create Textured] COMPLETE!")
+                                print(f"[Create Textured] ============================================")
+                            except Exception as e:
+                                print(f"[Create Textured] ❌ Import error: {e}")
+                                import traceback
+                                traceback.print_exc()
+                            return None  # Don't repeat timer
                         
-                        if newly_imported:
-                            new_obj = newly_imported[0]
-                            new_obj.name = f"AI_Textured_{int(time.time())}"
-                            new_obj.location = (0, 0, 0)
-                            
-                            # Save mesh to Models library
-                            workspace_setup.save_mesh_to_library(bpy.context, download_path, mesh_type='textured')
-                            
-                            print(f"[Create Textured] ✅ Textured 3D mesh created: {new_obj.name}")
-                        
-                        print(f"[Create Textured] ============================================")
-                        print(f"[Create Textured] COMPLETE!")
-                        print(f"[Create Textured] ============================================")
+                        bpy.app.timers.register(_do_import, first_interval=0.1)
                         
                     except Exception as e:
-                        print(f"[Create Textured] ❌ Error: {e}")
+                        print(f"[Create Textured] ❌ Download error: {e}")
                         import traceback
                         traceback.print_exc()
-                    
-                    return None  # Don't repeat timer
                 
-                # Schedule heavy work separately (keeps polling callback fast!)
-                bpy.app.timers.register(do_download_and_import, first_interval=0.1)
+                threading.Thread(target=_download_thread, daemon=True).start()
             
             # Register polling
             runcomfy_polling.RunComfyPoller.start_polling(
@@ -1151,6 +1165,26 @@ class STYLEENGINE_MT_pie_main(Menu):
                      text="Project Texture", 
                      icon='TEXTURE')
         
+        # PBR from Projected Texture (conditional: only when active mesh has iteration_XXX material)
+        obj = context.active_object
+        has_iteration_mat = (
+            obj and obj.type == 'MESH' and obj.data.materials and
+            any(m and m.name.startswith('iteration_') for m in obj.data.materials)
+        )
+        if has_iteration_mat:
+            col.separator(factor=0.5)
+            row = col.row()
+            row.scale_y = 1.5
+            row.operator("style_engine.pbr_from_projected", 
+                         text="PBR from Projected", 
+                         icon='MATSHADERBALL')
+        
+        col.separator(factor=0.5)
+        col.operator("style_engine.pbr_from_text", 
+                     text="Generate PBR", 
+                     icon='MATSHADERBALL')
+        
+        col.separator()
         col.separator()
         
         # 3D Generation buttons

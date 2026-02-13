@@ -1,0 +1,240 @@
+{
+  "11": {
+    "inputs": {
+      "filename_prefix": "texture_image",
+      "images": [
+        "27",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Texture Image"
+    }
+  },
+  "12": {
+    "inputs": {
+      "ckpt_name": "chord_v1.safetensors"
+    },
+    "class_type": "ChordLoadModel",
+    "_meta": {
+      "title": "Chord - Load Model"
+    }
+  },
+  "13": {
+    "inputs": {
+      "filename_prefix": "normal",
+      "images": [
+        "21",
+        1
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Normal"
+    }
+  },
+  "14": {
+    "inputs": {
+      "filename_prefix": "metalness",
+      "images": [
+        "21",
+        3
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Metalness"
+    }
+  },
+  "15": {
+    "inputs": {
+      "normal": [
+        "21",
+        1
+      ]
+    },
+    "class_type": "ChordNormalToHeight",
+    "_meta": {
+      "title": "Chord - Normal to Height"
+    }
+  },
+  "16": {
+    "inputs": {
+      "filename_prefix": "height",
+      "images": [
+        "15",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Height"
+    }
+  },
+  "17": {
+    "inputs": {
+      "filename_prefix": "basecolor",
+      "images": [
+        "21",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Basecolor"
+    }
+  },
+  "18": {
+    "inputs": {
+      "filename_prefix": "roughness",
+      "images": [
+        "21",
+        2
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Roughness"
+    }
+  },
+  "21": {
+    "inputs": {
+      "chord_model": [
+        "12",
+        0
+      ],
+      "image": [
+        "27",
+        0
+      ]
+    },
+    "class_type": "ChordMaterialEstimation",
+    "_meta": {
+      "title": "Chord - Material Estimation"
+    }
+  },
+  "23": {
+    "inputs": {
+      "lora_name": "Textures.safetensors",
+      "strength_model": 1,
+      "strength_clip": 1,
+      "model": [
+        "31",
+        0
+      ],
+      "clip": [
+        "31",
+        1
+      ]
+    },
+    "class_type": "LoraLoader",
+    "_meta": {
+      "title": "Load LoRA"
+    }
+  },
+  "24": {
+    "inputs": {
+      "text": [
+        "38",
+        0
+      ],
+      "clip": [
+        "23",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Prompt)"
+    }
+  },
+  "25": {
+    "inputs": {
+      "text": "",
+      "clip": [
+        "23",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Prompt)"
+    }
+  },
+  "26": {
+    "inputs": {
+      "seed": 162791670227281,
+      "steps": 20,
+      "cfg": 6,
+      "sampler_name": "dpmpp_2m_sde",
+      "scheduler": "karras",
+      "denoise": 1,
+      "model": [
+        "23",
+        0
+      ],
+      "positive": [
+        "24",
+        0
+      ],
+      "negative": [
+        "25",
+        0
+      ],
+      "latent_image": [
+        "30",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "27": {
+    "inputs": {
+      "samples": [
+        "26",
+        0
+      ],
+      "vae": [
+        "31",
+        2
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "30": {
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "Empty Latent Image"
+    }
+  },
+  "31": {
+    "inputs": {
+      "ckpt_name": "juggernautXL_ragnarokBy.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "Load Checkpoint"
+    }
+  },
+  "38": {
+    "inputs": {
+      "text": ""
+    },
+    "class_type": "Text Multiline",
+    "_meta": {
+      "title": "Text Multiline"
+    }
+  }
+}

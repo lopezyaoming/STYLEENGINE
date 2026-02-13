@@ -1,0 +1,113 @@
+{
+  "12": {
+    "inputs": {
+      "ckpt_name": "chord_v1.safetensors"
+    },
+    "class_type": "ChordLoadModel",
+    "_meta": {
+      "title": "Chord - Load Model"
+    }
+  },
+  "13": {
+    "inputs": {
+      "filename_prefix": "normal",
+      "images": [
+        "21",
+        1
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Normal"
+    }
+  },
+  "14": {
+    "inputs": {
+      "filename_prefix": "metalness",
+      "images": [
+        "21",
+        3
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Metalness"
+    }
+  },
+  "15": {
+    "inputs": {
+      "normal": [
+        "21",
+        1
+      ]
+    },
+    "class_type": "ChordNormalToHeight",
+    "_meta": {
+      "title": "Chord - Normal to Height"
+    }
+  },
+  "16": {
+    "inputs": {
+      "filename_prefix": "height",
+      "images": [
+        "15",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Height"
+    }
+  },
+  "17": {
+    "inputs": {
+      "filename_prefix": "basecolor",
+      "images": [
+        "21",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Basecolor"
+    }
+  },
+  "18": {
+    "inputs": {
+      "filename_prefix": "roughness",
+      "images": [
+        "21",
+        2
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Roughness"
+    }
+  },
+  "21": {
+    "inputs": {
+      "chord_model": [
+        "12",
+        0
+      ],
+      "image": [
+        "22",
+        0
+      ]
+    },
+    "class_type": "ChordMaterialEstimation",
+    "_meta": {
+      "title": "Chord - Material Estimation"
+    }
+  },
+  "22": {
+    "inputs": {
+      "image": "blank.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  }
+}

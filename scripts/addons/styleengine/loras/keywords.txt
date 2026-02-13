@@ -1,0 +1,4 @@
+chunky_sdxl_v1.safetensors: "chunky, rusty, DIY, diorama, papier-mache, handmade, metallic"
+rat-trap-city-sdxl-v2.safetensors: "hamster-tunnels, industrial pipe, outdoors, scenary, city ligths"
+xl_more_art-full_v1.safetensors:"Hyperrealistic, art Wonderful, intricate, detailed, artwork"
+
