@@ -33,7 +33,7 @@
   },
   "14": {
     "inputs": {
-      "image": "20251030_173049_runcomfy.png"
+      "image": "3D model test.png"
     },
     "class_type": "Hy3D21LoadImageWithTransparency",
     "_meta": {
@@ -63,7 +63,7 @@
       "model": "hunyuan3d-dit-v2-1.ckpt",
       "steps": 25,
       "guidance_scale": 7.5,
-      "seed": 835545165791282,
+      "seed": 706250760031369,
       "attention_mode": "sdpa",
       "image": [
         "64",
@@ -113,37 +113,45 @@
       "title": "Hunyuan 3D 2.1 Export Mesh"
     }
   },
+  "63": {
+    "inputs": {
+      "transparency": true,
+      "model": "u2net",
+      "post_processing": false,
+      "only_mask": false,
+      "alpha_matting": false,
+      "alpha_matting_foreground_threshold": 240,
+      "alpha_matting_background_threshold": 10,
+      "alpha_matting_erode_size": 10,
+      "background_color": "none",
+      "images": [
+        "14",
+        2
+      ]
+    },
+    "class_type": "Image Rembg (Remove Background)",
+    "_meta": {
+      "title": "Image Rembg (Remove Background)"
+    }
+  },
   "64": {
     "inputs": {
       "width": 1024,
       "height": 1024,
       "upscale_method": "nearest-exact",
-      "keep_proportion": "crop",
+      "keep_proportion": "stretch",
       "pad_color": "0, 0, 0",
       "crop_position": "center",
       "divisible_by": 2,
       "device": "cpu",
       "image": [
-        "65",
+        "63",
         0
       ]
     },
     "class_type": "ImageResizeKJv2",
     "_meta": {
       "title": "Resize Image v2"
-    }
-  },
-  "65": {
-    "inputs": {
-      "torchscript_jit": "default",
-      "image": [
-        "14",
-        0
-      ]
-    },
-    "class_type": "InspyrenetRembg",
-    "_meta": {
-      "title": "Inspyrenet Rembg"
     }
   }
 }

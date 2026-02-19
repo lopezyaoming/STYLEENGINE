@@ -116,17 +116,30 @@ class WM_OT_UVTexture(Operator):
         print(f"[UV Texture] ============================================")
         
         try:
+            # Detect existing material (iteration_XXX or pbrmaterial_XXX)
+            existing_mat_name = None
+            for mat in obj.data.materials:
+                if mat and mat.name.startswith(('pbrmaterial_', 'iteration_')):
+                    existing_mat_name = mat.name
+                    break
+            
+            has_existing_texture = existing_mat_name is not None
+            if has_existing_texture:
+                print(f"[UV Texture] Found existing material: {existing_mat_name}")
+                print(f"[UV Texture] Mode: Enhanced (UV base + front projection overlay)")
+            else:
+                print(f"[UV Texture] Mode: Legacy (UV texture only)")
+            
             # Step 1: Export mesh as GLB
             temp_dir = Path(tempfile.gettempdir()) / "styleengine_uv"
             temp_dir.mkdir(parents=True, exist_ok=True)
             
-            glb_filename = f"{obj.name}_{int(time.time())}.glb"
+            clean_name = Path(obj.name).stem.replace('.', '_')
+            glb_filename = f"{clean_name}_{int(time.time())}.glb"
             glb_path = temp_dir / glb_filename
             
             print(f"[UV Texture] Step 1: Exporting mesh to GLB...")
-            print(f"[UV Texture]   Export path: {glb_path}")
             
-            # Export using Blender's GLTF exporter
             bpy.ops.export_scene.gltf(
                 filepath=str(glb_path),
                 use_selection=True,
@@ -149,17 +162,36 @@ class WM_OT_UVTexture(Operator):
             uploaded_mesh_name = upload_result['name']
             print(f"[UV Texture] ✓ Uploaded as: {uploaded_mesh_name}")
             
-            # Step 3: Get current_ai.png and upload it
+            # Step 3: Determine and upload reference image
             print(f"[UV Texture] Step 3: Uploading reference image...")
             temp_img_dir = workspace_setup.get_temp_directory(context)
-            current_ai_path = temp_img_dir / "current_ai.png"
+            ref_image_path = None
             
-            if not current_ai_path.exists():
-                self.report({'ERROR'}, "current_ai.png not found. Generate an image first.")
-                print(f"[UV Texture] ❌ current_ai.png not found at {current_ai_path}")
-                return {'CANCELLED'}
+            if has_existing_texture:
+                # Extract basecolor from existing material's node tree
+                existing_mat = bpy.data.materials.get(existing_mat_name)
+                if existing_mat and existing_mat.node_tree:
+                    for node in existing_mat.node_tree.nodes:
+                        if node.type == 'TEX_IMAGE' and node.image:
+                            # For PBR, find the Base Color node; for iteration, any texture works
+                            is_basecolor = ('basecolor' in node.label.lower() or 
+                                          node.label == 'Base Color' or
+                                          existing_mat_name.startswith('iteration_'))
+                            if is_basecolor:
+                                ref_image_path = temp_dir / f"ref_{existing_mat_name}.png"
+                                node.image.save_render(str(ref_image_path))
+                                print(f"[UV Texture] ✓ Extracted basecolor from {existing_mat_name}")
+                                break
             
-            img_upload = server_client.upload_image(str(current_ai_path), overwrite=True)
+            if not ref_image_path:
+                # Fallback: use current_ai.png
+                ref_image_path = temp_img_dir / "current_ai.png"
+                if not ref_image_path.exists():
+                    self.report({'ERROR'}, "No reference image available. Generate an image first.")
+                    return {'CANCELLED'}
+                print(f"[UV Texture] Using current_ai.png as reference")
+            
+            img_upload = server_client.upload_image(str(ref_image_path), overwrite=True)
             uploaded_img_name = img_upload['name']
             print(f"[UV Texture] ✓ Image uploaded as: {uploaded_img_name}")
             
@@ -170,7 +202,6 @@ class WM_OT_UVTexture(Operator):
             
             if not workflow_path.exists():
                 self.report({'ERROR'}, f"Workflow not found: {workflow_path.name}")
-                print(f"[UV Texture] ❌ Workflow missing: {workflow_path}")
                 return {'CANCELLED'}
             
             import json
@@ -180,78 +211,66 @@ class WM_OT_UVTexture(Operator):
             print(f"[UV Texture] ✓ Loaded workflow: {workflow_path.name}")
             
             # Step 5: Override nodes with quality parameters
-            print(f"[UV Texture] Step 5: Configuring workflow nodes...")
-            
-            # Get quality parameters
             style_props = context.scene.style_engine_props
             quality = style_props.object_quality if hasattr(style_props, 'object_quality') else 'BALANCED'
             params = get_quality_params(quality)
             
-            # Apply quality parameters (texture only, mesh is from user)
             workflow_json["20"]["inputs"]["view_size"] = params['view_size']
             workflow_json["20"]["inputs"]["steps"] = params['texture_steps']
             workflow_json["20"]["inputs"]["texture_size"] = params['texture_size']
             
-            # Seed (Node 30 - Hy3D21TextureMesh) - unified seed from UI
-            seed = style_props.seed_value
-            if "30" in workflow_json:
-                workflow_json["30"]["inputs"]["seed"] = seed
+            # Seed (Node 20 - Hy3DMultiViewsGenerator)
+            workflow_json["20"]["inputs"]["seed"] = style_props.seed_value
             
             print(f"[UV Texture] ✓ Quality: {quality}")
             print(f"[UV Texture] ✓ Texture: view={params['view_size']}, steps={params['texture_steps']}, size={params['texture_size']}")
             
-            # Get ComfyUI path from preferences
+            # Get server-side ComfyUI path from preferences
+            # This must be the path on the REMOTE SERVER, not the local machine
             prefs = context.preferences.addons['styleengine'].preferences
             comfy_base_path = prefs.comfy_path if prefs.comfy_path else ""
             
-            # If not set, try to detect from server or use common defaults
             if not comfy_base_path:
-                # Try common paths based on OS
-                import platform
-                if platform.system() == 'Windows':
-                    comfy_base_path = "C:/ComfyUI"
-                else:
-                    comfy_base_path = "/home/Juan/ComfyUI"  # Linux/GCS default
-                print(f"[UV Texture] ⚠️ ComfyUI path not set in preferences, using default: {comfy_base_path}")
+                comfy_base_path = "/home/Juan/ComfyUI"
+                print(f"[UV Texture] ⚠️ ComfyUI server path not set, using default: {comfy_base_path}")
                 print(f"[UV Texture] Set in: Edit → Preferences → Style Engine → Advanced → ComfyUI Path")
             
-            # Construct full server path for mesh (uploads go to input/ directory)
             mesh_server_path = f"{comfy_base_path}/input/{uploaded_mesh_name}"
             
-            workflow_json["55"]["inputs"]["load_path"] = mesh_server_path  # Full path!
-            workflow_json["14"]["inputs"]["image"] = uploaded_img_name  # Image name only (LoadImage handles this)
-            workflow_json["32"]["inputs"]["string"] = f"UV_{obj.name}_{int(time.time())}"  # Output name
+            workflow_json["55"]["inputs"]["load_path"] = mesh_server_path
+            workflow_json["14"]["inputs"]["image"] = uploaded_img_name
+            workflow_json["32"]["inputs"]["string"] = f"UV_{clean_name}_{int(time.time())}"
             
             print(f"[UV Texture] ✓ Node 55 (mesh): {mesh_server_path}")
             print(f"[UV Texture] ✓ Node 14 (image): {uploaded_img_name}")
             
-            # Step 6: Submit workflow (NON-BLOCKING)
-            print(f"[UV Texture] Step 6: Submitting workflow to server...")
-            self.report({'INFO'}, f"Generating UV textures for {obj.name}... (check console)")
+            # Step 6: Submit workflow
+            print(f"[UV Texture] Step 6: Submitting workflow...")
+            self.report({'INFO'}, f"Generating UV textures for {obj.name}...")
             
             result = server_client.queue_prompt(workflow_json)
             prompt_id = result['prompt_id']
             print(f"[UV Texture] ✓ Queued: {prompt_id}")
             
-            # Store workflow for progress bar node name lookup
             from . import progress_bar
             progress_bar.set_current_workflow(workflow_json)
             
-            print(f"[UV Texture] ⏳ Processing in background (1-2 minutes)...")
-            print(f"[UV Texture] Watch console for completion message")
-            
-            # Capture variables for callback (avoid stale references)
+            # Capture variables for callback (strings/copies only, no bpy references)
             output_name = workflow_json["32"]["inputs"]["string"]
             obj_name = obj.name
             obj_location = obj.location.copy()
             download_path = temp_dir / f"textured_{glb_filename}"
             
-            # Step 7: Start background polling (NON-BLOCKING)
+            # Store camera matrix for re-projection (if enhanced mode)
+            cam_matrix_copy = None
+            if has_existing_texture and "ai_camera" in bpy.data.objects:
+                cam_matrix_copy = bpy.data.objects["ai_camera"].matrix_world.copy()
+            
+            # Step 7: Start background polling
             from . import runcomfy_polling
             
-            # Create completion callback
             def on_uv_texture_complete(success, result=None, error=None, workflow_type=None):
-                """Called when UV texture generation completes (runs in background)"""
+                """Called when UV texture generation completes"""
                 print(f"[UV Texture] ============================================")
                 print(f"[UV Texture] GENERATION COMPLETE")
                 print(f"[UV Texture] ============================================")
@@ -260,92 +279,169 @@ class WM_OT_UVTexture(Operator):
                     print(f"[UV Texture] ❌ Generation failed: {error}")
                     return
                 
-                try:
-                    # Step 8: Download textured mesh
-                    print(f"[UV Texture] Step 8: Downloading textured mesh...")
-                    
-                    # Find output GLB in history
-                    outputs = result.get('outputs', {})
-                    output_filename = None
-                    
-                    # Look for GLB output
-                    for node_id, node_output in outputs.items():
-                        # Check if this node has file outputs
-                        if isinstance(node_output, dict):
-                            if 'gltf' in node_output or 'filename' in node_output:
-                                files = node_output.get('gltf', node_output.get('filename', []))
-                                if files and isinstance(files, list) and len(files) > 0:
-                                    output_filename = files[0].get('filename') if isinstance(files[0], dict) else files[0]
-                                    if output_filename:
-                                        print(f"[UV Texture] Found output in node {node_id}: {output_filename}")
-                                        break
-                    
-                    if not output_filename:
-                        # Fallback: construct expected filename (use captured variable)
-                        output_filename = f"{output_name}_00001_.glb"
-                        print(f"[UV Texture] Using constructed filename: {output_filename}")
-                    
-                    # Download (use captured download_path)
-                    download_success = server_client.download_mesh(
-                        output_filename, 
-                        str(download_path),
-                        file_type="output"
-                    )
-                    
-                    if not download_success:
-                        print(f"[UV Texture] ❌ Download failed")
-                        return
-                    
-                    print(f"[UV Texture] ✓ Downloaded: {download_path.name}")
-                    
-                    # Step 9: Import textured mesh back into Blender
-                    print(f"[UV Texture] Step 9: Importing textured mesh into scene...")
-                    
-                    # Store original selection
-                    original_selected = list(bpy.context.selected_objects)
-                    
-                    # Import GLB
-                    bpy.ops.import_scene.gltf(filepath=str(download_path))
-                    
-                    # Get newly imported objects
-                    newly_imported = [o for o in bpy.context.selected_objects if o not in original_selected]
-                    
-                    if newly_imported:
-                        new_obj = newly_imported[0]
-                        new_obj.name = f"{obj_name}_Textured"  # Use captured name
+                # Resolve output filename (lightweight, no I/O)
+                outputs = result.get('outputs', {})
+                output_filename = None
+                
+                for node_id, node_output in outputs.items():
+                    if isinstance(node_output, dict):
+                        if 'gltf' in node_output or 'filename' in node_output:
+                            files = node_output.get('gltf', node_output.get('filename', []))
+                            if files and isinstance(files, list) and len(files) > 0:
+                                output_filename = files[0].get('filename') if isinstance(files[0], dict) else files[0]
+                                if output_filename:
+                                    print(f"[UV Texture] Found output in node {node_id}: {output_filename}")
+                                    break
+                
+                if not output_filename:
+                    # Hunyuan saves to temp/ as {output_name}.glb (no _00001_ suffix)
+                    output_filename = f"{output_name}.glb"
+                    print(f"[UV Texture] Using constructed filename: {output_filename}")
+                
+                # Download in background thread
+                import threading
+                
+                def _download_thread():
+                    try:
+                        print(f"[UV Texture] Downloading in background...")
+                        # Hunyuan 3D saves GLBs to temp/ directory, not output/
+                        dl_success = server_client.download_mesh(
+                            output_filename, 
+                            str(download_path),
+                            file_type="temp"
+                        )
                         
-                        # Position next to original (use captured location)
-                        new_obj.location = obj_location
-                        new_obj.location.x += 2.0  # Offset to the right
+                        if not dl_success:
+                            print(f"[UV Texture] ❌ Download failed")
+                            return
                         
-                        print(f"[UV Texture] ✓ Imported: {new_obj.name}")
+                        print(f"[UV Texture] ✓ Downloaded: {download_path.name}")
                         
-                        # Save mesh to Models library
-                        workspace_setup.save_mesh_to_library(bpy.context, download_path, mesh_type='uv_textured')
+                        # Schedule import on main thread
+                        def _do_import():
+                            try:
+                                print(f"[UV Texture] Importing textured mesh...")
+                                original_selected = list(bpy.context.selected_objects)
+                                bpy.ops.import_scene.gltf(filepath=str(download_path))
+                                newly_imported = [o for o in bpy.context.selected_objects if o not in original_selected]
+                                
+                                if not newly_imported:
+                                    print(f"[UV Texture] ⚠️ Mesh imported but not found")
+                                    return None
+                                
+                                new_obj = newly_imported[0]
+                                new_obj.name = f"{obj_name}_Textured"
+                                new_obj.location = obj_location
+                                
+                                print(f"[UV Texture] ✓ Imported: {new_obj.name}")
+                                
+                                # Save to library
+                                workspace_setup.save_mesh_to_library(bpy.context, download_path, mesh_type='uv_textured')
+                                
+                                # ================================================
+                                # ENHANCED MODE: Re-project front material
+                                # ================================================
+                                if has_existing_texture and cam_matrix_copy:
+                                    print(f"[UV Texture] Applying front projection overlay...")
+                                    
+                                    import bmesh
+                                    from mathutils import Vector
+                                    
+                                    # Get the existing front material (copy it for the new object)
+                                    src_mat = bpy.data.materials.get(existing_mat_name)
+                                    if src_mat:
+                                        front_mat = src_mat.copy()
+                                        front_mat.name = f"front_{existing_mat_name}"
+                                        new_obj.data.materials.append(front_mat)
+                                        front_slot = len(new_obj.data.materials) - 1
+                                        
+                                        # Camera direction from stored matrix
+                                        cam_dir = (cam_matrix_copy.to_quaternion() @ Vector((0, 0, -1))).normalized()
+                                        
+                                        # Set active object and enter edit mode
+                                        bpy.context.view_layer.objects.active = new_obj
+                                        new_obj.select_set(True)
+                                        bpy.ops.object.mode_set(mode='EDIT')
+                                        
+                                        bm = bmesh.from_edit_mesh(new_obj.data)
+                                        
+                                        # Assign front-facing faces to front material slot
+                                        front_count = 0
+                                        for face in bm.faces:
+                                            normal_world = (new_obj.matrix_world.to_3x3() @ face.normal).normalized()
+                                            if normal_world.dot(cam_dir) > 0.3:
+                                                face.material_index = front_slot
+                                                front_count += 1
+                                        
+                                        bmesh.update_edit_mesh(new_obj.data)
+                                        print(f"[UV Texture] Assigned {front_count} front-facing faces to slot {front_slot}")
+                                        
+                                        # Select only front faces for UV projection
+                                        bpy.ops.mesh.select_all(action='DESELECT')
+                                        bm = bmesh.from_edit_mesh(new_obj.data)
+                                        for face in bm.faces:
+                                            face.select = (face.material_index == front_slot)
+                                        bmesh.update_edit_mesh(new_obj.data)
+                                        
+                                        # Temporarily set ai_camera and switch to camera view
+                                        ai_cam = bpy.data.objects.get("ai_camera")
+                                        if ai_cam:
+                                            original_scene_cam = bpy.context.scene.camera
+                                            bpy.context.scene.camera = ai_cam
+                                            
+                                            # Find 3D viewport
+                                            space_3d = None
+                                            original_persp = None
+                                            for area in bpy.context.screen.areas:
+                                                if area.type == 'VIEW_3D':
+                                                    for space in area.spaces:
+                                                        if space.type == 'VIEW_3D':
+                                                            space_3d = space
+                                                            original_persp = space.region_3d.view_perspective
+                                                            break
+                                                    break
+                                            
+                                            if space_3d:
+                                                space_3d.region_3d.view_perspective = 'CAMERA'
+                                                bpy.ops.uv.project_from_view(camera_bounds=True, correct_aspect=True, scale_to_bounds=False)
+                                                space_3d.region_3d.view_perspective = original_persp
+                                                print(f"[UV Texture] ✓ Projected front texture from camera view")
+                                            
+                                            bpy.context.scene.camera = original_scene_cam
+                                    
+                                    bpy.ops.object.mode_set(mode='OBJECT')
+                                    
+                                    print(f"[UV Texture] ✅ Enhanced UV texture: slot 0 = UV (full), slot {front_slot} = front projection")
+                                else:
+                                    print(f"[UV Texture] ✅ UV textured mesh created: {new_obj.name}")
+                                
+                                print(f"[UV Texture] ============================================")
+                                print(f"[UV Texture] UV TEXTURE GENERATION COMPLETE")
+                                print(f"[UV Texture] ============================================")
+                                
+                            except Exception as e:
+                                print(f"[UV Texture] ❌ Import error: {e}")
+                                import traceback
+                                traceback.print_exc()
+                            return None
                         
-                        print(f"[UV Texture] ✅ UV textured mesh created: {new_obj.name}")
-                    else:
-                        print(f"[UV Texture] ⚠️ Mesh imported but not found in scene")
-                    
-                    print(f"[UV Texture] ============================================")
-                    print(f"[UV Texture] UV TEXTURE GENERATION COMPLETE")
-                    print(f"[UV Texture] ============================================")
-                    
-                except Exception as e:
-                    print(f"[UV Texture] ❌ Error during download/import: {e}")
-                    import traceback
-                    traceback.print_exc()
+                        bpy.app.timers.register(_do_import, first_interval=0.1)
+                        
+                    except Exception as e:
+                        print(f"[UV Texture] ❌ Download error: {e}")
+                        import traceback
+                        traceback.print_exc()
+                
+                threading.Thread(target=_download_thread, daemon=True).start()
             
-            # Register for background polling
             runcomfy_polling.RunComfyPoller.start_polling(
-                deployment_id='server',  # Server mode
+                deployment_id='server',
                 request_id=prompt_id,
                 callback=on_uv_texture_complete,
                 workflow_type='uv_texture'
             )
             
             print(f"[UV Texture] ✅ Submitted! Processing in background...")
-            print(f"[UV Texture] Blender will remain responsive")
             print(f"[UV Texture] ============================================")
             
             return {'FINISHED'}
@@ -1179,6 +1275,18 @@ class STYLEENGINE_MT_pie_main(Menu):
                          text="PBR from Projected", 
                          icon='MATSHADERBALL')
         
+        # Multiview from Projected (conditional: only if not already multiview)
+        already_multiview = (
+            obj and obj.type == 'MESH' and obj.data.materials and
+            any(m and (m.name.startswith('left_iteration_') or m.name.startswith('right_iteration_')) for m in obj.data.materials)
+        )
+        if has_iteration_mat and not already_multiview:
+            row = col.row()
+            row.scale_y = 1.2
+            row.operator("style_engine.multiview_from_projected", 
+                         text="Multiview", 
+                         icon='VIEW_CAMERA')
+        
         col.separator(factor=0.5)
         col.operator("style_engine.pbr_from_text", 
                      text="Generate PBR", 
@@ -1188,10 +1296,9 @@ class STYLEENGINE_MT_pie_main(Menu):
         col.separator()
         
         # 3D Generation buttons
-        # # HIDDEN: UV Texture - available in N panel
-        # col.operator("style_engine.uv_texture", 
-        #              text="UV Texture", 
-        #              icon='UV')
+        col.operator("style_engine.uv_texture", 
+                     text="UV Texture", 
+                     icon='UV')
         col.operator("style_engine.create_object", 
                      text="Create Object", 
                      icon='MESH_CUBE')

@@ -1,43 +1,11 @@
 {
-  "4": {
-    "inputs": {
-      "model_name": "hunyuan3d-vae-v2-1.ckpt"
-    },
-    "class_type": "Hy3D21VAELoader",
-    "_meta": {
-      "title": "Hunyuan 3D 2.1 VAE Loader"
-    }
-  },
-  "9": {
-    "inputs": {
-      "box_v": 1.01,
-      "octree_resolution": 256,
-      "num_chunks": 64000,
-      "mc_level": 0,
-      "mc_algo": "mc",
-      "enable_flash_vdm": true,
-      "force_offload": false,
-      "vae": [
-        "4",
-        0
-      ],
-      "latents": [
-        "37",
-        0
-      ]
-    },
-    "class_type": "Hy3D21VAEDecode",
-    "_meta": {
-      "title": "Hunyuan 3D 2.1 VAE Decoder"
-    }
-  },
   "14": {
     "inputs": {
       "image": "3D model test.png"
     },
     "class_type": "Hy3D21LoadImageWithTransparency",
     "_meta": {
-      "title": "LOAD IMAGE"
+      "title": "Hunyuan 3D 2.1 Load Image with Transparency"
     }
   },
   "19": {
@@ -58,8 +26,8 @@
       "steps": 10,
       "guidance_scale": 3,
       "texture_size": 1024,
-      "unwrap_mesh": false,
-      "seed": 626079162163097,
+      "unwrap_mesh": true,
+      "seed": 988077496205809,
       "trimesh": [
         "45",
         0
@@ -120,65 +88,10 @@
       "title": "String Constant"
     }
   },
-  "37": {
-    "inputs": {
-      "model": "hunyuan3d-dit-v2-1.ckpt",
-      "steps": 25,
-      "guidance_scale": 7.5,
-      "seed": 656480488364741,
-      "attention_mode": "sdpa",
-      "image": [
-        "64",
-        0
-      ]
-    },
-    "class_type": "Hy3DMeshGenerator",
-    "_meta": {
-      "title": "Hunyuan 3D 2.1 Mesh Generator"
-    }
-  },
-  "43": {
-    "inputs": {
-      "remove_floaters": true,
-      "remove_degenerate_faces": true,
-      "reduce_faces": true,
-      "max_facenum": [
-        "30",
-        0
-      ],
-      "smooth_normals": false,
-      "trimesh": [
-        "9",
-        0
-      ]
-    },
-    "class_type": "Hy3D21PostprocessMesh",
-    "_meta": {
-      "title": "Hunyuan 3D 2.1 Post Process Trimesh"
-    }
-  },
-  "44": {
-    "inputs": {
-      "filename_prefix": [
-        "32",
-        0
-      ],
-      "file_format": "glb",
-      "save_file": true,
-      "trimesh": [
-        "43",
-        0
-      ]
-    },
-    "class_type": "Hy3D21ExportMesh",
-    "_meta": {
-      "title": "Hunyuan 3D 2.1 Export Mesh"
-    }
-  },
   "45": {
     "inputs": {
       "trimesh": [
-        "43",
+        "55",
         0
       ]
     },
@@ -256,6 +169,16 @@
       "title": "Preview Image"
     }
   },
+  "55": {
+    "inputs": {
+      "load_path": "/home/Juan/ComfyUI/output/Hy21_Mesh_00006_.glb",
+      "file_format": "glb"
+    },
+    "class_type": "TrimeshLoad",
+    "_meta": {
+      "title": "Trimesh Load"
+    }
+  },
   "62": {
     "inputs": {
       "model_file": [
@@ -269,6 +192,27 @@
       "title": "Preview 3D"
     }
   },
+  "63": {
+    "inputs": {
+      "transparency": true,
+      "model": "u2net",
+      "post_processing": false,
+      "only_mask": false,
+      "alpha_matting": false,
+      "alpha_matting_foreground_threshold": 240,
+      "alpha_matting_background_threshold": 10,
+      "alpha_matting_erode_size": 10,
+      "background_color": "none",
+      "images": [
+        "14",
+        2
+      ]
+    },
+    "class_type": "Image Rembg (Remove Background)",
+    "_meta": {
+      "title": "Image Rembg (Remove Background)"
+    }
+  },
   "64": {
     "inputs": {
       "width": 1024,
@@ -280,26 +224,13 @@
       "divisible_by": 2,
       "device": "cpu",
       "image": [
-        "66",
+        "63",
         0
       ]
     },
     "class_type": "ImageResizeKJv2",
     "_meta": {
       "title": "Resize Image v2"
-    }
-  },
-  "66": {
-    "inputs": {
-      "torchscript_jit": "default",
-      "image": [
-        "14",
-        2
-      ]
-    },
-    "class_type": "InspyrenetRembg",
-    "_meta": {
-      "title": "Inspyrenet Rembg"
     }
   }
 }

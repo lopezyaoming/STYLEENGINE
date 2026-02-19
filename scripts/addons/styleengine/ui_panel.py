@@ -1735,6 +1735,448 @@ class WM_OT_ProjectTexture(bpy.types.Operator):
 
 
 # ================================================================
+# MULTIVIEW PROJECTION OPERATOR
+# ================================================================
+
+class WM_OT_MultiviewFromProjected(bpy.types.Operator):
+    """Generate back-left and back-right textures and project onto corresponding faces"""
+    bl_idname = "style_engine.multiview_from_projected"
+    bl_label = "Multiview from Projected"
+    bl_description = "Enhance projection with back-left and back-right views for better coverage"
+    bl_options = {'REGISTER'}
+    
+    def execute(self, context):
+        import json
+        import re
+        import math
+        from pathlib import Path
+        from mathutils import Matrix, Vector
+        from . import runcomfy_deployment
+        from . import workspace_setup
+        from . import progress_bar
+        from . import runcomfy_polling
+        from .runcomfy_server_client import extract_output_images
+        
+        # 1. Validate: find object with iteration_XXX material
+        obj = context.active_object
+        if not obj or obj.type != 'MESH' or not obj.data.materials:
+            self.report({'ERROR'}, "Select a mesh with a projected iteration texture")
+            return {'CANCELLED'}
+        
+        # Find the highest numbered iteration material
+        best_num = -1
+        iteration_mat = None
+        for mat in obj.data.materials:
+            if mat and mat.name.startswith('iteration_'):
+                m = re.match(r'iteration_(\d+)', mat.name)
+                if m:
+                    num = int(m.group(1))
+                    if num > best_num:
+                        best_num = num
+                        iteration_mat = mat
+        
+        if not iteration_mat or best_num < 0:
+            self.report({'ERROR'}, "Selected object has no iteration_XXX material")
+            return {'CANCELLED'}
+        
+        iter_num = f"{best_num:03d}"
+        print(f"[Multiview] Starting multi-view projection for iteration_{iter_num}")
+        
+        # 2. Check server mode
+        if not runcomfy_deployment.is_server_mode():
+            self.report({'ERROR'}, "Multiview requires Server mode (GCS)")
+            return {'CANCELLED'}
+        
+        # Check if ai_camera exists
+        if "ai_camera" not in bpy.data.objects:
+            self.report({'ERROR'}, "AI Camera not found")
+            return {'CANCELLED'}
+        
+        ai_camera = bpy.data.objects["ai_camera"]
+        
+        try:
+            # 3. Store original camera transform and setup
+            original_cam_matrix = ai_camera.matrix_world.copy()
+            original_engine = context.scene.render.engine
+            original_file_format = context.scene.render.image_settings.file_format
+            original_scene_camera = context.scene.camera
+            
+            # Ensure ai_camera is the active scene camera for rendering
+            context.scene.camera = ai_camera
+            
+            # Disable background images for solid renders
+            bg_states = []
+            for bg in ai_camera.data.background_images:
+                bg_states.append(bg.show_background_image)
+                bg.show_background_image = False
+            
+            # Calculate orbital camera positions around the target object
+            # Camera orbits around the object's center at the same distance
+            cam_loc = original_cam_matrix.to_translation()
+            obj_center = obj.matrix_world.to_translation()
+            
+            # Vector from object to camera
+            cam_offset = cam_loc - obj_center
+            cam_distance = cam_offset.length
+            
+            print(f"[Multiview] Object center: {obj_center}")
+            print(f"[Multiview] Camera distance: {cam_distance:.2f}")
+            
+            def orbit_camera(angle_degrees):
+                """Move camera to orbital position and aim at object using TRACK_TO constraint."""
+                rot_matrix = Matrix.Rotation(math.radians(angle_degrees), 4, 'Z')
+                rotated_offset = rot_matrix @ cam_offset
+                new_cam_loc = obj_center + rotated_offset
+                
+                # Move camera to new position
+                ai_camera.location = new_cam_loc
+                
+                # Add temporary TRACK_TO constraint to aim at object
+                track = ai_camera.constraints.new(type='TRACK_TO')
+                track.name = '_multiview_track'
+                track.target = obj
+                track.track_axis = 'TRACK_NEGATIVE_Z'
+                track.up_axis = 'UP_Y'
+                
+                # Force constraint evaluation
+                bpy.context.view_layer.update()
+                
+                # Bake the constrained rotation, then remove constraint
+                final_matrix = ai_camera.matrix_world.copy()
+                ai_camera.constraints.remove(track)
+                ai_camera.matrix_world = final_matrix
+                
+                print(f"[Multiview] Camera orbited {angle_degrees}° to {new_cam_loc}")
+            
+            # Setup render for solid views
+            context.scene.render.engine = 'BLENDER_WORKBENCH'
+            context.scene.display.shading.light = 'FLAT'
+            context.scene.render.image_settings.file_format = 'PNG'
+            temp_dir = workspace_setup.get_temp_directory(context)
+            
+            # 4. Generate left view (+120°)
+            print(f"[Multiview] Generating back-left view (+120°)...")
+            orbit_camera(120)
+            
+            combined_left_path = temp_dir / f"combined_left_{iter_num}.png"
+            context.scene.render.filepath = str(combined_left_path)
+            bpy.ops.render.render(write_still=True)
+            print(f"[Multiview] Rendered left view: {combined_left_path.name}")
+            
+            # Upload and submit left
+            server_client = runcomfy_deployment.get_server_client()
+            upload_left = server_client.upload_image(str(combined_left_path), overwrite=True)
+            uploaded_left = upload_left.get("name", "")
+            
+            # Load workflow (reuse Image or ImageRef logic)
+            workflows_dir = Path(__file__).parent / "workflows" / "Image"
+            use_ref = any(getattr(context.scene.style_engine_props, f"{slot}_image", None) for slot in ['st1', 'st2', 'st3', 'st4', 'st5', 'comp1', 'comp2', 'comp3', 'comp4', 'comp5'])
+            workflow_file = workflows_dir / ("ImageRef.json" if use_ref else "Image.json")
+            
+            with open(workflow_file, 'r') as f:
+                workflow_left = json.load(f)
+            
+            # Patch workflow with side render as input
+            workflow_left["15"]["inputs"]["image"] = uploaded_left
+            props = context.scene.style_engine_props
+            workflow_left["25"]["inputs"]["value"] = props.global_prompt
+            workflow_left["7"]["inputs"]["text"] = props.negative_prompt or ""
+            workflow_left["4"]["inputs"]["seed"] = props.seed_value
+            
+            response_left = server_client.queue_prompt(workflow_left)
+            prompt_id_left = response_left['prompt_id']
+            print(f"[Multiview] Left view queued: {prompt_id_left[:8]}...")
+            
+            # 5. Generate right view (-120°)
+            print(f"[Multiview] Generating back-right view (-120°)...")
+            orbit_camera(-120)
+            
+            combined_right_path = temp_dir / f"combined_right_{iter_num}.png"
+            context.scene.render.filepath = str(combined_right_path)
+            bpy.ops.render.render(write_still=True)
+            print(f"[Multiview] Rendered right view: {combined_right_path.name}")
+            
+            # Upload and submit right
+            upload_right = server_client.upload_image(str(combined_right_path), overwrite=True)
+            uploaded_right = upload_right.get("name", "")
+            
+            with open(workflow_file, 'r') as f:
+                workflow_right = json.load(f)
+            
+            workflow_right["15"]["inputs"]["image"] = uploaded_right
+            workflow_right["25"]["inputs"]["value"] = props.global_prompt
+            workflow_right["7"]["inputs"]["text"] = props.negative_prompt or ""
+            workflow_right["4"]["inputs"]["seed"] = props.seed_value
+            
+            response_right = server_client.queue_prompt(workflow_right)
+            prompt_id_right = response_right['prompt_id']
+            print(f"[Multiview] Right view queued: {prompt_id_right[:8]}...")
+            
+            # 6. Restore camera, engine, and settings
+            ai_camera.matrix_world = original_cam_matrix
+            context.scene.render.engine = original_engine
+            context.scene.render.image_settings.file_format = original_file_format
+            context.scene.camera = original_scene_camera
+            for i, bg in enumerate(ai_camera.data.background_images):
+                if i < len(bg_states):
+                    bg.show_background_image = bg_states[i]
+            
+            print(f"[Multiview] Camera and render settings restored")
+            
+            # 7. Setup parallel completion tracking
+            obj_name = obj.name
+            completed_results = {'left': None, 'right': None}
+            
+            def check_and_process_multiview():
+                """Check if both generations complete, then do projection"""
+                if all(v is not None for v in completed_results.values()):
+                    print(f"[Multiview] ============================================")
+                    print(f"[Multiview] BOTH VIEWS COMPLETE - Starting projection")
+                    print(f"[Multiview] ============================================")
+                    
+                    # Check both succeeded
+                    left_success, left_result, left_error = completed_results['left']
+                    right_success, right_result, right_error = completed_results['right']
+                    
+                    if not left_success or not right_success:
+                        print(f"[Multiview] Failed: left={left_success}, right={right_success}")
+                        return
+                    
+                    # Download both images
+                    temp_dir = workspace_setup.get_temp_directory(bpy.context)
+                    
+                    # Extract left image
+                    left_images = extract_output_images(left_result)
+                    left_img_path = None
+                    for img_info in left_images:
+                        if not img_info['filename'].startswith(('canny', 'depth')):
+                            save_path = temp_dir / f"left_iteration_{iter_num}.png"
+                            server_client.download_image(img_info['filename'], str(save_path), img_info.get('subfolder', ''))
+                            left_img_path = save_path
+                            print(f"[Multiview] Downloaded left: {save_path.name}")
+                            break
+                    
+                    # Extract right image
+                    right_images = extract_output_images(right_result)
+                    right_img_path = None
+                    for img_info in right_images:
+                        if not img_info['filename'].startswith(('canny', 'depth')):
+                            save_path = temp_dir / f"right_iteration_{iter_num}.png"
+                            server_client.download_image(img_info['filename'], str(save_path), img_info.get('subfolder', ''))
+                            right_img_path = save_path
+                            print(f"[Multiview] Downloaded right: {save_path.name}")
+                            break
+                    
+                    if not left_img_path or not right_img_path:
+                        print(f"[Multiview] Failed to download side images")
+                        return
+                    
+                    # Create materials for left and right
+                    import shutil
+                    
+                    # Load images into Blender
+                    left_img = bpy.data.images.load(str(left_img_path))
+                    left_img.name = f"left_iteration_{iter_num}.png"
+                    left_img.pack()
+                    
+                    right_img = bpy.data.images.load(str(right_img_path))
+                    right_img.name = f"right_iteration_{iter_num}.png"
+                    right_img.pack()
+                    
+                    # Create left material
+                    mat_left = bpy.data.materials.new(name=f"left_iteration_{iter_num}")
+                    mat_left.use_nodes = True
+                    nodes_left = mat_left.node_tree.nodes
+                    nodes_left.clear()
+                    bsdf_left = nodes_left.new(type='ShaderNodeBsdfPrincipled')
+                    bsdf_left.location = (0, 0)
+                    bsdf_left.inputs['Roughness'].default_value = 1.0
+                    tex_left = nodes_left.new(type='ShaderNodeTexImage')
+                    tex_left.location = (-300, 0)
+                    tex_left.image = left_img
+                    output_left = nodes_left.new(type='ShaderNodeOutputMaterial')
+                    output_left.location = (300, 0)
+                    mat_left.node_tree.links.new(tex_left.outputs['Color'], bsdf_left.inputs['Base Color'])
+                    mat_left.node_tree.links.new(bsdf_left.outputs['BSDF'], output_left.inputs['Surface'])
+                    
+                    # Create right material
+                    mat_right = bpy.data.materials.new(name=f"right_iteration_{iter_num}")
+                    mat_right.use_nodes = True
+                    nodes_right = mat_right.node_tree.nodes
+                    nodes_right.clear()
+                    bsdf_right = nodes_right.new(type='ShaderNodeBsdfPrincipled')
+                    bsdf_right.location = (0, 0)
+                    bsdf_right.inputs['Roughness'].default_value = 1.0
+                    tex_right = nodes_right.new(type='ShaderNodeTexImage')
+                    tex_right.location = (-300, 0)
+                    tex_right.image = right_img
+                    output_right = nodes_right.new(type='ShaderNodeOutputMaterial')
+                    output_right.location = (300, 0)
+                    mat_right.node_tree.links.new(tex_right.outputs['Color'], bsdf_right.inputs['Base Color'])
+                    mat_right.node_tree.links.new(bsdf_right.outputs['BSDF'], output_right.inputs['Surface'])
+                    
+                    print(f"[Multiview] Created materials: {mat_left.name}, {mat_right.name}")
+                    
+                    # Get target object
+                    target_obj = bpy.data.objects.get(obj_name)
+                    if not target_obj or target_obj.type != 'MESH':
+                        print(f"[Multiview] Object not found")
+                        return
+                    
+                    # Add materials to object (append to slots)
+                    target_obj.data.materials.append(mat_left)
+                    target_obj.data.materials.append(mat_right)
+                    slot_left = len(target_obj.data.materials) - 2
+                    slot_right = len(target_obj.data.materials) - 1
+                    
+                    print(f"[Multiview] Added materials to slots {slot_left} and {slot_right}")
+                    
+                    # Enter edit mode for face assignment
+                    bpy.ops.object.mode_set(mode='OBJECT')
+                    bpy.context.view_layer.objects.active = target_obj
+                    target_obj.select_set(True)
+                    bpy.ops.object.mode_set(mode='EDIT')
+                    
+                    import bmesh
+                    bm = bmesh.from_edit_mesh(target_obj.data)
+                    
+                    # Calculate view directions (world space)
+                    front_dir = (original_cam_matrix.to_quaternion() @ Vector((0, 0, -1))).normalized()
+                    left_dir = (Matrix.Rotation(math.radians(120), 4, 'Z') @ Vector((front_dir.x, front_dir.y, front_dir.z, 0))).xyz.normalized()
+                    right_dir = (Matrix.Rotation(math.radians(-120), 4, 'Z') @ Vector((front_dir.x, front_dir.y, front_dir.z, 0))).xyz.normalized()
+                    
+                    # Assign faces by normal direction
+                    front_count = 0
+                    left_count = 0
+                    right_count = 0
+                    
+                    for face in bm.faces:
+                        normal_world = (target_obj.matrix_world.to_3x3() @ face.normal).normalized()
+                        
+                        dot_front = normal_world.dot(front_dir)
+                        dot_left = normal_world.dot(left_dir)
+                        dot_right = normal_world.dot(right_dir)
+                        
+                        # Assign to slot with highest dot product
+                        if dot_front > dot_left and dot_front > dot_right and dot_front > 0.3:
+                            face.material_index = 0  # Front (existing iteration)
+                            front_count += 1
+                        elif dot_left > dot_right and dot_left > 0.3:
+                            face.material_index = slot_left  # Left
+                            left_count += 1
+                        elif dot_right > 0.3:
+                            face.material_index = slot_right  # Right
+                            right_count += 1
+                    
+                    bmesh.update_edit_mesh(target_obj.data)
+                    print(f"[Multiview] Face assignment: front={front_count}, left={left_count}, right={right_count}")
+                    
+                    # Project UVs for each angle
+                    # Find 3D viewport and store its perspective
+                    space_3d = None
+                    for area in context.screen.areas:
+                        if area.type == 'VIEW_3D':
+                            for space in area.spaces:
+                                if space.type == 'VIEW_3D':
+                                    space_3d = space
+                                    break
+                            break
+                    
+                    original_view_perspective = space_3d.region_3d.view_perspective if space_3d else None
+                    
+                    # Project front (re-select front faces and project to preserve priority)
+                    for face in bm.faces:
+                        face.select = (face.material_index == 0)
+                    bmesh.update_edit_mesh(target_obj.data)
+                    
+                    ai_camera.matrix_world = original_cam_matrix
+                    if space_3d:
+                        space_3d.region_3d.view_perspective = 'CAMERA'
+                    bpy.ops.uv.project_from_view(camera_bounds=True)
+                    print(f"[Multiview] Projected front faces")
+                    
+                    # Project left
+                    for face in bm.faces:
+                        face.select = (face.material_index == slot_left)
+                    bmesh.update_edit_mesh(target_obj.data)
+                    
+                    ai_camera.rotation_euler.z = original_cam_matrix.to_euler().z + math.radians(120)
+                    bpy.ops.uv.project_from_view(camera_bounds=True)
+                    print(f"[Multiview] Projected left faces")
+                    
+                    # Project right
+                    for face in bm.faces:
+                        face.select = (face.material_index == slot_right)
+                    bmesh.update_edit_mesh(target_obj.data)
+                    
+                    ai_camera.rotation_euler.z = original_cam_matrix.to_euler().z + math.radians(-120)
+                    bpy.ops.uv.project_from_view(camera_bounds=True)
+                    print(f"[Multiview] Projected right faces")
+                    
+                    # Restore viewport and camera
+                    if space_3d and original_view_perspective:
+                        space_3d.region_3d.view_perspective = original_view_perspective
+                    ai_camera.matrix_world = original_cam_matrix
+                    
+                    bpy.ops.object.mode_set(mode='OBJECT')
+                    
+                    print(f"[Multiview] ============================================")
+                    print(f"[Multiview] MULTIVIEW PROJECTION COMPLETE")
+                    print(f"[Multiview]   Front: iteration_{iter_num} (slot 0)")
+                    print(f"[Multiview]   Left:  left_iteration_{iter_num} (slot {slot_left})")
+                    print(f"[Multiview]   Right: right_iteration_{iter_num} (slot {slot_right})")
+                    print(f"[Multiview] ============================================")
+            
+            def on_left_complete(success, result=None, error=None, workflow_type=None):
+                completed_results['left'] = (success, result, error)
+                check_and_process_multiview()
+            
+            def on_right_complete(success, result=None, error=None, workflow_type=None):
+                completed_results['right'] = (success, result, error)
+                check_and_process_multiview()
+            
+            # Start polling for both
+            runcomfy_polling.RunComfyPoller.start_polling(
+                deployment_id='server',
+                request_id=prompt_id_left,
+                callback=on_left_complete,
+                workflow_type='multiview_left'
+            )
+            
+            runcomfy_polling.RunComfyPoller.start_polling(
+                deployment_id='server',
+                request_id=prompt_id_right,
+                callback=on_right_complete,
+                workflow_type='multiview_right'
+            )
+            
+            self.report({'INFO'}, f"Generating side views... (2x generation time)")
+            print(f"[Multiview] Processing both views in parallel...")
+            
+            return {'FINISHED'}
+            
+        except Exception as e:
+            self.report({'ERROR'}, f"Multiview failed: {str(e)}")
+            print(f"[Multiview] Error: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            # Restore camera on error
+            try:
+                ai_camera.matrix_world = original_cam_matrix
+                context.scene.render.engine = original_engine
+                context.scene.render.image_settings.file_format = original_file_format
+                context.scene.camera = original_scene_camera
+                for i, bg in enumerate(ai_camera.data.background_images):
+                    if i < len(bg_states):
+                        bg.show_background_image = bg_states[i]
+            except:
+                pass
+            
+            return {'CANCELLED'}
+
+
+# ================================================================
 # PBR FROM PROJECTED TEXTURE OPERATOR
 # ================================================================
 
@@ -3678,6 +4120,13 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                 row.scale_y = 1.2
                 row.operator("style_engine.pbr_from_projected", text="PBR from Projected Texture", icon='MATSHADERBALL')
             
+            # Multiview from Projected (conditional: only if iteration exists and not already multiview)
+            already_multiview = any(m and (m.name.startswith('left_iteration_') or m.name.startswith('right_iteration_')) for m in obj.data.materials)
+            if has_iteration_mat and not already_multiview:
+                row = img_gen_box.row()
+                row.scale_y = 1.1
+                row.operator("style_engine.multiview_from_projected", text="Multiview from Projected", icon='VIEW_CAMERA')
+            
             # Generate PBR Material from text (always visible)
             row = img_gen_box.row()
             row.scale_y = 1.2
@@ -3715,6 +4164,7 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                 col.scale_y = 1.2
                 col.operator("style_engine.create_object", text="Generate Mesh", icon='MESH_UVSPHERE')
                 col.operator("style_engine.create_textured_object", text="Generate Textured Mesh", icon='SHADING_TEXTURE')
+                col.operator("style_engine.uv_texture", text="UV Texture", icon='UV')
             
             # ────────────────────────────────────────────────────────────
             # 3D FROM MULTIVIEW SUB-CATEGORY (Collapsible, closed by default)
@@ -4655,6 +5105,7 @@ classes = (
     WM_OT_SelectGroup,
     WM_OT_DeleteGroup,
     WM_OT_ProjectTexture,
+    WM_OT_MultiviewFromProjected,
     WM_OT_PBRFromProjectedTexture,
     WM_OT_PBRFromText,
     WM_OT_LoadReferenceImage,

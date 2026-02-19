@@ -311,38 +311,13 @@ class StyleEnginePreferences(AddonPreferences):
         basic_box = layout.box()
         basic_box.label(text="Basic Settings", icon='SETTINGS')
         
-        # Backend selector
-        basic_box.prop(self, "api_backend", text="Backend")
-        basic_box.separator()
+        # Self-Hosted ComfyUI
+        basic_box.prop(self, "gcs_server_url", text="Server Address")
         
-        # Self-Hosted ComfyUI (GCS) - minimal setup
-        if self.api_backend == 'GCS':
-            basic_box.prop(self, "gcs_server_url", text="Server Address")
-        
-            # Test button
-            row = basic_box.row()
-            row.scale_y = 1.3
-            row.operator("style_engine.test_gcs_connection", text="Test Connection", icon='PLUGIN')
-        
-        # RunComfy Cloud - minimal credentials
-        else:
-            basic_box.prop(self, "credentials_file_path", text="Credentials File")
-            row = basic_box.row()
-            row.scale_y = 1.3
-            row.operator("style_engine.import_credentials", text="Import Credentials", icon='IMPORT')
-            
-            basic_box.separator()
-            
-            # Manual credentials (compact)
-            basic_box.prop(self, "show_api_keys", text="Show Credentials", toggle=True)
-            if self.show_api_keys:
-                basic_box.prop(self, "runcomfy_api_token", text="API Token")
-                basic_box.prop(self, "runcomfy_user_id", text="User ID")
-            
-            # Test button
-            row = basic_box.row()
-            row.scale_y = 1.3
-            row.operator("style_engine.test_connection", text="Test Connection", icon='PLUGIN')
+        # Test button
+        row = basic_box.row()
+        row.scale_y = 1.3
+        row.operator("style_engine.test_gcs_connection", text="Test Connection", icon='PLUGIN')
             
         # ================================================================
         # ADVANCED SETTINGS (collapsible, hidden by default)
@@ -356,28 +331,10 @@ class StyleEnginePreferences(AddonPreferences):
         
         if self.show_advanced_settings:
             
-            # GCS: Preview images option
-            if self.api_backend == 'GCS':
-                advanced_box.separator()
-                advanced_box.label(text="Preview Images", icon='IMAGE_DATA')
-                advanced_box.prop(self, "gcs_download_preview_images", text="Download Canny & Depth")
-            
-            # RunComfy: Workflow & Hardware
-            if self.api_backend == 'RUNCOMFY':
-                advanced_box.separator()
-                advanced_box.label(text="Workflow Configuration", icon='FILE_SCRIPT')
-                advanced_box.prop(self, "runcomfy_workflow_id", text="Workflow ID")
-                advanced_box.prop(self, "runcomfy_deployment_id", text="Deployment ID")
-                
-                advanced_box.separator()
-                advanced_box.label(text="Hardware Settings", icon='SHADING_RENDERED')
-                advanced_box.prop(self, "runcomfy_hardware_tier", text="GPU Tier")
-                
-                col = advanced_box.column(align=True)
-                col.prop(self, "runcomfy_min_instances")
-                col.prop(self, "runcomfy_max_instances")
-                col.prop(self, "runcomfy_queue_size")
-                col.prop(self, "runcomfy_keep_warm_seconds")
+            # Preview images option
+            advanced_box.separator()
+            advanced_box.label(text="Preview Images", icon='IMAGE_DATA')
+            advanced_box.prop(self, "gcs_download_preview_images", text="Download Canny & Depth")
                 
             # Timeout settings (both backends)
             advanced_box.separator()

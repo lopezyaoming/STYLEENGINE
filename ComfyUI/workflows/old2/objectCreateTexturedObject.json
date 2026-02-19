@@ -269,6 +269,27 @@
       "title": "Preview 3D"
     }
   },
+  "63": {
+    "inputs": {
+      "transparency": true,
+      "model": "u2net",
+      "post_processing": false,
+      "only_mask": false,
+      "alpha_matting": false,
+      "alpha_matting_foreground_threshold": 240,
+      "alpha_matting_background_threshold": 10,
+      "alpha_matting_erode_size": 10,
+      "background_color": "none",
+      "images": [
+        "14",
+        2
+      ]
+    },
+    "class_type": "Image Rembg (Remove Background)",
+    "_meta": {
+      "title": "Image Rembg (Remove Background)"
+    }
+  },
   "64": {
     "inputs": {
       "width": 1024,
@@ -280,26 +301,13 @@
       "divisible_by": 2,
       "device": "cpu",
       "image": [
-        "66",
+        "63",
         0
       ]
     },
     "class_type": "ImageResizeKJv2",
     "_meta": {
       "title": "Resize Image v2"
-    }
-  },
-  "66": {
-    "inputs": {
-      "torchscript_jit": "default",
-      "image": [
-        "14",
-        2
-      ]
-    },
-    "class_type": "InspyrenetRembg",
-    "_meta": {
-      "title": "Inspyrenet Rembg"
     }
   }
 }
