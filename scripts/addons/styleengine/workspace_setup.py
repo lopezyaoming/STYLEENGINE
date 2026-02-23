@@ -2710,8 +2710,54 @@ def generate_ai_image_cloud(context):
             upload_duration = time.time() - upload_start
             print(f"[GCS] ✓ Combined image uploaded: {uploaded_filename} ({upload_duration:.3f}s)")
             
-            # Upload reference images (ST, COMP, SST) if they exist
+            # ============================================================
+            # GEMINI PATH (short-circuit if Gemini model selected)
+            # ============================================================
             props = context.scene.style_engine_props
+            if props.ai_model == 'GEMINI':
+                print(f"[GCS] Using Gemini 3 Pro (nano-banana) model")
+                
+                from pathlib import Path
+                addon_dir = Path(__file__).parent
+                gemini_wf_path = addon_dir / "workflows" / "Image" / "TestImageNano.json"
+                
+                if not gemini_wf_path.exists():
+                    print(f"[GCS] TestImageNano.json not found")
+                    return
+                
+                with open(gemini_wf_path, 'r') as f:
+                    workflow_json = json.load(f)
+                
+                workflow_json["56"]["inputs"]["image"] = uploaded_filename
+                workflow_json["63"]["inputs"]["text"] = session_data.get('global_prompt', '')
+                
+                print(f"[GCS] Patched Gemini workflow:")
+                print(f"[GCS]   - Image: {uploaded_filename}")
+                print(f"[GCS]   - Prompt: {session_data.get('global_prompt', '')[:60]}...")
+                
+                from . import progress_bar
+                
+                queue_response = server_client.queue_prompt(workflow_json)
+                prompt_id = queue_response.get('prompt_id')
+                progress_bar.set_current_workflow(workflow_json)
+                
+                print(f"[GCS] Gemini queued (ID: {prompt_id[:8]}...)")
+                
+                runcomfy_polling.RunComfyPoller.start_polling(
+                    deployment_id='server',
+                    request_id=prompt_id,
+                    callback=lambda success, result=None, error=None, workflow_type=None: 
+                        on_generation_complete_server(context, success, result, error, workflow_type or 'gemini', server_client),
+                    workflow_type='gemini'
+                )
+                
+                print(f"[GCS] Gemini generation started!")
+                return
+            
+            # ============================================================
+            # SDXL PATH (default)
+            # ============================================================
+            # Upload reference images (ST, COMP, SST) if they exist
             ref_image_props = [
                 (props.st1_image, 'st1_path', 'ST1'),
                 (props.st2_image, 'st2_path', 'ST2'),

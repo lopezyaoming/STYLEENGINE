@@ -266,6 +266,17 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         max=2147483647,
     )
     
+    # AI Model selection
+    ai_model: bpy.props.EnumProperty(
+        name="AI Model",
+        description="Select the AI model for image generation",
+        items=[
+            ('SDXL', "Stable Diffusion", "SDXL with ControlNet (default)"),
+            ('GEMINI', "Gemini 3 Pro", "Gemini nano-banana image generation"),
+        ],
+        default='SDXL'
+    )
+    
     # Patch system state
     patch_mode_active: bpy.props.BoolProperty(
         name="Patch Mode",
@@ -4290,6 +4301,12 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
             row = file_box.row(align=True)
             row.prop(style_props, "seed_value", text="Seed")
             row.operator("style_engine.reroll_seed", text="", icon='FILE_REFRESH')
+            
+            # Model
+            file_box.separator()
+            col = file_box.column(align=True)
+            col.label(text="Model:")
+            col.prop(style_props, "ai_model", text="")
             
             # ────────────────────────────────────────────────────────────
             # VIEW SUB-CATEGORY (Collapsible)
