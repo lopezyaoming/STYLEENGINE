@@ -1960,6 +1960,214 @@ class WM_OT_NanoGenerate(bpy.types.Operator):
 
 
 # ================================================================
+# NANO 3D GENERATION (POC)
+# ================================================================
+
+class WM_OT_Nano3DGenerate(bpy.types.Operator):
+    """Generate 3D mesh from a nano-generated texture on a plane"""
+    bl_idname = "style_engine.nano_3d_generate"
+    bl_label = "Nano 3D"
+    bl_description = "Send the plane's nano texture to generate a 3D mesh, positioned on the plane"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    def execute(self, context):
+        import json
+        import time
+        import tempfile
+        from pathlib import Path
+        from . import runcomfy_deployment
+        from . import workspace_setup
+        from . import progress_bar
+        from . import runcomfy_polling
+        
+        obj = context.active_object
+        if not obj or obj.type != 'MESH':
+            self.report({'ERROR'}, "Select a mesh with a nano texture")
+            return {'CANCELLED'}
+        
+        if not obj.data.materials:
+            self.report({'ERROR'}, "Selected object has no material")
+            return {'CANCELLED'}
+        
+        if not runcomfy_deployment.is_server_mode():
+            self.report({'ERROR'}, "Requires Server mode")
+            return {'CANCELLED'}
+        
+        # Extract texture from material
+        tex_image = None
+        for mat in obj.data.materials:
+            if mat and mat.node_tree:
+                for node in mat.node_tree.nodes:
+                    if node.type == 'TEX_IMAGE' and node.image:
+                        tex_image = node.image
+                        break
+                if tex_image:
+                    break
+        
+        if not tex_image:
+            self.report({'ERROR'}, "No texture found on selected object")
+            return {'CANCELLED'}
+        
+        print(f"[Nano 3D] ============================================")
+        print(f"[Nano 3D] STARTING 3D MESH FROM NANO TEXTURE")
+        print(f"[Nano 3D] Source: {obj.name}, Texture: {tex_image.name}")
+        print(f"[Nano 3D] ============================================")
+        
+        try:
+            # Save texture to temp with unique name
+            temp_dir = workspace_setup.get_temp_directory(context)
+            tex_path = temp_dir / f"nano3d_input_{int(time.time())}.png"
+            tex_image.save_render(str(tex_path))
+            print(f"[Nano 3D] Extracted texture: {tex_path.name}")
+            
+            # Upload
+            server_client = runcomfy_deployment.get_server_client()
+            upload_resp = server_client.upload_image(str(tex_path), overwrite=True)
+            uploaded_name = upload_resp.get("name", "")
+            print(f"[Nano 3D] Uploaded: {uploaded_name}")
+            
+            # Load objectCreateObject.json
+            addon_dir = Path(__file__).parent
+            workflow_path = addon_dir / "workflows" / "Object" / "objectCreateObject.json"
+            
+            if not workflow_path.exists():
+                self.report({'ERROR'}, "objectCreateObject.json not found")
+                return {'CANCELLED'}
+            
+            with open(workflow_path, 'r') as f:
+                workflow_json = json.load(f)
+            
+            # Patch workflow
+            from . import pie_menu
+            style_props = context.scene.style_engine_props
+            quality = style_props.object_quality if hasattr(style_props, 'object_quality') else 'BALANCED'
+            params = pie_menu.get_quality_params(quality)
+            
+            workflow_json["14"]["inputs"]["image"] = uploaded_name
+            workflow_json["32"]["inputs"]["string"] = f"Nano3D_{int(time.time())}"
+            workflow_json["37"]["inputs"]["seed"] = style_props.seed_value
+            workflow_json["37"]["inputs"]["steps"] = params['mesh_steps']
+            workflow_json["9"]["inputs"]["octree_resolution"] = params['octree_resolution']
+            workflow_json["9"]["inputs"]["num_chunks"] = params['num_chunks']
+            workflow_json["30"]["inputs"]["value"] = params['max_faces']
+            
+            output_name = workflow_json["32"]["inputs"]["string"]
+            print(f"[Nano 3D] Quality: {quality}, Output: {output_name}")
+            
+            # Submit
+            result = server_client.queue_prompt(workflow_json)
+            prompt_id = result['prompt_id']
+            print(f"[Nano 3D] Queued: {prompt_id[:8]}...")
+            
+            progress_bar.set_current_workflow(workflow_json)
+            
+            # Capture plane info for positioning
+            plane_name = obj.name
+            plane_location = obj.location.copy()
+            plane_dimensions = obj.dimensions.copy()
+            
+            temp_mesh_dir = Path(tempfile.gettempdir()) / "styleengine_create"
+            temp_mesh_dir.mkdir(parents=True, exist_ok=True)
+            download_path = temp_mesh_dir / f"{output_name}.glb"
+            
+            def on_nano3d_complete(success, result=None, error=None, workflow_type=None):
+                print(f"[Nano 3D] ============================================")
+                print(f"[Nano 3D] GENERATION COMPLETE")
+                print(f"[Nano 3D] ============================================")
+                
+                if not success:
+                    print(f"[Nano 3D] Failed: {error}")
+                    return
+                
+                outputs = result.get('outputs', {})
+                output_filename = None
+                
+                if '44' in outputs:
+                    node_44 = outputs['44']
+                    if isinstance(node_44, dict) and 'gltf' in node_44:
+                        files = node_44['gltf']
+                        if files and isinstance(files, list) and len(files) > 0:
+                            file_info = files[0]
+                            output_filename = file_info.get('filename') if isinstance(file_info, dict) else file_info
+                
+                if not output_filename:
+                    output_filename = f"{output_name}_00001_.glb"
+                    print(f"[Nano 3D] Using constructed filename: {output_filename}")
+                
+                import threading
+                
+                def _download_thread():
+                    try:
+                        print(f"[Nano 3D] Downloading...")
+                        dl_success = server_client.download_mesh(
+                            output_filename, str(download_path),
+                            file_type="output"
+                        )
+                        
+                        if not dl_success:
+                            print(f"[Nano 3D] Download failed")
+                            return
+                        
+                        print(f"[Nano 3D] Downloaded: {download_path.name}")
+                        
+                        def _do_import():
+                            try:
+                                original_selected = list(bpy.context.selected_objects)
+                                bpy.ops.import_scene.gltf(filepath=str(download_path))
+                                newly_imported = [o for o in bpy.context.selected_objects if o not in original_selected]
+                                
+                                if newly_imported:
+                                    new_obj = newly_imported[0]
+                                    new_obj.name = f"Nano3D_{int(time.time())}"
+                                    
+                                    # Position on top of the source plane
+                                    new_obj.location.x = plane_location.x
+                                    new_obj.location.y = plane_location.y
+                                    new_obj.location.z = plane_location.z
+                                    
+                                    workspace_setup.save_mesh_to_library(bpy.context, download_path, mesh_type='mesh')
+                                    print(f"[Nano 3D] Imported: {new_obj.name} at plane position")
+                                
+                                print(f"[Nano 3D] ============================================")
+                                print(f"[Nano 3D] COMPLETE")
+                                print(f"[Nano 3D] ============================================")
+                                
+                            except Exception as e:
+                                print(f"[Nano 3D] Import error: {e}")
+                                import traceback
+                                traceback.print_exc()
+                            return None
+                        
+                        bpy.app.timers.register(_do_import, first_interval=0.1)
+                        
+                    except Exception as e:
+                        print(f"[Nano 3D] Download error: {e}")
+                        import traceback
+                        traceback.print_exc()
+                
+                threading.Thread(target=_download_thread, daemon=True).start()
+            
+            runcomfy_polling.RunComfyPoller.start_polling(
+                deployment_id='server',
+                request_id=prompt_id,
+                callback=on_nano3d_complete,
+                workflow_type='nano_3d'
+            )
+            
+            self.report({'INFO'}, "Nano 3D generation submitted...")
+            print(f"[Nano 3D] Processing in background...")
+            
+            return {'FINISHED'}
+            
+        except Exception as e:
+            self.report({'ERROR'}, f"Nano 3D failed: {str(e)}")
+            print(f"[Nano 3D] Error: {e}")
+            import traceback
+            traceback.print_exc()
+            return {'CANCELLED'}
+
+
+# ================================================================
 # PATCH TEXTURE OPERATORS
 # ================================================================
 
@@ -4914,6 +5122,7 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                 col.operator("style_engine.create_object", text="Generate Mesh", icon='MESH_UVSPHERE')
                 col.operator("style_engine.create_textured_object", text="Generate Textured Mesh", icon='SHADING_TEXTURE')
                 col.operator("style_engine.uv_texture", text="UV Texture", icon='UV')
+                col.operator("style_engine.nano_3d_generate", text="Nano", icon='OUTLINER_OB_LIGHT')
             
             # ────────────────────────────────────────────────────────────
             # 3D FROM MULTIVIEW SUB-CATEGORY (Collapsible, closed by default)
@@ -5855,6 +6064,7 @@ classes = (
     WM_OT_DeleteGroup,
     WM_OT_ProjectTexture,
     WM_OT_NanoGenerate,
+    WM_OT_Nano3DGenerate,
     WM_OT_TogglePatchCamera,
     WM_OT_ApplyPatch,
     WM_OT_MultiviewFromProjected,
