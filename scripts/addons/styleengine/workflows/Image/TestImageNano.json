@@ -1,0 +1,83 @@
+{
+  "50": {
+    "inputs": {
+      "model_name": "gemini-3-pro-image-preview",
+      "prompt": [
+        "60",
+        0
+      ],
+      "image_count": 1,
+      "use_search": true,
+      "aspect_ratio": "1:1",
+      "image_size": "1K",
+      "temperature": 0,
+      "image_1": [
+        "56",
+        0
+      ]
+    },
+    "class_type": "NanoBananaAIO",
+    "_meta": {
+      "title": "Nano Banana AIO"
+    }
+  },
+  "56": {
+    "inputs": {
+      "image": "blank.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "60": {
+    "inputs": {
+      "string_a": [
+        "62",
+        0
+      ],
+      "string_b": "Use the exact edge alignment and spatial boundaries of image 1. Do not shift the silhouette; maintain 1-to-1 geometric parity with the source edges for projection mapping. Mantain Unified Control",
+      "delimiter": ""
+    },
+    "class_type": "StringConcatenate",
+    "_meta": {
+      "title": "Spatial Alignment"
+    }
+  },
+  "62": {
+    "inputs": {
+      "string_a": [
+        "63",
+        0
+      ],
+      "string_b": "This drawing should be transformed into a cute claymation style. with visible thumbprints and raw textures, pastel colors and soft shadows, professional claymation aesthetic. Cinematic tilt-shift photography with an extremely shallow depth of field and soft bokeh. High-fidelity 4K resolution, macro lens detail, vibrant handmade aesthetic, soft studio lighting.",
+      "delimiter": ""
+    },
+    "class_type": "StringConcatenate",
+    "_meta": {
+      "title": "Aesthetics"
+    }
+  },
+  "63": {
+    "inputs": {
+      "text": "A stop-motion claymation scene of a snowman standing in a snowy field. the snowman has a carrot nose and black pebble eyes, surrounded by green pine trees. The entire world is made of hand-molded plasticine clay with soft, rounded, cartoony shapes and traditional winter colors—white snow, deep green pines, coal-black eyes, and an orange carrot nose. The clay surfaces show subtle fingerprints, thumb smears, and gentle imperfections, emphasizing a handmade, tactile feel. The snow looks slightly lumpy and sculpted rather than smooth. Warm, practical studio lighting illuminates the miniature set, with shallow depth of field and a macro-photography look, as if photographed frame-by-frame on a physical stop-motion stage. No CGI or digital smoothness—pure handcrafted clay animation."
+    },
+    "class_type": "Text Multiline",
+    "_meta": {
+      "title": "Prompt"
+    }
+  },
+  "64": {
+    "inputs": {
+      "filename_prefix": "ComfyUI",
+      "images": [
+        "50",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  }
+}

@@ -266,6 +266,13 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         max=2147483647,
     )
     
+    # Patch system state
+    patch_mode_active: bpy.props.BoolProperty(
+        name="Patch Mode",
+        description="Toggle patch camera mode for fixing edge textures",
+        default=False
+    )
+    
     show_view_settings: bpy.props.BoolProperty(
         name="Show View Settings",
         description="Expand or collapse the View section",
@@ -1472,6 +1479,7 @@ class WM_OT_ProjectTexture(bpy.types.Operator):
                 space_3d.region_3d.view_perspective = original_view_perspective
                 print(f"[Style Engine] Restored viewport to original view")
             
+            # Initialize coverage map for patch system (while still in edit mode)
             # Return to object mode
             bpy.ops.object.mode_set(mode='OBJECT')
             
@@ -1732,6 +1740,730 @@ class WM_OT_ProjectTexture(bpy.types.Operator):
             
         except Exception as e:
             print(f"[Style Engine] ❌ Error saving iteration image/material: {e}")
+
+
+# ================================================================
+# NANO IMAGE GENERATION (POC)
+# ================================================================
+
+class WM_OT_NanoGenerate(bpy.types.Operator):
+    """Generate image from a plane's texture using Gemini nano-banana"""
+    bl_idname = "style_engine.nano_generate"
+    bl_label = "Nano Generate"
+    bl_description = "Send a plane's painted texture + prompt to Gemini nano-banana for image generation"
+    bl_options = {'REGISTER'}
+    
+    def execute(self, context):
+        import json
+        import time
+        from pathlib import Path
+        from . import runcomfy_deployment
+        from . import workspace_setup
+        from . import progress_bar
+        from . import runcomfy_polling
+        from . import utils
+        from .runcomfy_server_client import extract_output_images
+        
+        # 1. Validate
+        obj = context.active_object
+        if not obj or obj.type != 'MESH':
+            self.report({'ERROR'}, "Select a mesh with a painted texture")
+            return {'CANCELLED'}
+        
+        if not obj.data.materials:
+            self.report({'ERROR'}, "Selected object has no material")
+            return {'CANCELLED'}
+        
+        if not runcomfy_deployment.is_server_mode():
+            self.report({'ERROR'}, "Nano requires Server mode")
+            return {'CANCELLED'}
+        
+        # 2. Extract texture from material node tree
+        tex_image = None
+        for mat in obj.data.materials:
+            if mat and mat.node_tree:
+                for node in mat.node_tree.nodes:
+                    if node.type == 'TEX_IMAGE' and node.image:
+                        tex_image = node.image
+                        break
+                if tex_image:
+                    break
+        
+        if not tex_image:
+            self.report({'ERROR'}, "No texture image found in material. Paint on the plane first.")
+            return {'CANCELLED'}
+        
+        # Save texture to temp
+        temp_dir = workspace_setup.get_temp_directory(context)
+        tex_path = temp_dir / f"nano_input_{int(time.time())}.png"
+        tex_image.save_render(str(tex_path))
+        print(f"[Nano] Extracted texture: {tex_image.name} -> {tex_path.name}")
+        
+        # 3. Parse prompt (only positive from <p> tag)
+        prompt_text = ""
+        raw_prompt = utils.get_prompt_from_text_editor()
+        if raw_prompt:
+            positive, _ = utils.process_prompt_builder(raw_prompt)
+            prompt_text = positive or ""
+        
+        if not prompt_text:
+            self.report({'ERROR'}, "No prompt found in <p> tag")
+            return {'CANCELLED'}
+        
+        print(f"[Nano] Prompt: {prompt_text[:80]}...")
+        
+        try:
+            # 4. Upload texture
+            server_client = runcomfy_deployment.get_server_client()
+            upload_resp = server_client.upload_image(str(tex_path), overwrite=True)
+            uploaded_name = upload_resp.get("name", "")
+            
+            if not uploaded_name:
+                self.report({'ERROR'}, "Failed to upload texture")
+                return {'CANCELLED'}
+            
+            print(f"[Nano] Uploaded: {uploaded_name}")
+            
+            # 5. Load and patch workflow
+            workflow_file = Path(__file__).parent / "workflows" / "Image" / "TestImageNano.json"
+            if not workflow_file.exists():
+                self.report({'ERROR'}, "TestImageNano.json not found")
+                return {'CANCELLED'}
+            
+            with open(workflow_file, 'r') as f:
+                workflow = json.load(f)
+            
+            workflow["56"]["inputs"]["image"] = uploaded_name
+            workflow["63"]["inputs"]["text"] = prompt_text
+            
+            print(f"[Nano] Patched node 56 (image): {uploaded_name}")
+            print(f"[Nano] Patched node 63 (prompt): {prompt_text[:60]}...")
+            
+            # 6. Submit
+            response = server_client.queue_prompt(workflow)
+            prompt_id = response['prompt_id']
+            print(f"[Nano] Queued: {prompt_id[:8]}...")
+            
+            progress_bar.set_current_workflow(workflow)
+            
+            # Capture for callback
+            obj_name = obj.name
+            
+            def on_nano_complete(success, result=None, error=None, workflow_type=None):
+                print(f"[Nano] ============================================")
+                print(f"[Nano] GENERATION COMPLETE")
+                print(f"[Nano] ============================================")
+                
+                if not success:
+                    print(f"[Nano] Failed: {error}")
+                    return
+                
+                try:
+                    images = extract_output_images(result)
+                    if not images:
+                        print(f"[Nano] No output images found")
+                        return
+                    
+                    # Download the output image
+                    nano_img_path = None
+                    for img_info in images:
+                        filename = img_info['filename']
+                        save_path = workspace_setup.get_temp_directory(bpy.context) / f"nano_output_{int(time.time())}.png"
+                        server_client.download_image(filename, str(save_path), img_info.get('subfolder', ''))
+                        nano_img_path = save_path
+                        print(f"[Nano] Downloaded: {save_path.name}")
+                        break
+                    
+                    if not nano_img_path:
+                        print(f"[Nano] No image downloaded")
+                        return
+                    
+                    # Schedule material creation on main thread
+                    def _create_material():
+                        try:
+                            # Auto-increment naming
+                            nano_num = 0
+                            while f"nano_{nano_num:03d}" in bpy.data.materials:
+                                nano_num += 1
+                            mat_name = f"nano_{nano_num:03d}"
+                            
+                            # Load image
+                            img = bpy.data.images.load(str(nano_img_path))
+                            img.name = f"{mat_name}.png"
+                            img.pack()
+                            
+                            # Create material
+                            mat = bpy.data.materials.new(name=mat_name)
+                            mat.use_nodes = True
+                            nodes = mat.node_tree.nodes
+                            nodes.clear()
+                            
+                            bsdf = nodes.new(type='ShaderNodeBsdfPrincipled')
+                            bsdf.location = (0, 0)
+                            bsdf.inputs['Roughness'].default_value = 1.0
+                            
+                            tex = nodes.new(type='ShaderNodeTexImage')
+                            tex.location = (-300, 0)
+                            tex.image = img
+                            
+                            output = nodes.new(type='ShaderNodeOutputMaterial')
+                            output.location = (300, 0)
+                            
+                            mat.node_tree.links.new(tex.outputs['Color'], bsdf.inputs['Base Color'])
+                            mat.node_tree.links.new(bsdf.outputs['BSDF'], output.inputs['Surface'])
+                            
+                            # Assign to object
+                            target = bpy.data.objects.get(obj_name)
+                            if target and target.type == 'MESH':
+                                if target.data.materials:
+                                    target.data.materials[0] = mat
+                                else:
+                                    target.data.materials.append(mat)
+                                print(f"[Nano] Assigned {mat_name} to {target.name}")
+                            
+                            print(f"[Nano] ============================================")
+                            print(f"[Nano] MATERIAL CREATED: {mat_name}")
+                            print(f"[Nano] ============================================")
+                            
+                        except Exception as e:
+                            print(f"[Nano] Material error: {e}")
+                            import traceback
+                            traceback.print_exc()
+                        return None
+                    
+                    bpy.app.timers.register(_create_material, first_interval=0.1)
+                    
+                except Exception as e:
+                    print(f"[Nano] Callback error: {e}")
+                    import traceback
+                    traceback.print_exc()
+            
+            # 7. Poll
+            runcomfy_polling.RunComfyPoller.start_polling(
+                deployment_id='server',
+                request_id=prompt_id,
+                callback=on_nano_complete,
+                workflow_type='nano'
+            )
+            
+            self.report({'INFO'}, "Nano generation submitted...")
+            print(f"[Nano] Processing in background...")
+            
+            return {'FINISHED'}
+            
+        except Exception as e:
+            self.report({'ERROR'}, f"Nano failed: {str(e)}")
+            print(f"[Nano] Error: {e}")
+            import traceback
+            traceback.print_exc()
+            return {'CANCELLED'}
+
+
+# ================================================================
+# PATCH TEXTURE OPERATORS
+# ================================================================
+
+class WM_OT_TogglePatchCamera(bpy.types.Operator):
+    """Toggle patch camera for fixing edge textures"""
+    bl_idname = "style_engine.toggle_patch_camera"
+    bl_label = "Toggle Patch Camera"
+    bl_description = "Spawn/remove a patch camera to fix poorly projected edge textures"
+    bl_options = {'REGISTER'}
+    
+    def execute(self, context):
+        props = context.scene.style_engine_props
+        
+        if props.patch_mode_active:
+            # ── TOGGLE OFF: Kill patch camera ──
+            # Exit edit mode if active
+            if context.object and context.object.mode == 'EDIT':
+                bpy.ops.object.mode_set(mode='OBJECT')
+            
+            # Restore ai_camera BEFORE removing patch_camera
+            # (removing first can leave scene.camera as None momentarily)
+            ai_cam = bpy.data.objects.get("ai_camera")
+            if ai_cam:
+                context.scene.camera = ai_cam
+            
+            patch_cam = bpy.data.objects.get("patch_camera")
+            if patch_cam:
+                bpy.data.objects.remove(patch_cam, do_unlink=True)
+                print(f"[Patch] Removed patch_camera")
+            
+            # Unlock camera from viewport
+            for area in context.screen.areas:
+                if area.type == 'VIEW_3D':
+                    for space in area.spaces:
+                        if space.type == 'VIEW_3D':
+                            space.lock_camera = False
+                            if space.region_3d.view_perspective == 'CAMERA':
+                                space.region_3d.view_perspective = 'PERSP'
+                            break
+                    break
+            
+            props.patch_mode_active = False
+            self.report({'INFO'}, "Patch mode disabled")
+            
+        else:
+            # ── TOGGLE ON: Spawn patch camera at current view ──
+            obj = context.active_object
+            if not obj or obj.type != 'MESH':
+                self.report({'ERROR'}, "Select a mesh with a projected texture first")
+                return {'CANCELLED'}
+            
+            has_iteration = any(m and m.name.startswith('iteration_') for m in obj.data.materials)
+            if not has_iteration:
+                self.report({'ERROR'}, "No iteration material found. Project a texture first.")
+                return {'CANCELLED'}
+            
+            # Remove old patch camera if it exists
+            old_cam = bpy.data.objects.get("patch_camera")
+            if old_cam:
+                bpy.data.objects.remove(old_cam, do_unlink=True)
+            
+            # Create patch camera
+            cam_data = bpy.data.cameras.new("patch_camera")
+            patch_cam = bpy.data.objects.new("patch_camera", cam_data)
+            context.collection.objects.link(patch_cam)
+            
+            # Copy lens from ai_camera for consistent FOV
+            ai_cam = bpy.data.objects.get("ai_camera")
+            if ai_cam:
+                cam_data.lens = ai_cam.data.lens
+            
+            # Position at current viewport
+            for area in context.screen.areas:
+                if area.type == 'VIEW_3D':
+                    for space in area.spaces:
+                        if space.type == 'VIEW_3D':
+                            rv3d = space.region_3d
+                            patch_cam.matrix_world = rv3d.view_matrix.inverted()
+                            break
+                    break
+            
+            # Add TRACK_TO constraint targeting the mesh
+            track = patch_cam.constraints.new(type='TRACK_TO')
+            track.target = obj
+            track.track_axis = 'TRACK_NEGATIVE_Z'
+            track.up_axis = 'UP_Y'
+            
+            # Set as scene camera and lock viewport to it
+            context.scene.camera = patch_cam
+            
+            for area in context.screen.areas:
+                if area.type == 'VIEW_3D':
+                    for space in area.spaces:
+                        if space.type == 'VIEW_3D':
+                            space.region_3d.view_perspective = 'CAMERA'
+                            space.lock_camera = True
+                            break
+                    break
+            
+            # Enter edit mode with face selection
+            context.view_layer.objects.active = obj
+            obj.select_set(True)
+            bpy.ops.object.mode_set(mode='EDIT')
+            context.tool_settings.mesh_select_mode = (False, False, True)
+            bpy.ops.mesh.select_all(action='DESELECT')
+            
+            props.patch_mode_active = True
+            self.report({'INFO'}, "Select faces to patch, then click Apply Patch")
+            print(f"[Patch] patch_camera spawned, tracking {obj.name}, edit mode (face select)")
+        
+        return {'FINISHED'}
+
+
+class WM_OT_ApplyPatch(bpy.types.Operator):
+    """Generate and apply a texture patch from the current patch camera angle"""
+    bl_idname = "style_engine.apply_patch"
+    bl_label = "Apply Patch"
+    bl_description = "Generate texture from patch camera angle and project onto uncovered faces"
+    bl_options = {'REGISTER'}
+    
+    def execute(self, context):
+        import json
+        import re
+        import time
+        from pathlib import Path
+        from mathutils import Vector
+        from . import runcomfy_deployment
+        from . import workspace_setup
+        from . import progress_bar
+        from . import runcomfy_polling
+        from .runcomfy_server_client import extract_output_images
+        
+        props = context.scene.style_engine_props
+        
+        # Validate
+        if not props.patch_mode_active:
+            self.report({'ERROR'}, "Patch mode is not active")
+            return {'CANCELLED'}
+        
+        patch_cam = bpy.data.objects.get("patch_camera")
+        if not patch_cam:
+            self.report({'ERROR'}, "Patch camera not found")
+            return {'CANCELLED'}
+        
+        obj = context.active_object
+        if not obj or obj.type != 'MESH':
+            self.report({'ERROR'}, "No active mesh selected")
+            return {'CANCELLED'}
+        
+        if not runcomfy_deployment.is_server_mode():
+            self.report({'ERROR'}, "Patch requires Server mode")
+            return {'CANCELLED'}
+        
+        # Find the iteration material (for style reference)
+        iteration_mat = None
+        iter_num = "000"
+        for mat in obj.data.materials:
+            if mat and mat.name.startswith('iteration_'):
+                m = re.match(r'iteration_(\d+)', mat.name)
+                if m:
+                    num = int(m.group(1))
+                    iteration_mat = mat
+                    iter_num = m.group(1)
+        
+        if not iteration_mat:
+            self.report({'ERROR'}, "No iteration material found on object")
+            return {'CANCELLED'}
+        
+        print(f"[Patch] ============================================")
+        print(f"[Patch] APPLYING PATCH from patch_camera")
+        print(f"[Patch] Object: {obj.name}, Iteration: {iteration_mat.name}")
+        print(f"[Patch] ============================================")
+        
+        try:
+            # 1. Capture selected faces while still in edit mode
+            import bmesh
+            
+            selected_face_indices = []
+            if obj.mode == 'EDIT':
+                bm = bmesh.from_edit_mesh(obj.data)
+                selected_face_indices = [f.index for f in bm.faces if f.select]
+                bm.free()
+            
+            if not selected_face_indices:
+                self.report({'ERROR'}, "No faces selected. Select faces to patch first.")
+                return {'CANCELLED'}
+            
+            print(f"[Patch] Captured {len(selected_face_indices)} selected faces")
+            
+            # Exit edit mode for rendering
+            if obj.mode == 'EDIT':
+                bpy.ops.object.mode_set(mode='OBJECT')
+            
+            # 2. Store patch camera matrix BEFORE killing it
+            patch_cam_matrix = patch_cam.matrix_world.copy()
+            obj_name = obj.name
+            
+            # Force constraint evaluation to get final world matrix
+            context.view_layer.update()
+            patch_cam_matrix = patch_cam.matrix_world.copy()
+            
+            # 3. Render solid from patch camera
+            original_engine = context.scene.render.engine
+            original_file_format = context.scene.render.image_settings.file_format
+            original_scene_camera = context.scene.camera
+            
+            # Disable ai_camera background images
+            ai_cam = bpy.data.objects.get("ai_camera")
+            bg_states = []
+            if ai_cam:
+                for bg in ai_cam.data.background_images:
+                    bg_states.append(bg.show_background_image)
+                    bg.show_background_image = False
+            
+            context.scene.camera = patch_cam
+            context.scene.render.engine = 'BLENDER_WORKBENCH'
+            context.scene.display.shading.light = 'FLAT'
+            context.scene.render.image_settings.file_format = 'PNG'
+            
+            temp_dir = workspace_setup.get_temp_directory(context)
+            patch_render_path = temp_dir / f"patch_render_{iter_num}_{int(time.time())}.png"
+            context.scene.render.filepath = str(patch_render_path)
+            bpy.ops.render.render(write_still=True)
+            
+            print(f"[Patch] Rendered solid view: {patch_render_path.name}")
+            
+            # Restore render settings
+            context.scene.render.engine = original_engine
+            context.scene.render.image_settings.file_format = original_file_format
+            if ai_cam:
+                for i, bg in enumerate(ai_cam.data.background_images):
+                    if i < len(bg_states):
+                        bg.show_background_image = bg_states[i]
+            
+            # 3. Extract iteration texture as style reference
+            ref_img_path = None
+            for node in iteration_mat.node_tree.nodes:
+                if node.type == 'TEX_IMAGE' and node.image:
+                    ref_img_path = temp_dir / f"patch_ref_{iter_num}_{int(time.time())}.png"
+                    node.image.save_render(str(ref_img_path))
+                    print(f"[Patch] Extracted style reference from {iteration_mat.name}")
+                    break
+            
+            if not ref_img_path:
+                ref_img_path = temp_dir / "current_ai.png"
+                print(f"[Patch] Using current_ai.png as style reference")
+            
+            # 4. Upload both images
+            server_client = runcomfy_deployment.get_server_client()
+            
+            upload_render = server_client.upload_image(str(patch_render_path), overwrite=True)
+            uploaded_render = upload_render.get("name", "")
+            print(f"[Patch] Uploaded render: {uploaded_render}")
+            
+            upload_ref = server_client.upload_image(str(ref_img_path), overwrite=True)
+            uploaded_ref = upload_ref.get("name", "")
+            print(f"[Patch] Uploaded reference: {uploaded_ref}")
+            
+            # 5. Load and patch objectPatch.json
+            workflow_file = Path(__file__).parent / "workflows" / "Object" / "objectPatch.json"
+            if not workflow_file.exists():
+                self.report({'ERROR'}, "objectPatch.json not found")
+                return {'CANCELLED'}
+            
+            with open(workflow_file, 'r') as f:
+                workflow = json.load(f)
+            
+            # Patch with session settings (same as Image.json patching in workspace_setup.py)
+            workflow["15"]["inputs"]["image"] = uploaded_render
+            workflow["138"]["inputs"]["image"] = uploaded_ref
+            workflow["25"]["inputs"]["value"] = props.global_prompt
+            workflow["7"]["inputs"]["text"] = props.negative_prompt or ""
+            workflow["3"]["inputs"]["seed"] = props.seed_value
+            workflow["40"]["inputs"]["value"] = props.silhouette_influence
+            workflow["41"]["inputs"]["value"] = props.depth_influence
+            
+            # Denoise (same scaling as Image.json)
+            influence_value = props.texture_influence
+            scaled_influence = influence_value * 0.7
+            denoise_value = 1.0 - scaled_influence
+            workflow["135"]["inputs"]["value"] = denoise_value
+            
+            workflow["145"]["inputs"]["value"] = props.steps
+            
+            # LoRa patching (same logic as workspace_setup.py)
+            if "136" in workflow:
+                if props.lora_enabled and props.lora_name != 'NONE':
+                    workflow["136"]["inputs"]["lora_name"] = props.lora_name
+                    workflow["136"]["inputs"]["strength_model"] = props.lora_strength_model
+                    workflow["136"]["inputs"]["strength_clip"] = props.lora_strength_model
+                else:
+                    workflow["136"]["inputs"]["strength_model"] = 0.0
+                    workflow["136"]["inputs"]["strength_clip"] = 0.0
+            
+            if "34" in workflow:
+                if props.lora2_enabled and props.lora2_name != 'NONE':
+                    workflow["34"]["inputs"]["lora_name"] = props.lora2_name
+                    workflow["34"]["inputs"]["strength_model"] = props.lora2_strength_model
+                    workflow["34"]["inputs"]["strength_clip"] = props.lora2_strength_model
+                else:
+                    workflow["34"]["inputs"]["strength_model"] = 0.0
+                    workflow["34"]["inputs"]["strength_clip"] = 0.0
+            
+            print(f"[Patch] Workflow patched with session settings")
+            
+            # 6. Submit
+            response = server_client.queue_prompt(workflow)
+            prompt_id = response['prompt_id']
+            print(f"[Patch] Queued: {prompt_id[:8]}...")
+            
+            progress_bar.set_current_workflow(workflow)
+            
+            # 7. IMMEDIATELY kill patch camera and restore viewport
+            bpy.ops.style_engine.toggle_patch_camera()
+            
+            # 8. Find next patch number
+            patch_num = 0
+            while f"patch_{patch_num:03d}_iteration_{iter_num}" in bpy.data.materials:
+                patch_num += 1
+            patch_name = f"patch_{patch_num:03d}_iteration_{iter_num}"
+            
+            # Capture variables for callback
+            captured_patch_cam_matrix = patch_cam_matrix.copy()
+            captured_obj_name = obj_name
+            captured_patch_name = patch_name
+            captured_iter_num = iter_num
+            captured_face_indices = list(selected_face_indices)
+            
+            def on_patch_complete(success, result=None, error=None, workflow_type=None):
+                """Callback when patch generation completes"""
+                print(f"[Patch] ============================================")
+                print(f"[Patch] PATCH GENERATION COMPLETE")
+                print(f"[Patch] ============================================")
+                
+                if not success:
+                    print(f"[Patch] Failed: {error}")
+                    return
+                
+                try:
+                    # Download the main image (blacklist pattern)
+                    images = extract_output_images(result)
+                    patch_img_path = None
+                    
+                    for img_info in images:
+                        filename = img_info['filename']
+                        if not filename.lower().startswith(('canny', 'depth')):
+                            save_path = workspace_setup.get_temp_directory(bpy.context) / f"{captured_patch_name}.png"
+                            server_client.download_image(filename, str(save_path), img_info.get('subfolder', ''))
+                            patch_img_path = save_path
+                            print(f"[Patch] Downloaded: {save_path.name}")
+                            break
+                    
+                    if not patch_img_path:
+                        print(f"[Patch] No output image found")
+                        return
+                    
+                    # Schedule projection on main thread
+                    def _do_patch_projection():
+                        try:
+                            import bmesh
+                            
+                            # Load image and create material
+                            patch_img = bpy.data.images.load(str(patch_img_path))
+                            patch_img.name = f"{captured_patch_name}.png"
+                            patch_img.pack()
+                            
+                            mat = bpy.data.materials.new(name=captured_patch_name)
+                            mat.use_nodes = True
+                            nodes = mat.node_tree.nodes
+                            nodes.clear()
+                            bsdf = nodes.new(type='ShaderNodeBsdfPrincipled')
+                            bsdf.location = (0, 0)
+                            bsdf.inputs['Roughness'].default_value = 1.0
+                            tex = nodes.new(type='ShaderNodeTexImage')
+                            tex.location = (-300, 0)
+                            tex.image = patch_img
+                            output = nodes.new(type='ShaderNodeOutputMaterial')
+                            output.location = (300, 0)
+                            mat.node_tree.links.new(tex.outputs['Color'], bsdf.inputs['Base Color'])
+                            mat.node_tree.links.new(bsdf.outputs['BSDF'], output.inputs['Surface'])
+                            
+                            print(f"[Patch] Created material: {captured_patch_name}")
+                            
+                            # Get target object
+                            target_obj = bpy.data.objects.get(captured_obj_name)
+                            if not target_obj or target_obj.type != 'MESH':
+                                print(f"[Patch] Object '{captured_obj_name}' not found")
+                                return None
+                            
+                            # Append material to new slot
+                            target_obj.data.materials.append(mat)
+                            patch_slot = len(target_obj.data.materials) - 1
+                            
+                            # Enter edit mode for face assignment using captured selection
+                            bpy.context.view_layer.objects.active = target_obj
+                            target_obj.select_set(True)
+                            bpy.ops.object.mode_set(mode='EDIT')
+                            
+                            import bmesh
+                            bm = bmesh.from_edit_mesh(target_obj.data)
+                            
+                            # Assign user-selected faces to patch material slot
+                            selected_set = set(captured_face_indices)
+                            patch_count = 0
+                            bpy.ops.mesh.select_all(action='DESELECT')
+                            bm = bmesh.from_edit_mesh(target_obj.data)
+                            for face in bm.faces:
+                                if face.index in selected_set:
+                                    face.material_index = patch_slot
+                                    face.select = True
+                                    patch_count += 1
+                                else:
+                                    face.select = False
+                            
+                            bmesh.update_edit_mesh(target_obj.data)
+                            print(f"[Patch] Assigned {patch_count} user-selected faces to slot {patch_slot}")
+                            
+                            # Create temporary camera at saved position for projection
+                            temp_cam_data = bpy.data.cameras.new("_patch_proj_cam")
+                            ai_cam = bpy.data.objects.get("ai_camera")
+                            if ai_cam:
+                                temp_cam_data.lens = ai_cam.data.lens
+                            temp_cam = bpy.data.objects.new("_patch_proj_cam", temp_cam_data)
+                            bpy.context.collection.objects.link(temp_cam)
+                            temp_cam.matrix_world = captured_patch_cam_matrix
+                            
+                            # Set as scene camera and project
+                            original_cam = bpy.context.scene.camera
+                            bpy.context.scene.camera = temp_cam
+                            
+                            space_3d = None
+                            original_persp = None
+                            for area in bpy.context.screen.areas:
+                                if area.type == 'VIEW_3D':
+                                    for space in area.spaces:
+                                        if space.type == 'VIEW_3D':
+                                            space_3d = space
+                                            original_persp = space.region_3d.view_perspective
+                                            break
+                                    break
+                            
+                            if space_3d:
+                                space_3d.region_3d.view_perspective = 'CAMERA'
+                                bpy.ops.uv.project_from_view(camera_bounds=True, correct_aspect=True, scale_to_bounds=False)
+                                space_3d.region_3d.view_perspective = original_persp
+                                print(f"[Patch] Projected UVs from patch angle")
+                            
+                            # Cleanup temp camera
+                            bpy.context.scene.camera = original_cam
+                            bpy.data.objects.remove(temp_cam, do_unlink=True)
+                            
+                            bpy.ops.object.mode_set(mode='OBJECT')
+                            
+                            print(f"[Patch] ============================================")
+                            print(f"[Patch] PATCH APPLIED: {captured_patch_name}")
+                            print(f"[Patch]   Faces patched: {patch_count}")
+                            print(f"[Patch]   Material slot: {patch_slot}")
+                            print(f"[Patch] ============================================")
+                            
+                        except Exception as e:
+                            print(f"[Patch] Projection error: {e}")
+                            import traceback
+                            traceback.print_exc()
+                            try:
+                                bpy.ops.object.mode_set(mode='OBJECT')
+                            except:
+                                pass
+                        return None
+                    
+                    bpy.app.timers.register(_do_patch_projection, first_interval=0.1)
+                    
+                except Exception as e:
+                    print(f"[Patch] Callback error: {e}")
+                    import traceback
+                    traceback.print_exc()
+            
+            # Start polling
+            runcomfy_polling.RunComfyPoller.start_polling(
+                deployment_id='server',
+                request_id=prompt_id,
+                callback=on_patch_complete,
+                workflow_type='patch'
+            )
+            
+            self.report({'INFO'}, f"Patch submitted! Generating texture...")
+            print(f"[Patch] Processing in background...")
+            
+            return {'FINISHED'}
+            
+        except Exception as e:
+            self.report({'ERROR'}, f"Patch failed: {str(e)}")
+            print(f"[Patch] Error: {e}")
+            import traceback
+            traceback.print_exc()
+            # Restore on error
+            try:
+                context.scene.render.engine = original_engine
+                if ai_cam:
+                    for i, bg in enumerate(ai_cam.data.background_images):
+                        if i < len(bg_states):
+                            bg.show_background_image = bg_states[i]
+            except:
+                pass
+            return {'CANCELLED'}
 
 
 # ================================================================
@@ -3839,10 +4571,15 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
             # Generate Image button (main action)
             row = img_gen_box.row()
             row.scale_y = 2.0
-            row.operator("style_engine.generate_ai_quick", 
-                         text="Generate Image", 
+            row.operator("style_engine.generate_ai_quick",
+                         text="Generate Image",
                          icon='IMAGE_DATA')
             
+            # Nano (Gemini nano-banana POC)
+            row = img_gen_box.row()
+            row.scale_y = 1.2
+            row.operator("style_engine.nano_generate", text="Nano", icon='OUTLINER_OB_LIGHT')
+
             img_gen_box.separator()
             
             # ────────────────────────────────────────────────────────────
@@ -4116,6 +4853,18 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                 any(m and m.name.startswith('iteration_') for m in obj.data.materials)
             )
             if has_iteration_mat:
+                # Patch buttons (toggle between Patch/Apply+Cancel states)
+                if style_props.patch_mode_active:
+                    row = img_gen_box.row()
+                    row.scale_y = 1.3
+                    row.operator("style_engine.apply_patch", text="Apply Patch", icon='BRUSH_DATA')
+                    row = img_gen_box.row()
+                    row.operator("style_engine.toggle_patch_camera", text="Cancel Patch", icon='X')
+                else:
+                    row = img_gen_box.row()
+                    row.scale_y = 1.2
+                    row.operator("style_engine.toggle_patch_camera", text="Patch", icon='BRUSH_DATA')
+                
                 row = img_gen_box.row()
                 row.scale_y = 1.2
                 row.operator("style_engine.pbr_from_projected", text="PBR from Projected Texture", icon='MATSHADERBALL')
@@ -5105,6 +5854,9 @@ classes = (
     WM_OT_SelectGroup,
     WM_OT_DeleteGroup,
     WM_OT_ProjectTexture,
+    WM_OT_NanoGenerate,
+    WM_OT_TogglePatchCamera,
+    WM_OT_ApplyPatch,
     WM_OT_MultiviewFromProjected,
     WM_OT_PBRFromProjectedTexture,
     WM_OT_PBRFromText,
