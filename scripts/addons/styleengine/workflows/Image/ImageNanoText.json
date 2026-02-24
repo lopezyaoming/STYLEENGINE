@@ -1,0 +1,94 @@
+{
+  "50": {
+    "inputs": {
+      "model_name": "gemini-3-pro-image-preview",
+      "prompt": [
+        "62",
+        0
+      ],
+      "image_count": 1,
+      "use_search": true,
+      "aspect_ratio": "1:1",
+      "image_size": "1K",
+      "temperature": 0
+    },
+    "class_type": "NanoBananaAIO",
+    "_meta": {
+      "title": "Nano Banana AIO"
+    }
+  },
+  "60": {
+    "inputs": {
+      "string_a": [
+        "62",
+        0
+      ],
+      "string_b": [
+        "66",
+        0
+      ],
+      "delimiter": ""
+    },
+    "class_type": "StringConcatenate",
+    "_meta": {
+      "title": "Spatial Alignment Join"
+    }
+  },
+  "62": {
+    "inputs": {
+      "string_a": [
+        "63",
+        0
+      ],
+      "string_b": [
+        "65",
+        0
+      ],
+      "delimiter": ""
+    },
+    "class_type": "StringConcatenate",
+    "_meta": {
+      "title": "Instructions Join"
+    }
+  },
+  "63": {
+    "inputs": {
+      "text": ""
+    },
+    "class_type": "Text Multiline",
+    "_meta": {
+      "title": "Prompt"
+    }
+  },
+  "64": {
+    "inputs": {
+      "filename_prefix": "ComfyUI",
+      "images": [
+        "50",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "65": {
+    "inputs": {
+      "value": ""
+    },
+    "class_type": "PrimitiveStringMultiline",
+    "_meta": {
+      "title": "Instructions"
+    }
+  },
+  "66": {
+    "inputs": {
+      "value": ""
+    },
+    "class_type": "PrimitiveStringMultiline",
+    "_meta": {
+      "title": "Spatial Alignment Prompt"
+    }
+  }
+}

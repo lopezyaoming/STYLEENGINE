@@ -1,6 +1,0 @@
-# Keywords
-<k>photorealistic, professional photography, 8k resolution, sharp focus, highly detailed, realistic lighting</k>
-# Prompt
-<p>modern architectural interior with floor-to-ceiling windows, natural daylight, minimalist furniture, clean composition</p>
-# Negative Prompt
-<n>painting, illustration, sketch, drawing, artistic, stylized, cartoon, anime, low resolution, blurry, grainy</n>

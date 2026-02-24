@@ -2731,9 +2731,29 @@ def generate_ai_image_cloud(context):
                 workflow_json["56"]["inputs"]["image"] = uploaded_filename
                 workflow_json["63"]["inputs"]["text"] = session_data.get('global_prompt', '')
                 
+                # Gemini-specific params
+                workflow_json["50"]["inputs"]["temperature"] = props.gemini_temperature
+                workflow_json["50"]["inputs"]["image_size"] = props.gemini_image_size
+                
+                # Auto-detect aspect ratio from render resolution
+                _GEMINI_RATIOS = [
+                    (1, 1, '1:1'), (2, 3, '2:3'), (3, 2, '3:2'), (3, 4, '3:4'),
+                    (4, 3, '4:3'), (4, 5, '4:5'), (5, 4, '5:4'),
+                    (9, 16, '9:16'), (16, 9, '16:9'), (21, 9, '21:9'),
+                ]
+                rw = context.scene.render.resolution_x
+                rh = context.scene.render.resolution_y
+                render_ratio = rw / max(rh, 1)
+                best_ratio = min(_GEMINI_RATIOS, key=lambda r: abs((r[0]/r[1]) - render_ratio))
+                computed_aspect = best_ratio[2]
+                workflow_json["50"]["inputs"]["aspect_ratio"] = computed_aspect
+                
                 print(f"[GCS] Patched Gemini workflow:")
                 print(f"[GCS]   - Image: {uploaded_filename}")
                 print(f"[GCS]   - Prompt: {session_data.get('global_prompt', '')[:60]}...")
+                print(f"[GCS]   - Temperature: {props.gemini_temperature}")
+                print(f"[GCS]   - Size: {props.gemini_image_size}")
+                print(f"[GCS]   - Aspect: {computed_aspect} (from {rw}x{rh})")
                 
                 from . import progress_bar
                 

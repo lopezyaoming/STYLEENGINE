@@ -1,0 +1,172 @@
+{
+  "50": {
+    "inputs": {
+      "model_name": "gemini-3-pro-image-preview",
+      "prompt": [
+        "62",
+        0
+      ],
+      "image_count": 1,
+      "use_search": true,
+      "aspect_ratio": "1:1",
+      "image_size": "1K",
+      "temperature": 0,
+      "image_1": [
+        "56",
+        0
+      ],
+      "image_2": [
+        "67",
+        0
+      ],
+      "image_3": [
+        "68",
+        0
+      ],
+      "image_4": [
+        "69",
+        0
+      ],
+      "image_5": [
+        "70",
+        0
+      ],
+      "image_6": [
+        "71",
+        0
+      ]
+    },
+    "class_type": "NanoBananaAIO",
+    "_meta": {
+      "title": "Nano Banana AIO"
+    }
+  },
+  "56": {
+    "inputs": {
+      "image": "blank.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "60": {
+    "inputs": {
+      "string_a": [
+        "62",
+        0
+      ],
+      "string_b": [
+        "66",
+        0
+      ],
+      "delimiter": ""
+    },
+    "class_type": "StringConcatenate",
+    "_meta": {
+      "title": "Spatial Alignment Join"
+    }
+  },
+  "62": {
+    "inputs": {
+      "string_a": [
+        "63",
+        0
+      ],
+      "string_b": [
+        "65",
+        0
+      ],
+      "delimiter": ""
+    },
+    "class_type": "StringConcatenate",
+    "_meta": {
+      "title": "Instructions Join"
+    }
+  },
+  "63": {
+    "inputs": {
+      "text": ""
+    },
+    "class_type": "Text Multiline",
+    "_meta": {
+      "title": "Prompt"
+    }
+  },
+  "64": {
+    "inputs": {
+      "filename_prefix": "ComfyUI",
+      "images": [
+        "50",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "65": {
+    "inputs": {
+      "value": ""
+    },
+    "class_type": "PrimitiveStringMultiline",
+    "_meta": {
+      "title": "Instructions"
+    }
+  },
+  "66": {
+    "inputs": {
+      "value": ""
+    },
+    "class_type": "PrimitiveStringMultiline",
+    "_meta": {
+      "title": "Spatial Alignment Prompt"
+    }
+  },
+  "67": {
+    "inputs": {
+      "image": "blank.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Reference Image 1"
+    }
+  },
+  "68": {
+    "inputs": {
+      "image": "blank.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Reference Image 2"
+    }
+  },
+  "69": {
+    "inputs": {
+      "image": "blank.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Reference Image 3"
+    }
+  },
+  "70": {
+    "inputs": {
+      "image": "blank.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Reference Image 4"
+    }
+  },
+  "71": {
+    "inputs": {
+      "image": "blank.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Reference Image 5"
+    }
+  }
+}

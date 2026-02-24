@@ -277,6 +277,26 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         default='SDXL'
     )
     
+    # Gemini-specific settings
+    gemini_temperature: bpy.props.FloatProperty(
+        name="Temperature",
+        description="Creativity level (0=faithful to input, 1=maximum creativity)",
+        default=0.0,
+        min=0.0,
+        max=1.0,
+        step=1,
+    )
+    gemini_image_size: bpy.props.EnumProperty(
+        name="Image Size",
+        description="Output image resolution for Gemini generation",
+        items=[
+            ('1K', "1K", "1024px"),
+            ('2K', "2K", "2048px"),
+            ('4K', "4K", "4096px"),
+        ],
+        default='1K'
+    )
+    
     # Patch system state
     patch_mode_active: bpy.props.BoolProperty(
         name="Patch Mode",
@@ -4807,261 +4827,194 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
 
             img_gen_box.separator()
             
-            # ────────────────────────────────────────────────────────────
-            # INFLUENCE SUB-CATEGORY (Collapsible)
-            # ────────────────────────────────────────────────────────────
-            influence_box = img_gen_box.box()
-            influence_header = influence_box.row(align=True)
-            influence_icon = 'TRIA_DOWN' if style_props.show_influence else 'TRIA_RIGHT'
-            influence_header.prop(style_props, "show_influence", text="Influence", icon=influence_icon, emboss=False, toggle=True)
-            influence_header.label(text="", icon='SMOOTHCURVE')
-            
-            if style_props.show_influence:
-                col = influence_box.column(align=True)
-                col.prop(style_props, "silhouette_influence", text="Silhouette", slider=True)
-                col.prop(style_props, "depth_influence", text="Depth", slider=True)
-                col.prop(style_props, "texture_influence", text="Viewport", slider=True)
+            if style_props.ai_model == 'GEMINI':
+                # ────────────────────────────────────────────────────────────
+                # GEMINI CONTROLS (simplified)
+                # ────────────────────────────────────────────────────────────
+                col = img_gen_box.column(align=True)
+                col.prop(style_props, "gemini_temperature", text="Temperature", slider=True)
+                col.prop(style_props, "gemini_image_size", text="Size")
                 
-                influence_box.separator()
-                col = influence_box.column(align=True)
-                col.label(text="Steps:")
-                col.prop(style_props, "steps", text="", slider=True)
+                # Show auto-detected aspect ratio from render resolution
+                w = context.scene.render.resolution_x
+                h = context.scene.render.resolution_y
+                img_gen_box.label(text=f"Aspect: {w}x{h}", icon='FULLSCREEN_ENTER')
             
-            # Autogenerate toggle - HIDDEN (now redundant with progress bar)
-            # img_gen_box.separator()
-            # row = img_gen_box.row()
-            # row.scale_y = 1.3
-            # row.prop(style_props, "auto_generate", 
-            #          text="Autogenerate", 
-            #          toggle=True, 
-            #          icon='FILE_REFRESH')
-            
-            # ────────────────────────────────────────────────────────────
-            # REFERENCE IMAGES SUB-CATEGORY (Collapsible, closed by default)
-            # ────────────────────────────────────────────────────────────
-            img_gen_box.separator()
-            ref_box = img_gen_box.box()
-            ref_header = ref_box.row(align=True)
-            ref_icon = 'TRIA_DOWN' if style_props.show_reference_images else 'TRIA_RIGHT'
-            ref_header.prop(style_props, "show_reference_images", text="Reference Images", icon=ref_icon, emboss=False, toggle=True)
-            ref_header.label(text="", icon='IMAGE_REFERENCE')
-            
-            if style_props.show_reference_images:
-                # Advanced Control toggle (shows individual weight sliders when enabled)
-                adv_row = ref_box.row(align=True)
-                adv_row.prop(style_props, "show_advanced_ref_controls", text="Advanced Control", toggle=True, icon='PREFERENCES')
+            else:
+                # ────────────────────────────────────────────────────────────
+                # SDXL CONTROLS
+                # ────────────────────────────────────────────────────────────
                 
-                # Helper function to draw a reference image section
-                def draw_reference_section(box, title, icon, show_prop, slots, strength_prop, show_weights=False):
-                    """Draw a collapsible reference image section with grid layout"""
-                    section_box = box.box()
-                    header = section_box.row(align=True)
-                    icon_tri = 'TRIA_DOWN' if getattr(style_props, show_prop) else 'TRIA_RIGHT'
-                    header.prop(style_props, show_prop, text=title, icon=icon_tri, emboss=False, toggle=True)
+                # INFLUENCE SUB-CATEGORY (Collapsible)
+                influence_box = img_gen_box.box()
+                influence_header = influence_box.row(align=True)
+                influence_icon = 'TRIA_DOWN' if style_props.show_influence else 'TRIA_RIGHT'
+                influence_header.prop(style_props, "show_influence", text="Influence", icon=influence_icon, emboss=False, toggle=True)
+                influence_header.label(text="", icon='SMOOTHCURVE')
                 
-                    if getattr(style_props, show_prop):
-                        # Global strength slider
-                        section_box.separator()
-                        strength_row = section_box.row()
-                        strength_row.scale_y = 1.5
-                        strength_row.prop(style_props, strength_prop, text="Global Strength", slider=True)
-                        
-                        section_box.separator()
-                        
-                        # Grid layout for images (3 columns)
-                        grid = section_box.grid_flow(
-                            row_major=True,
-                            columns=3,
-                            even_columns=True,
-                            even_rows=True,
-                            align=True
-                        )
-                        
-                        # Draw each slot
-                        for slot_id, img_prop, weight_prop, label in slots:
-                            img = getattr(style_props, img_prop)
-                        
-                            # Card for each slot
-                            card = grid.box()
-                            card.scale_y = 1.0
-                            
-                            if img:
-                                # Image exists - show preview and controls
-                                col = card.column(align=True)
-                        
-                                # Image thumbnail using template_icon
-                                # This displays the actual image content as an icon
-                                preview_box = col.box()
-                                preview_col = preview_box.column(align=True)
-                                
-                                # Display image thumbnail using preview collection (Poliigon method)
-                                try:
-                                    # Get the persistent preview collection
-                                    pcoll = preview_collections.get("ref_images")
-                                    
-                                    if pcoll is None:
-                                        preview_col.label(text="[No Collection]", icon='ERROR')
-                                    else:
-                                        # Generate unique key for this image
-                                        thumb_key = f"{slot_id}_{img.name}"
-                                        
-                                        # Load thumbnail into preview collection if not already loaded
-                                        if thumb_key not in pcoll:
-                                            if img.filepath:
-                                                abs_path = bpy.path.abspath(img.filepath)
-                                                try:
-                                                    pcoll.load(thumb_key, abs_path, 'IMAGE')
-                                                except Exception as e:
-                                                    print(f"[UI] Failed to load preview for {img.name}: {e}")
-                                        
-                                        # Display the thumbnail using template_icon
-                                        if thumb_key in pcoll:
-                                            thumb = pcoll[thumb_key]
-                                            if thumb.icon_id > 0:
-                                                preview_col.template_icon(icon_value=thumb.icon_id, scale=5.0)
-                                            else:
-                                                preview_col.label(text="[Invalid Icon]", icon='IMAGE_DATA')
+                if style_props.show_influence:
+                    col = influence_box.column(align=True)
+                    col.prop(style_props, "silhouette_influence", text="Silhouette", slider=True)
+                    col.prop(style_props, "depth_influence", text="Depth", slider=True)
+                    col.prop(style_props, "texture_influence", text="Viewport", slider=True)
+                    
+                    influence_box.separator()
+                    col = influence_box.column(align=True)
+                    col.label(text="Steps:")
+                    col.prop(style_props, "steps", text="", slider=True)
+            
+                # REFERENCE IMAGES SUB-CATEGORY (Collapsible, closed by default)
+                img_gen_box.separator()
+                ref_box = img_gen_box.box()
+                ref_header = ref_box.row(align=True)
+                ref_icon = 'TRIA_DOWN' if style_props.show_reference_images else 'TRIA_RIGHT'
+                ref_header.prop(style_props, "show_reference_images", text="Reference Images", icon=ref_icon, emboss=False, toggle=True)
+                ref_header.label(text="", icon='IMAGE_REFERENCE')
+            
+                if style_props.show_reference_images:
+                    adv_row = ref_box.row(align=True)
+                    adv_row.prop(style_props, "show_advanced_ref_controls", text="Advanced Control", toggle=True, icon='PREFERENCES')
+                    
+                    def draw_reference_section(box, title, icon, show_prop, slots, strength_prop, show_weights=False):
+                        section_box = box.box()
+                        header = section_box.row(align=True)
+                        icon_tri = 'TRIA_DOWN' if getattr(style_props, show_prop) else 'TRIA_RIGHT'
+                        header.prop(style_props, show_prop, text=title, icon=icon_tri, emboss=False, toggle=True)
+                        if getattr(style_props, show_prop):
+                            section_box.separator()
+                            strength_row = section_box.row()
+                            strength_row.scale_y = 1.5
+                            strength_row.prop(style_props, strength_prop, text="Global Strength", slider=True)
+                            section_box.separator()
+                            grid = section_box.grid_flow(row_major=True, columns=3, even_columns=True, even_rows=True, align=True)
+                            for slot_id, img_prop, weight_prop, label in slots:
+                                img = getattr(style_props, img_prop)
+                                card = grid.box()
+                                card.scale_y = 1.0
+                                if img:
+                                    col = card.column(align=True)
+                                    preview_box = col.box()
+                                    preview_col = preview_box.column(align=True)
+                                    try:
+                                        pcoll = preview_collections.get("ref_images")
+                                        if pcoll is None:
+                                            preview_col.label(text="[No Collection]", icon='ERROR')
                                         else:
-                                            preview_col.label(text="[Not Loaded]", icon='IMAGE_DATA')
-                                    
-                                except Exception as e:
-                                    preview_col.label(text="[Error]", icon='ERROR')
-                                    print(f"[UI] Error displaying thumbnail for {img.name}: {e}")
-                                
-                                col.separator(factor=0.2)
-                            
-                                # Slot label and image name
-                                info_col = col.column(align=True)
-                                info_col.scale_y = 0.7
-                                
-                                label_row = info_col.row()
-                                label_row.alignment = 'CENTER'
-                                label_row.label(text=label, icon='IMAGE_DATA')
-                                
-                                name_row = info_col.row()
-                                name_row.alignment = 'CENTER'
-                                display_name = img.name[:10] + "..." if len(img.name) > 13 else img.name
-                                name_row.label(text=display_name)
-                                
-                                col.separator(factor=0.3)
-                            
-                                # Weight slider (only shown when Advanced Control is enabled)
-                                if show_weights:
-                                    col.prop(style_props, weight_prop, text="", slider=True)
+                                            thumb_key = f"{slot_id}_{img.name}"
+                                            if thumb_key not in pcoll:
+                                                if img.filepath:
+                                                    abs_path = bpy.path.abspath(img.filepath)
+                                                    try:
+                                                        pcoll.load(thumb_key, abs_path, 'IMAGE')
+                                                    except Exception as e:
+                                                        print(f"[UI] Failed to load preview for {img.name}: {e}")
+                                            if thumb_key in pcoll:
+                                                thumb = pcoll[thumb_key]
+                                                if thumb.icon_id > 0:
+                                                    preview_col.template_icon(icon_value=thumb.icon_id, scale=5.0)
+                                                else:
+                                                    preview_col.label(text="[Invalid Icon]", icon='IMAGE_DATA')
+                                            else:
+                                                preview_col.label(text="[Not Loaded]", icon='IMAGE_DATA')
+                                    except Exception as e:
+                                        preview_col.label(text="[Error]", icon='ERROR')
                                     col.separator(factor=0.2)
-                            
-                                # Action buttons (reload and clear)
-                                btn_row = col.row(align=True)
-                                btn_row.scale_y = 0.7
-                                reload_op = btn_row.operator("style_engine.reload_reference", text="", icon='FILE_REFRESH')
-                                reload_op.slot = slot_id
-                                clear_op = btn_row.operator("style_engine.clear_reference", text="", icon='X')
-                                clear_op.slot = slot_id
-                            else:
-                                # Empty slot - show add button
-                                col = card.column(align=True)
-                                col.scale_y = 2.5
-                                col.separator()
-                                load_op = col.operator("style_engine.load_reference", 
-                                                     text=f"{label}\n+", 
-                                                     icon='ADD',
-                                                     emboss=True)
-                                load_op.slot = slot_id
-                                col.separator()
+                                    info_col = col.column(align=True)
+                                    info_col.scale_y = 0.7
+                                    label_row = info_col.row()
+                                    label_row.alignment = 'CENTER'
+                                    label_row.label(text=label, icon='IMAGE_DATA')
+                                    name_row = info_col.row()
+                                    name_row.alignment = 'CENTER'
+                                    display_name = img.name[:10] + "..." if len(img.name) > 13 else img.name
+                                    name_row.label(text=display_name)
+                                    col.separator(factor=0.3)
+                                    if show_weights:
+                                        col.prop(style_props, weight_prop, text="", slider=True)
+                                        col.separator(factor=0.2)
+                                    btn_row = col.row(align=True)
+                                    btn_row.scale_y = 0.7
+                                    reload_op = btn_row.operator("style_engine.reload_reference", text="", icon='FILE_REFRESH')
+                                    reload_op.slot = slot_id
+                                    clear_op = btn_row.operator("style_engine.clear_reference", text="", icon='X')
+                                    clear_op.slot = slot_id
+                                else:
+                                    col = card.column(align=True)
+                                    col.scale_y = 2.5
+                                    col.separator()
+                                    load_op = col.operator("style_engine.load_reference", text=f"{label}\n+", icon='ADD', emboss=True)
+                                    load_op.slot = slot_id
+                                    col.separator()
                 
-                # Style Transfer section
-                st_slots = [
-                    ("st1", "st1_image", "st1_weight", "ST1"),
-                    ("st2", "st2_image", "st2_weight", "ST2"),
-                    ("st3", "st3_image", "st3_weight", "ST3"),
-                    ("st4", "st4_image", "st4_weight", "ST4"),
-                    ("st5", "st5_image", "st5_weight", "ST5"),
-                ]
-                draw_reference_section(ref_box, "Style", 'BRUSH_DATA', 
-                                     "show_style_transfer", st_slots, "style_transfer_strength",
-                                     show_weights=style_props.show_advanced_ref_controls)
-                
-                # Composition section
-                comp_slots = [
-                    ("comp1", "comp1_image", "comp1_weight", "COMP1"),
-                    ("comp2", "comp2_image", "comp2_weight", "COMP2"),
-                    ("comp3", "comp3_image", "comp3_weight", "COMP3"),
-                    ("comp4", "comp4_image", "comp4_weight", "COMP4"),
-                    ("comp5", "comp5_image", "comp5_weight", "COMP5"),
-                ]
-                draw_reference_section(ref_box, "Composition", 'MESH_GRID', 
-                                     "show_composition", comp_slots, "composition_strength",
-                                     show_weights=style_props.show_advanced_ref_controls)
-            
-            # ────────────────────────────────────────────────────────────
-            # LORAS SUB-CATEGORY (Collapsible, closed by default)
-            # ────────────────────────────────────────────────────────────
-            img_gen_box.separator()
-            lora_box = img_gen_box.box()
-            lora_header = lora_box.row(align=True)
-            lora_icon = 'TRIA_DOWN' if style_props.show_loras else 'TRIA_RIGHT'
-            lora_header.prop(style_props, "show_loras", text="LoRas", icon=lora_icon, emboss=False, toggle=True)
-            lora_header.label(text="", icon='MODIFIER')
-            
-            if style_props.show_loras:
-                lora_col = lora_box.column(align=False)
-                
-                # ── LoRa 1 ──────────────────────────────────
-                lora1_box = lora_col.box()
-                lora1_col = lora1_box.column(align=True)
-                
-                # Enable toggle (prominent)
-                row = lora1_col.row()
-                row.scale_y = 1.4
-                row.prop(style_props, "lora_enabled", 
-                              text="Use LoRa", 
-                              toggle=True, icon='MODIFIER')
-                
-                # Only show controls if enabled
-                if style_props.lora_enabled:
-                    lora1_col.separator(factor=0.3)
+                    st_slots = [
+                        ("st1", "st1_image", "st1_weight", "ST1"),
+                        ("st2", "st2_image", "st2_weight", "ST2"),
+                        ("st3", "st3_image", "st3_weight", "ST3"),
+                        ("st4", "st4_image", "st4_weight", "ST4"),
+                        ("st5", "st5_image", "st5_weight", "ST5"),
+                    ]
+                    draw_reference_section(ref_box, "Style", 'BRUSH_DATA', 
+                                         "show_style_transfer", st_slots, "style_transfer_strength",
+                                         show_weights=style_props.show_advanced_ref_controls)
                     
-                    # LoRa dropdown with refresh button
-                    refresh_row = lora1_col.row(align=True)
-                    refresh_row.prop(style_props, "lora_name", text="")
-                    refresh_row.operator("style_engine.refresh_lora_list", text="", icon='FILE_REFRESH')
+                    comp_slots = [
+                        ("comp1", "comp1_image", "comp1_weight", "COMP1"),
+                        ("comp2", "comp2_image", "comp2_weight", "COMP2"),
+                        ("comp3", "comp3_image", "comp3_weight", "COMP3"),
+                        ("comp4", "comp4_image", "comp4_weight", "COMP4"),
+                        ("comp5", "comp5_image", "comp5_weight", "COMP5"),
+                    ]
+                    draw_reference_section(ref_box, "Composition", 'MESH_GRID', 
+                                         "show_composition", comp_slots, "composition_strength",
+                                         show_weights=style_props.show_advanced_ref_controls)
+                
+                # LORAS SUB-CATEGORY (Collapsible, closed by default)
+                img_gen_box.separator()
+                lora_box = img_gen_box.box()
+                lora_header = lora_box.row(align=True)
+                lora_icon = 'TRIA_DOWN' if style_props.show_loras else 'TRIA_RIGHT'
+                lora_header.prop(style_props, "show_loras", text="LoRas", icon=lora_icon, emboss=False, toggle=True)
+                lora_header.label(text="", icon='MODIFIER')
+                
+                if style_props.show_loras:
+                    lora_col = lora_box.column(align=False)
                     
-                    # Strength slider
-                    lora1_col.prop(style_props, "lora_strength_model", 
-                                  text="Strength", 
-                                  slider=True)
-                
-                # ── LoRa 2 ──────────────────────────────────
-                lora2_box = lora_col.box()
-                lora2_col = lora2_box.column(align=True)
-                
-                lora2_col.prop(style_props, "lora2_enabled", text="Use LoRa 2", toggle=True, icon='MODIFIER')
-                
-                # Show LoRa 2 controls if enabled
-                if style_props.lora2_enabled:
-                    lora2_col.separator(factor=0.3)
+                    lora1_box = lora_col.box()
+                    lora1_col = lora1_box.column(align=True)
                     
-                    # LoRa 2 dropdown
-                    lora2_col.prop(style_props, "lora2_name", text="")
+                    row = lora1_col.row()
+                    row.scale_y = 1.4
+                    row.prop(style_props, "lora_enabled", text="Use LoRa", toggle=True, icon='MODIFIER')
                     
-                    # LoRa 2 Strength
-                    lora2_col.prop(style_props, "lora2_strength_model", text="Strength", slider=True)
-                
-                # ── Load Keywords Button ────────────────────
-                lora_col.separator(factor=0.3)
-                lora_col.operator("style_engine.load_lora_keywords", text="Load Keywords", icon='TEXT')
-                
-                # Show active LoRas summary
-                active_loras = []
-                if style_props.lora_enabled and style_props.lora_name != 'NONE':
-                    active_loras.append(f"L1: {style_props.lora_name.replace('.safetensors', '')[:12]}")
-                if style_props.lora2_enabled and style_props.lora2_name != 'NONE':
-                    active_loras.append(f"L2: {style_props.lora2_name.replace('.safetensors', '')[:12]}")
-                
-                if active_loras:
-                    info_row = lora_col.row()
-                    info_row.scale_y = 0.7
-                    info_row.label(text=", ".join(active_loras), icon='CHECKMARK')
+                    if style_props.lora_enabled:
+                        lora1_col.separator(factor=0.3)
+                        refresh_row = lora1_col.row(align=True)
+                        refresh_row.prop(style_props, "lora_name", text="")
+                        refresh_row.operator("style_engine.refresh_lora_list", text="", icon='FILE_REFRESH')
+                        lora1_col.prop(style_props, "lora_strength_model", text="Strength", slider=True)
+                    
+                    lora2_box = lora_col.box()
+                    lora2_col = lora2_box.column(align=True)
+                    lora2_col.prop(style_props, "lora2_enabled", text="Use LoRa 2", toggle=True, icon='MODIFIER')
+                    
+                    if style_props.lora2_enabled:
+                        lora2_col.separator(factor=0.3)
+                        lora2_col.prop(style_props, "lora2_name", text="")
+                        lora2_col.prop(style_props, "lora2_strength_model", text="Strength", slider=True)
+                    
+                    lora_col.separator(factor=0.3)
+                    lora_col.operator("style_engine.load_lora_keywords", text="Load Keywords", icon='TEXT')
+                    
+                    active_loras = []
+                    if style_props.lora_enabled and style_props.lora_name != 'NONE':
+                        active_loras.append(f"L1: {style_props.lora_name.replace('.safetensors', '')[:12]}")
+                    if style_props.lora2_enabled and style_props.lora2_name != 'NONE':
+                        active_loras.append(f"L2: {style_props.lora2_name.replace('.safetensors', '')[:12]}")
+                    
+                    if active_loras:
+                        info_row = lora_col.row()
+                        info_row.scale_y = 0.7
+                        info_row.label(text=", ".join(active_loras), icon='CHECKMARK')
             
             # ────────────────────────────────────────────────────────────
             # PROJECT TEXTURE & PBR BUTTONS

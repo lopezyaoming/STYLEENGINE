@@ -1,6 +1,0 @@
-# Keywords
-<k></k>
-# Prompt
-<p></p>
-# Negative Prompt
-<n></n>
