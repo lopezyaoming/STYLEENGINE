@@ -3,7 +3,7 @@
     "inputs": {
       "model_name": "gemini-3-pro-image-preview",
       "prompt": [
-        "62",
+        "60",
         0
       ],
       "image_count": 1,

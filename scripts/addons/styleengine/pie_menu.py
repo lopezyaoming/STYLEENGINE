@@ -1373,17 +1373,23 @@ class STYLEENGINE_MT_pie_main(Menu):
         
         col.separator()
         
-        # Influence sliders section
-        influence_box = col.box()
-        influence_col = influence_box.column(align=True)
-        influence_col.label(text="Influences", icon='SMOOTHCURVE')
-        
-        influence_col.prop(style_props, "silhouette_influence", 
-                          text="Silhouette", slider=True)
-        influence_col.prop(style_props, "depth_influence", 
-                          text="Depth", slider=True)
-        influence_col.prop(style_props, "texture_influence", 
-                          text="Viewport", slider=True)
+        if style_props.ai_model == 'GEMINI':
+            # Gemini: only show Alignment toggle
+            row = col.row()
+            row.scale_y = 1.5
+            row.prop(style_props, "gemini_alignment", text="Alignment", toggle=True, icon='CON_LOCLIKE')
+        else:
+            # SDXL: Influence sliders
+            influence_box = col.box()
+            influence_col = influence_box.column(align=True)
+            influence_col.label(text="Influences", icon='SMOOTHCURVE')
+            
+            influence_col.prop(style_props, "silhouette_influence", 
+                              text="Silhouette", slider=True)
+            influence_col.prop(style_props, "depth_influence", 
+                              text="Depth", slider=True)
+            influence_col.prop(style_props, "texture_influence", 
+                              text="Viewport", slider=True)
         
         # # HIDDEN: Steps - available in N panel (Image Generation > Influence)
         # col.separator()
@@ -1475,115 +1481,84 @@ class STYLEENGINE_MT_pie_main(Menu):
         # ═══════════════════════════════════════════════════
         # Position 3: RIGHT (EAST) - Visualization Type
         # ═══════════════════════════════════════════════════
-        # Check if preview images are enabled
+        # Visualization box — display mode buttons only shown for SDXL; history always shown
         prefs = context.preferences.addons.get('styleengine')
-        show_visualization = (prefs and 
-                             prefs.preferences.api_backend == 'GCS' and 
-                             prefs.preferences.gcs_download_preview_images)
-        
-        if show_visualization:
-            # Show Visualization Type switcher (compact width to match Generate Image)
-            box = pie.box()
-            box.ui_units_x = 10  # Constrain width
-            col = box.column(align=True)
-            col.scale_y = 1.1
-            
-            # Header
-            row = col.row()
-            row.label(text="Visualization", icon='VIEW_CAMERA')
-            col.separator()
-            
-            # Visualization type buttons (icon-only for compact width)
-            row = col.row(align=True)
-            row.scale_y = 1.5
-            
-            # Combined button
-            op = row.operator("style_engine.set_visualization", 
-                             text="Combined", 
-                             icon='IMAGE_DATA',
-                             depress=(style_props.visualization_type == 'COMBINED'))
-            op.viz_type = 'COMBINED'
-            
-            # Silhouette button
-            op = row.operator("style_engine.set_visualization", 
-                             text="", 
-                             icon='MESH_PLANE',
-                             depress=(style_props.visualization_type == 'CANNY'))
-            op.viz_type = 'CANNY'
-            
-            # Depth button
-            op = row.operator("style_engine.set_visualization", 
-                             text="", 
-                             icon='EMPTY_SINGLE_ARROW',
-                             depress=(style_props.visualization_type == 'DEPTH'))
-            op.viz_type = 'DEPTH'
-            
-            col.separator()
-            
-            # Show current visualization
-            col.label(text=f"Current: {style_props.visualization_type.title()}", icon='INFO')
-            
-            # Background opacity (moved from Setup Workspace)
-            col.separator()
-            col.label(text="Background Opacity")
-            col.prop(style_props, "background_opacity", text="", slider=True)
-            
-            # ═══════════════════════════════════════════════════
-            # Generation Browser - Navigate Through Saved Generations
-            # ═══════════════════════════════════════════════════
-            col.separator()
-            col.label(text="Generation Browser", icon='RENDERLAYERS')
-            
-            # Get generation info
-            from . import workspace_setup
-            generations = workspace_setup.get_generation_list(context)
-            
-            if generations:
-                # Navigation buttons
+        box = pie.box()
+        box.ui_units_x = 10
+        col = box.column(align=True)
+        col.scale_y = 1.1
+
+        row = col.row()
+        row.label(text="Visualization", icon='VIEW_CAMERA')
+        col.separator()
+
+        # Display mode buttons — SDXL only (Gemini outputs a single image, no depth/canny)
+        if style_props.ai_model != 'GEMINI':
+            show_viz_controls = (prefs and
+                                 prefs.preferences.api_backend == 'GCS' and
+                                 prefs.preferences.gcs_download_preview_images)
+            if show_viz_controls:
                 row = col.row(align=True)
-                row.scale_y = 1.3
-                
-                # Check if at boundaries
-                at_oldest = (style_props.current_generation_index == 0)
-                at_latest = (style_props.current_generation_index == -1)
-                
-                # Previous button (go to older)
-                prev_row = row.row(align=True)
-                prev_row.enabled = not at_oldest  # Disable if at oldest
-                prev_row.operator("style_engine.prev_generation", 
-                                 text="", 
-                                 icon='TRIA_LEFT')
-                
-                # Current generation indicator
-                if at_latest:
-                    current_text = f"Latest ({len(generations)})"
-                else:
-                    current_text = f"{style_props.current_generation_index + 1}/{len(generations)}"
-                
-                row.label(text=current_text)
-                
-                # Next button (go to newer)
-                next_row = row.row(align=True)
-                next_row.enabled = not at_latest  # Disable if at latest
-                next_row.operator("style_engine.next_generation", 
-                                 text="", 
-                                 icon='TRIA_RIGHT')
+                row.scale_y = 1.5
+
+                op = row.operator("style_engine.set_visualization",
+                                 text="Combined",
+                                 icon='IMAGE_DATA',
+                                 depress=(style_props.visualization_type == 'COMBINED'))
+                op.viz_type = 'COMBINED'
+
+                op = row.operator("style_engine.set_visualization",
+                                 text="",
+                                 icon='MESH_PLANE',
+                                 depress=(style_props.visualization_type == 'CANNY'))
+                op.viz_type = 'CANNY'
+
+                op = row.operator("style_engine.set_visualization",
+                                 text="",
+                                 icon='EMPTY_SINGLE_ARROW',
+                                 depress=(style_props.visualization_type == 'DEPTH'))
+                op.viz_type = 'DEPTH'
+
+                col.separator()
+                col.label(text=f"Current: {style_props.visualization_type.title()}", icon='INFO')
             else:
-                col.label(text="No generations yet", icon='INFO')
-        
+                col.label(text="Enable 'Download Preview", icon='INFO')
+                col.label(text="Images' in GCS settings")
+
+        # Background opacity — always shown
+        col.separator()
+        col.label(text="Background Opacity")
+        col.prop(style_props, "background_opacity", text="", slider=True)
+
+        # Generation Browser — always shown
+        col.separator()
+        col.label(text="Generation Browser", icon='RENDERLAYERS')
+
+        from . import workspace_setup
+        generations = workspace_setup.get_generation_list(context)
+
+        if generations:
+            row = col.row(align=True)
+            row.scale_y = 1.3
+
+            at_oldest = (style_props.current_generation_index == 0)
+            at_latest = (style_props.current_generation_index == -1)
+
+            prev_row = row.row(align=True)
+            prev_row.enabled = not at_oldest
+            prev_row.operator("style_engine.prev_generation", text="", icon='TRIA_LEFT')
+
+            if at_latest:
+                current_text = f"Latest ({len(generations)})"
+            else:
+                current_text = f"{style_props.current_generation_index + 1}/{len(generations)}"
+            row.label(text=current_text)
+
+            next_row = row.row(align=True)
+            next_row.enabled = not at_latest
+            next_row.operator("style_engine.next_generation", text="", icon='TRIA_RIGHT')
         else:
-            # Fallback: empty box or placeholder
-            box = pie.box()
-            col = box.column(align=True)
-            col.scale_y = 1.1
-            
-            row = col.row()
-            row.label(text="Visualization", icon='VIEW_CAMERA')
-            col.separator()
-            
-            col.label(text="Enable 'Download Preview", icon='INFO')
-            col.label(text="Images' in GCS settings")
-            col.label(text="to use this feature")
+            col.label(text="No generations yet", icon='INFO')
         
 
 

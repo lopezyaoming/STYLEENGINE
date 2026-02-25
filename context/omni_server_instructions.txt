@@ -1,0 +1,51 @@
+To fully integrate the Hunyuan3D-Omni backend into your local Style Engine (Blender), you need to bridge the gap between Blender's 3D coordinates and the VM's FastAPI server.1. The Core Logic: "Ratio-Safe" Bounding BoxTo fix the stretching issue, Blender must send coordinates that maintain the object's proportions. The AI expects a normalized space, so if your object is non-cubic, we must define the data.json values proportionally.Add this function to your Blender Addon script:Pythonimport bpy
+from mathutils import Vector
+
+def get_proportional_bbox(obj):
+    # 1. Get world-space dimensions
+    # matrix_world handles scaling/rotation applied in the scene
+    corners = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
+    
+    x_coords = [c.x for c in corners]
+    y_coords = [c.y for c in corners]
+    z_coords = [c.z for c in corners]
+    
+    # 2. Calculate actual size
+    width = max(x_coords) - min(x_coords)
+    depth = max(y_coords) - min(y_coords)
+    height = max(z_coords) - min(z_coords)
+    
+    # 3. Normalize to the largest dimension (to prevent stretching)
+    max_dim = max(width, depth, height)
+    
+    # We center the bbox around 0.0, scaling based on the largest side
+    half_x = (width / max_dim) * 0.5
+    half_y = (depth / max_dim) * 0.5
+    half_z = (height / max_dim) * 0.5
+    
+    return [-half_x, -half_y, -half_z, half_x, half_y, half_z]
+2. The Communication ProtocolYour Blender Operator needs to perform an HTTP "Handshake" with the VM. Since the omni-server.service is running on styleengine2:8190, you can use the requests library inside Blender.Step A: The Upload (Trigger)Blender snaps a screenshot and POSTs it along with the BBox.Pythonimport requests
+
+def trigger_omni_generation(image_path, obj):
+    bbox = get_proportional_bbox(obj)
+    url = "http://styleengine2:8190/generate"
+    
+    files = {'image': open(image_path, 'rb')}
+    data = {
+        "x_min": bbox[0], "y_min": bbox[1], "z_min": bbox[2],
+        "x_max": bbox[3], "y_max": bbox[4], "z_max": bbox[5]
+    }
+    
+    response = requests.post(url, files=files, data=data)
+    return response.json().get("job_id")
+Step B: The Sync (Progress)Because your FastAPI server pokes bridge.py on port 8189, your existing Progress Bar in Blender will automatically show "Hunyuan-Omni: processing" without any extra code.Step C: The Download (Import)Once the status is completed, Blender fetches the .glb.Pythondef download_and_import(job_id):
+    dl_url = f"http://styleengine2:8190/download/{job_id}"
+    temp_path = "/tmp/omni_result.glb" # Adjust for Windows if needed
+    
+    r = requests.get(dl_url)
+    with open(temp_path, 'wb') as f:
+        f.write(r.content)
+        
+    # Import directly into the scene
+    bpy.ops.import_scene.gltf(filepath=temp_path)
+3. General Guideline SummaryPhaseResponsibilityOutcomeGeometryBlender Proxy ObjectDefines the volume and aspect ratio.TransmissionTailscale + FastAPISafely pipes data to the VM without manual SSH.Inferenceinference.py (VM)Generates high-poly mesh (up to 1.5M faces).Status Syncbridge.pyKeeps the Blender UI updated in real-time.RefinementLocal Hy3D-Paint 2.1Takes the imported .glb for high-quality PBR texturing.

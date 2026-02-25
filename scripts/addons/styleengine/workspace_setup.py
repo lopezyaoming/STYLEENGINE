@@ -1096,10 +1096,11 @@ def _delayed_horizontal_split_standalone(camera, original_area):
     """
     context = bpy.context
     prefs = context.preferences.addons['styleengine'].preferences
-    
+    _ai_model = getattr(context.scene.style_engine_props, 'ai_model', 'SDXL') if hasattr(context, 'scene') and context.scene else 'SDXL'
+
     from . import utils
-    prompt_text = utils.get_or_create_prompt_text()
-    
+    prompt_text = utils.get_or_create_prompt_text(model=_ai_model)
+
     # Find the right area (should be sized now)
     view3d_areas = [a for a in context.screen.areas if a.type == 'VIEW_3D']
     
@@ -1213,10 +1214,11 @@ def _delayed_split_setup_standalone(camera):
     
     # Import utils for text editor functions
     from . import utils
-    
+    _ai_model = getattr(context.scene.style_engine_props, 'ai_model', 'SDXL') if hasattr(context, 'scene') and context.scene else 'SDXL'
+
     # Create/get the prompt text block
-    prompt_text = utils.get_or_create_prompt_text()
-    
+    prompt_text = utils.get_or_create_prompt_text(model=_ai_model)
+
     # Find the 3D viewport in the current workspace
     for area in context.screen.areas:
         if area.type == 'VIEW_3D':
@@ -1479,12 +1481,17 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
         
         # Create or get the AI camera
         ai_camera = self.create_ai_camera(context)
-        
-        # Position camera at current view
-        self.align_camera_to_view(context, ai_camera)
-        
-        # Setup camera background image
-        self.setup_camera_background(context, ai_camera)
+
+        # In Gemini mode, sync from scene camera if one exists; otherwise align to view
+        _props = context.scene.style_engine_props
+        _gemini_synced = False
+        if getattr(_props, 'ai_model', 'SDXL') == 'GEMINI':
+            _gemini_synced = sync_ai_camera_from_scene(context)
+        if not _gemini_synced:
+            self.align_camera_to_view(context, ai_camera)
+
+        # Setup camera background image (resolution override skipped in Gemini sync mode)
+        self.setup_camera_background(context, ai_camera, skip_resolution_override=_gemini_synced)
         
         # Create the AI workspace (always from default Layout)
         workspace = self.create_ai_workspace(context)
@@ -1516,8 +1523,9 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
                 
                 # Create/get the prompt text block with template
                 from . import utils
-                prompt_text = utils.get_or_create_prompt_text()
-                
+                _ai_model = getattr(context.scene.style_engine_props, 'ai_model', 'SDXL') if hasattr(context, 'scene') and context.scene else 'SDXL'
+                prompt_text = utils.get_or_create_prompt_text(model=_ai_model)
+
                 # Configure all text editors in the workspace
                 for area in workspace.screens[0].areas:
                     if area.type == 'TEXT_EDITOR':
@@ -1626,70 +1634,74 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
         camera.rotation_euler = (1.1, 0, 0)
         context.scene.camera = camera
     
-    def setup_camera_background(self, context, camera):
+    def setup_camera_background(self, context, camera, skip_resolution_override=False):
         """Setup the background image for the camera."""
         cam_data = camera.data
-        
+
         # Set passepartout to fully opaque (1.0)
         cam_data.passepartout_alpha = 1.0
-        
+
         # Clear existing background images
         cam_data.show_background_images = True
-        
+
         # Get or create background image
         if len(cam_data.background_images) > 0:
             bg_img = cam_data.background_images[0]
         else:
             bg_img = cam_data.background_images.new()
-        
+
         # Get temp directory and image path
         temp_dir = get_temp_directory(context)
         img_path = temp_dir / "current_ai.png"
-        
-        # Always create a fresh black placeholder image on workspace setup
-        # This ensures clean slate for each project and prevents old temp images from showing
+
+        # Placeholder resolution: use scene render res when synced from a scene camera,
+        # otherwise use the ai_resolution dropdown
         props = context.scene.style_engine_props
-        res_str = props.ai_resolution
-        width, height = map(int, res_str.split('x'))
-        
+        if skip_resolution_override:
+            width = context.scene.render.resolution_x
+            height = context.scene.render.resolution_y
+        else:
+            res_str = props.ai_resolution
+            width, height = map(int, res_str.split('x'))
+
         # Remove old image if exists
         if "current_ai.png" in bpy.data.images:
             bpy.data.images.remove(bpy.data.images["current_ai.png"])
-        
+
         # Create fresh black placeholder
         img = bpy.data.images.new("current_ai.png", width=width, height=height)
-        
+
         # Fill with black (0, 0, 0, 1)
         pixels = [0.0, 0.0, 0.0, 1.0] * (width * height)
         img.pixels = pixels
-        
+
         # Save to disk
         img.filepath_raw = str(img_path)
         img.file_format = 'PNG'
         img.save()
-        
+
         print(f"[Style Engine] 🖤 Created fresh black placeholder: {width}x{height}")
-        
+
         # Setup background image properties
         bg_img.image = img
-        
+
         # Get opacity from properties (default to 0.7 for better visibility)
         props = bpy.context.scene.style_engine_props
         bg_img.alpha = props.background_opacity if hasattr(props, 'background_opacity') else 0.7
-        
+
         bg_img.display_depth = 'FRONT'  # Display in front (default - can be changed via UI)
         bg_img.frame_method = 'STRETCH'
-        
-        # Set render resolution based on user's ai_resolution setting
-        props = context.scene.style_engine_props
-        res_str = props.ai_resolution  # e.g., "1024x1024"
-        render_width, render_height = map(int, res_str.split('x'))
-        
-        context.scene.render.resolution_x = render_width
-        context.scene.render.resolution_y = render_height
-        
-        print(f"[Style Engine] Background image set: {img_path}")
-        print(f"[Style Engine] Render resolution set to: {render_width}x{render_height} (from ai_resolution setting)")
+
+        if not skip_resolution_override:
+            res_str = props.ai_resolution
+            render_width, render_height = map(int, res_str.split('x'))
+            context.scene.render.resolution_x = render_width
+            context.scene.render.resolution_y = render_height
+            print(f"[Style Engine] Background image set: {img_path}")
+            print(f"[Style Engine] Render resolution set to: {render_width}x{render_height} (from ai_resolution setting)")
+        else:
+            print(f"[Style Engine] Background image set: {img_path}")
+            print(f"[Style Engine] Render resolution preserved: {width}x{height} (Gemini sync from scene camera)")
     
     # NOTE: HeavyPoly hijacking disabled - now using standard Layout workspace
     # Code kept latent for future reference
@@ -2131,15 +2143,20 @@ class WM_OT_PopulateAssets(bpy.types.Operator):
         
         # Create or get the AI camera
         ai_camera = self._ensure_ai_camera(context)
-        
-        # Position camera at current view
-        self._align_camera_to_view(context, ai_camera)
-        
-        # Setup camera background image
-        self._setup_camera_background(context, ai_camera)
+
+        # In Gemini mode, sync from scene camera if one exists; otherwise align to view
+        _gemini_synced = False
+        if getattr(context.scene.style_engine_props, 'ai_model', 'SDXL') == 'GEMINI':
+            _gemini_synced = sync_ai_camera_from_scene(context)
+        if not _gemini_synced:
+            self._align_camera_to_view(context, ai_camera)
+
+        # Setup camera background image (resolution override skipped in Gemini sync mode)
+        self._setup_camera_background(context, ai_camera, skip_resolution_override=_gemini_synced)
         
         # Create/get the prompt text block
-        prompt_text = utils.get_or_create_prompt_text()
+        _ai_model = getattr(context.scene.style_engine_props, 'ai_model', 'SDXL')
+        prompt_text = utils.get_or_create_prompt_text(model=_ai_model)
         print(f"[Style Engine] ✓ Prompt text block ready: {prompt_text.name}")
         
         # Write session.json
@@ -2187,33 +2204,33 @@ class WM_OT_PopulateAssets(bpy.types.Operator):
                         return
         print("[Style Engine] ⚠️ No 3D viewport found for camera alignment")
     
-    def _setup_camera_background(self, context, camera):
+    def _setup_camera_background(self, context, camera, skip_resolution_override=False):
         """Setup the background image for the camera."""
         cam_data = camera.data
         cam_data.passepartout_alpha = 1.0
         cam_data.show_background_images = True
-        
+
         if len(cam_data.background_images) > 0:
             bg_img = cam_data.background_images[0]
         else:
             bg_img = cam_data.background_images.new()
-        
+
         temp_dir = get_temp_directory(context)
         img_path = temp_dir / "current_ai.png"
-        
+
         # Load or get the image
         if "current_ai.png" in bpy.data.images:
             img = bpy.data.images["current_ai.png"]
         else:
             img = bpy.data.images.load(str(img_path))
             img.name = "current_ai.png"
-        
+
         bg_img.image = img
         props = context.scene.style_engine_props
         bg_img.alpha = props.background_opacity if hasattr(props, 'background_opacity') else 0.7
         bg_img.display_depth = 'FRONT'
         bg_img.frame_method = 'STRETCH'
-        
+
         print(f"[Style Engine] ✓ Camera background configured")
 
 
@@ -2312,6 +2329,61 @@ class WM_OT_SetCamera(bpy.types.Operator):
         print(f"[Style Engine]   Type: {dst_cam.type}, Lens: {dst_cam.lens}mm, Clip: {dst_cam.clip_start}-{dst_cam.clip_end}")
         
         return {'FINISHED'}
+
+
+def sync_ai_camera_from_scene(context):
+    """
+    When Gemini mode is active and a non-ai_camera camera exists in the scene,
+    copy its transform and lens properties to ai_camera, and preserve the scene's
+    current render resolution instead of overriding it with ai_resolution.
+
+    Returns True if a source camera was found and synced, False otherwise.
+    """
+    import bpy as _bpy
+
+    # Find a source camera (active scene camera that is NOT ai_camera)
+    source_camera = None
+    if context.scene.camera and context.scene.camera.name != 'ai_camera' and context.scene.camera.type == 'CAMERA':
+        source_camera = context.scene.camera
+    else:
+        for obj in context.scene.objects:
+            if obj.type == 'CAMERA' and obj.name != 'ai_camera':
+                source_camera = obj
+                break
+
+    if source_camera is None:
+        return False
+
+    if 'ai_camera' not in _bpy.data.objects:
+        return False
+
+    ai_camera = _bpy.data.objects['ai_camera']
+
+    # Copy full world transform
+    ai_camera.matrix_world = source_camera.matrix_world.copy()
+
+    # Copy lens / camera data properties
+    src = source_camera.data
+    dst = ai_camera.data
+    dst.type = src.type
+    dst.lens = src.lens
+    dst.lens_unit = src.lens_unit
+    dst.angle = src.angle
+    dst.ortho_scale = src.ortho_scale
+    dst.shift_x = src.shift_x
+    dst.shift_y = src.shift_y
+    dst.clip_start = src.clip_start
+    dst.clip_end = src.clip_end
+    dst.sensor_fit = src.sensor_fit
+    dst.sensor_width = src.sensor_width
+    dst.sensor_height = src.sensor_height
+
+    # Set ai_camera as scene camera so viewport/render uses it
+    context.scene.camera = ai_camera
+
+    print(f"[Gemini] Synced ai_camera from '{source_camera.name}': "
+          f"lens={dst.lens:.1f}mm, res={context.scene.render.resolution_x}x{context.scene.render.resolution_y}")
+    return True
 
 
 class WM_OT_StopAutoRefresh(bpy.types.Operator):
@@ -2719,17 +2791,43 @@ def generate_ai_image_cloud(context):
                 
                 from pathlib import Path
                 addon_dir = Path(__file__).parent
-                gemini_wf_path = addon_dir / "workflows" / "Image" / "TestImageNano.json"
+                workflows_dir = addon_dir / "workflows" / "Image"
+                
+                # Select workflow based on alignment toggle
+                if props.gemini_alignment:
+                    gemini_wf_path = workflows_dir / "ImageNanoAlignment.json"
+                    print(f"[GCS] Alignment ON - using ImageNanoAlignment.json")
+                else:
+                    gemini_wf_path = workflows_dir / "ImageNanoText.json"
+                    print(f"[GCS] Alignment OFF - using ImageNanoText.json")
                 
                 if not gemini_wf_path.exists():
-                    print(f"[GCS] TestImageNano.json not found")
+                    print(f"[GCS] {gemini_wf_path.name} not found")
                     return
                 
                 with open(gemini_wf_path, 'r') as f:
                     workflow_json = json.load(f)
                 
-                workflow_json["56"]["inputs"]["image"] = uploaded_filename
-                workflow_json["63"]["inputs"]["text"] = session_data.get('global_prompt', '')
+                # Raw prompt from STYLEENGINE_Prompt (no tag parsing for Gemini)
+                text_block = bpy.data.texts.get("STYLEENGINE_Prompt")
+                raw_prompt = text_block.as_string().strip() if text_block else ""
+                workflow_json["63"]["inputs"]["text"] = raw_prompt
+                
+                # Instructions from STYLEENGINE_Instructions text block
+                instr_block = bpy.data.texts.get("STYLEENGINE_Instructions")
+                instr_text = instr_block.as_string().strip() if instr_block else ""
+                workflow_json["65"]["inputs"]["value"] = instr_text
+                
+                # Alignment-specific patching
+                if props.gemini_alignment:
+                    workflow_json["56"]["inputs"]["image"] = uploaded_filename
+                    # Load spatial alignment text
+                    alignment_file = addon_dir / "templates" / "spatial_alignment.txt"
+                    alignment_text = ""
+                    if alignment_file.exists():
+                        alignment_text = alignment_file.read_text(encoding='utf-8').strip()
+                    workflow_json["66"]["inputs"]["value"] = alignment_text
+                    print(f"[GCS]   - Alignment image: {uploaded_filename}")
                 
                 # Gemini-specific params
                 workflow_json["50"]["inputs"]["temperature"] = props.gemini_temperature
@@ -2749,8 +2847,8 @@ def generate_ai_image_cloud(context):
                 workflow_json["50"]["inputs"]["aspect_ratio"] = computed_aspect
                 
                 print(f"[GCS] Patched Gemini workflow:")
-                print(f"[GCS]   - Image: {uploaded_filename}")
-                print(f"[GCS]   - Prompt: {session_data.get('global_prompt', '')[:60]}...")
+                print(f"[GCS]   - Prompt: {raw_prompt[:60]}...")
+                print(f"[GCS]   - Instructions: {instr_text[:40]}..." if instr_text else "[GCS]   - Instructions: (none)")
                 print(f"[GCS]   - Temperature: {props.gemini_temperature}")
                 print(f"[GCS]   - Size: {props.gemini_image_size}")
                 print(f"[GCS]   - Aspect: {computed_aspect} (from {rw}x{rh})")

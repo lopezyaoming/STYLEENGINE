@@ -188,6 +188,59 @@ class ObjectGroup(bpy.types.PropertyGroup):
     )
 
 
+def _get_gemini_instruction_items():
+    """Scan templates/instructions_*.txt and return enum items for the dropdown."""
+    from pathlib import Path
+    items = [('NONE', "None", "No style instructions")]
+    templates_dir = Path(__file__).parent / "templates"
+    if templates_dir.exists():
+        for f in sorted(templates_dir.glob("instructions_*.txt")):
+            name = f.stem.replace("instructions_", "")
+            items.append((name, name, f"Load {f.name}"))
+    return items
+
+
+def _on_ai_model_changed(self, context):
+    """Update prompt text and camera when the user toggles between SDXL and Gemini."""
+    from . import utils
+    utils.set_prompt_text_for_model(self.ai_model)
+
+    if self.ai_model == 'GEMINI':
+        from . import workspace_setup
+        workspace_setup.sync_ai_camera_from_scene(context)
+
+
+def _on_gemini_instructions_changed(self, context):
+    """Load the selected instruction file into STYLEENGINE_Instructions text block."""
+    from pathlib import Path
+    
+    text_name = "STYLEENGINE_Instructions"
+    
+    if self.gemini_instructions == 'NONE':
+        if text_name in bpy.data.texts:
+            bpy.data.texts[text_name].clear()
+        return
+    
+    templates_dir = Path(__file__).parent / "templates"
+    instr_file = templates_dir / f"instructions_{self.gemini_instructions}.txt"
+    
+    if not instr_file.exists():
+        print(f"[Gemini] Instruction file not found: {instr_file.name}")
+        return
+    
+    content = instr_file.read_text(encoding='utf-8').strip()
+    
+    if text_name in bpy.data.texts:
+        text_block = bpy.data.texts[text_name]
+        text_block.clear()
+        text_block.write(content)
+    else:
+        text_block = bpy.data.texts.new(text_name)
+        text_block.write(content)
+    
+    print(f"[Gemini] Loaded instructions: {self.gemini_instructions} ({len(content)} chars)")
+
+
 class StyleEngineProperties(bpy.types.PropertyGroup):
     """Stores all the properties for the Style Engine panel."""
     
@@ -274,7 +327,8 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
             ('SDXL', "Stable Diffusion", "SDXL with ControlNet (default)"),
             ('GEMINI', "Gemini 3 Pro", "Gemini nano-banana image generation"),
         ],
-        default='SDXL'
+        default='GEMINI',
+        update=lambda self, context: _on_ai_model_changed(self, context)
     )
     
     # Gemini-specific settings
@@ -295,6 +349,17 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
             ('4K', "4K", "4096px"),
         ],
         default='1K'
+    )
+    gemini_alignment: bpy.props.BoolProperty(
+        name="Alignment",
+        description="Enable spatial alignment (uses viewport render as reference image)",
+        default=True
+    )
+    gemini_instructions: bpy.props.EnumProperty(
+        name="Instructions",
+        description="Style instructions to append to the prompt",
+        items=lambda self, context: _get_gemini_instruction_items(),
+        update=lambda self, context: _on_gemini_instructions_changed(self, context),
     )
     
     # Patch system state
@@ -4339,33 +4404,31 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
             view_header.label(text="", icon='VIEW_CAMERA')
             
             if style_props.show_view_settings:
-                # Visualization Type Buttons
-                col = view_box.column(align=True)
-                col.label(text="Visualization:")
-                row = col.row(align=True)
-                row.scale_y = 1.3
-                
-                # Combined button
-                op = row.operator("style_engine.set_visualization", 
-                                 text="Combined", 
-                                 icon='IMAGE_DATA',
-                                 depress=(style_props.visualization_type == 'COMBINED'))
-                op.viz_type = 'COMBINED'
-                
-                # Silhouette button
-                op = row.operator("style_engine.set_visualization", 
-                                 text="Silhouette", 
-                                 icon='MESH_PLANE',
-                                 depress=(style_props.visualization_type == 'CANNY'))
-                op.viz_type = 'CANNY'
-                
-                # Depth button
-                op = row.operator("style_engine.set_visualization", 
-                                 text="Depth", 
-                                 icon='EMPTY_SINGLE_ARROW',
-                                 depress=(style_props.visualization_type == 'DEPTH'))
-                op.viz_type = 'DEPTH'
-                
+                # Visualization Type Buttons (SDXL only — Gemini outputs a single image, no previews)
+                if style_props.ai_model != 'GEMINI':
+                    col = view_box.column(align=True)
+                    col.label(text="Visualization:")
+                    row = col.row(align=True)
+                    row.scale_y = 1.3
+
+                    op = row.operator("style_engine.set_visualization",
+                                     text="Combined",
+                                     icon='IMAGE_DATA',
+                                     depress=(style_props.visualization_type == 'COMBINED'))
+                    op.viz_type = 'COMBINED'
+
+                    op = row.operator("style_engine.set_visualization",
+                                     text="Silhouette",
+                                     icon='MESH_PLANE',
+                                     depress=(style_props.visualization_type == 'CANNY'))
+                    op.viz_type = 'CANNY'
+
+                    op = row.operator("style_engine.set_visualization",
+                                     text="Depth",
+                                     icon='EMPTY_SINGLE_ARROW',
+                                     depress=(style_props.visualization_type == 'DEPTH'))
+                    op.viz_type = 'DEPTH'
+
                 # Background Opacity
                 view_box.separator()
                 col = view_box.column(align=True)
@@ -4411,7 +4474,9 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                     col.label(text="No generations yet", icon='INFO')
 
         # ================================================================
+        # ================================================================
         # VISUALIZATION CATEGORY (Collapsible)
+        # Display mode buttons hidden in Gemini (single output), history always visible
         # ================================================================
         layout.separator()
         vis_box = layout.box()
@@ -4419,92 +4484,81 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
         vis_icon = 'TRIA_DOWN' if style_props.show_visualization else 'TRIA_RIGHT'
         vis_header.prop(style_props, "show_visualization", text="Visualization", icon=vis_icon, emboss=False, toggle=True)
         vis_header.label(text="", icon='VIEW_CAMERA')
-        
+
         if style_props.show_visualization:
-            # Check if preview images are enabled
             prefs = context.preferences.addons.get('styleengine')
-            show_viz_controls = (prefs and 
-                                prefs.preferences.api_backend == 'GCS' and 
-                                prefs.preferences.gcs_download_preview_images)
-            
-            if show_viz_controls:
-                # Visualization type buttons
-                col = vis_box.column(align=True)
-                col.label(text="Display Mode:")
-                row = col.row(align=True)
-                row.scale_y = 1.3
-                
-                # Combined button
-                op = row.operator("style_engine.set_visualization", 
-                                 text="Combined", 
-                                 icon='IMAGE_DATA',
-                                 depress=(style_props.visualization_type == 'COMBINED'))
-                op.viz_type = 'COMBINED'
-                
-                # Silhouette button
-                op = row.operator("style_engine.set_visualization", 
-                                 text="Silhouette", 
-                                 icon='MESH_PLANE',
-                                 depress=(style_props.visualization_type == 'CANNY'))
-                op.viz_type = 'CANNY'
-                
-                # Depth button
-                op = row.operator("style_engine.set_visualization", 
-                                 text="Depth", 
-                                 icon='EMPTY_SINGLE_ARROW',
-                                 depress=(style_props.visualization_type == 'DEPTH'))
-                op.viz_type = 'DEPTH'
-                
-                # Current visualization
-                vis_box.separator()
-                col = vis_box.column(align=True)
-                col.label(text=f"Current: {style_props.visualization_type.title()}", icon='INFO')
-                
-                # Background opacity
-                vis_box.separator()
-                col = vis_box.column(align=True)
-                col.label(text="Background Opacity")
-                col.prop(style_props, "background_opacity", text="", slider=True)
-                
-                # Generation Browser
-                vis_box.separator()
-                col = vis_box.column(align=True)
-                col.label(text="Generation Browser", icon='RENDERLAYERS')
-                
-                # Get generation info
-                from . import workspace_setup
-                generations = workspace_setup.get_generation_list(context)
-                
-                if generations:
-                    # Navigation buttons
+
+            # Display mode buttons — SDXL only (Gemini outputs a single image, no depth/canny)
+            if style_props.ai_model != 'GEMINI':
+                show_viz_controls = (prefs and
+                                     prefs.preferences.api_backend == 'GCS' and
+                                     prefs.preferences.gcs_download_preview_images)
+                if show_viz_controls:
+                    col = vis_box.column(align=True)
+                    col.label(text="Display Mode:")
                     row = col.row(align=True)
-                    row.scale_y = 1.2
-                    
-                    # Check current position
-                    current_gen = getattr(context.scene, 'styleengine_current_generation', len(generations) - 1)
-                    at_oldest = current_gen <= 0
-                    at_latest = current_gen >= len(generations) - 1
-                    
-                    # Prev button
-                    prev_row = row.row(align=True)
-                    prev_row.enabled = not at_oldest
-                    prev_row.operator("style_engine.prev_generation", text="", icon='TRIA_LEFT')
-                    
-                    # Current position label
-                    row.label(text=f"{current_gen + 1} / {len(generations)}")
-                    
-                    # Next button
-                    next_row = row.row(align=True)
-                    next_row.enabled = not at_latest
-                    next_row.operator("style_engine.next_generation", text="", icon='TRIA_RIGHT')
+                    row.scale_y = 1.3
+
+                    op = row.operator("style_engine.set_visualization",
+                                     text="Combined",
+                                     icon='IMAGE_DATA',
+                                     depress=(style_props.visualization_type == 'COMBINED'))
+                    op.viz_type = 'COMBINED'
+
+                    op = row.operator("style_engine.set_visualization",
+                                     text="Silhouette",
+                                     icon='MESH_PLANE',
+                                     depress=(style_props.visualization_type == 'CANNY'))
+                    op.viz_type = 'CANNY'
+
+                    op = row.operator("style_engine.set_visualization",
+                                     text="Depth",
+                                     icon='EMPTY_SINGLE_ARROW',
+                                     depress=(style_props.visualization_type == 'DEPTH'))
+                    op.viz_type = 'DEPTH'
+
+                    vis_box.separator()
+                    col = vis_box.column(align=True)
+                    col.label(text=f"Current: {style_props.visualization_type.title()}", icon='INFO')
                 else:
-                    col.label(text="No generations yet", icon='INFO')
+                    col = vis_box.column(align=True)
+                    col.label(text="Enable 'Download Preview", icon='INFO')
+                    col.label(text="Images' in GCS settings")
+                    col.label(text="to use this feature")
+
+            # Background opacity — always shown
+            vis_box.separator()
+            col = vis_box.column(align=True)
+            col.label(text="Background Opacity")
+            col.prop(style_props, "background_opacity", text="", slider=True)
+
+            # Generation Browser — always shown
+            vis_box.separator()
+            col = vis_box.column(align=True)
+            col.label(text="Generation Browser", icon='RENDERLAYERS')
+
+            from . import workspace_setup
+            generations = workspace_setup.get_generation_list(context)
+
+            if generations:
+                row = col.row(align=True)
+                row.scale_y = 1.2
+
+                current_gen = getattr(context.scene, 'styleengine_current_generation', len(generations) - 1)
+                at_oldest = current_gen <= 0
+                at_latest = current_gen >= len(generations) - 1
+
+                prev_row = row.row(align=True)
+                prev_row.enabled = not at_oldest
+                prev_row.operator("style_engine.prev_generation", text="", icon='TRIA_LEFT')
+
+                row.label(text=f"{current_gen + 1} / {len(generations)}")
+
+                next_row = row.row(align=True)
+                next_row.enabled = not at_latest
+                next_row.operator("style_engine.next_generation", text="", icon='TRIA_RIGHT')
             else:
-                # Show info about enabling preview images
-                col = vis_box.column(align=True)
-                col.label(text="Enable 'Download Preview", icon='INFO')
-                col.label(text="Images' in GCS settings")
-                col.label(text="to use this feature")
+                col.label(text="No generations yet", icon='INFO')
 
         # ================================================================
         # TEXT GENERATION CATEGORY (Collapsible)
@@ -4820,11 +4874,6 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                          text="Generate Image",
                          icon='IMAGE_DATA')
             
-            # Nano (Gemini nano-banana POC)
-            row = img_gen_box.row()
-            row.scale_y = 1.2
-            row.operator("style_engine.nano_generate", text="Nano", icon='OUTLINER_OB_LIGHT')
-
             img_gen_box.separator()
             
             if style_props.ai_model == 'GEMINI':
@@ -4834,6 +4883,15 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                 col = img_gen_box.column(align=True)
                 col.prop(style_props, "gemini_temperature", text="Temperature", slider=True)
                 col.prop(style_props, "gemini_image_size", text="Size")
+                
+                # Instructions dropdown
+                col.prop(style_props, "gemini_instructions", text="Instructions")
+                
+                # Alignment toggle
+                img_gen_box.separator()
+                row = img_gen_box.row()
+                row.scale_y = 1.3
+                row.prop(style_props, "gemini_alignment", text="Alignment", toggle=True, icon='CON_LOCLIKE')
                 
                 # Show auto-detected aspect ratio from render resolution
                 w = context.scene.render.resolution_x
@@ -5048,7 +5106,10 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                 row.operator("style_engine.pbr_from_projected", text="PBR from Projected Texture", icon='MATSHADERBALL')
             
             # Multiview from Projected (conditional: only if iteration exists and not already multiview)
-            already_multiview = any(m and (m.name.startswith('left_iteration_') or m.name.startswith('right_iteration_')) for m in obj.data.materials)
+            already_multiview = (
+                obj and obj.type == 'MESH' and obj.data and hasattr(obj.data, 'materials') and obj.data.materials and
+                any(m and (m.name.startswith('left_iteration_') or m.name.startswith('right_iteration_')) for m in obj.data.materials)
+            )
             if has_iteration_mat and not already_multiview:
                 row = img_gen_box.row()
                 row.scale_y = 1.1

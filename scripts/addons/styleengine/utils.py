@@ -194,35 +194,71 @@ def parse_credentials_file(file_path=None):
 #    Text Editor Integration for Prompts
 # ================================================================
 
-def get_or_create_prompt_text():
+SDXL_PROMPT_TEMPLATE = (
+    "# Keywords\n"
+    "<k></k>\n"
+    "# Prompt\n"
+    "<p></p>\n"
+    "# Negative Prompt\n"
+    "<n>worst quality, low quality, lowres, blurry, jpeg artifacts, pixelated, bad composition, out of focus, noise, watermark, text, logo, signature, cropped, out of frame</n>\n"
+    "# Machine Vision\n"
+    "<v></v>\n"
+)
+
+
+def get_or_create_prompt_text(model='SDXL'):
     """
-    Get or create the Style Engine prompt text block with default template.
-    This allows users to write long, multi-line prompts in Blender's text editor.
-    
+    Get or create the Style Engine prompt text block.
+    For SDXL: creates the tagged template format.
+    For GEMINI: creates a clean empty text block for free-form prompts.
+
+    Args:
+        model (str): 'SDXL' or 'GEMINI'
+
     Returns:
         bpy.types.Text: The text block for prompt editing
     """
     text_name = "STYLEENGINE_Prompt"
-    
+
     if text_name not in bpy.data.texts:
-        # Create new text block
         text = bpy.data.texts.new(text_name)
-        
-        # Write default template with HTML-style tags
-        text.write("# Keywords\n")
-        text.write("<k></k>\n")
-        text.write("# Prompt\n")
-        text.write("<p></p>\n")
-        text.write("# Negative Prompt\n")
-        text.write("<n>worst quality, low quality, lowres, blurry, jpeg artifacts, pixelated, bad composition, out of focus, noise, watermark, text, logo, signature, cropped, out of frame</n>\n")
-        text.write("# Machine Vision\n")
-        text.write("<v></v>\n")
-        
+        if model != 'GEMINI':
+            text.write(SDXL_PROMPT_TEMPLATE)
         print(f"[Style Engine] Created prompt text block: {text_name}")
     else:
         text = bpy.data.texts[text_name]
-    
+
     return text
+
+
+def set_prompt_text_for_model(model):
+    """
+    Update STYLEENGINE_Prompt contents to match the selected model.
+    Called when the user switches between SDXL and Gemini mid-session.
+
+    Args:
+        model (str): 'SDXL' or 'GEMINI'
+    """
+    text_name = "STYLEENGINE_Prompt"
+
+    if text_name not in bpy.data.texts:
+        get_or_create_prompt_text(model)
+        return
+
+    text = bpy.data.texts[text_name]
+    current = text.as_string()
+
+    if model == 'GEMINI':
+        # If content still looks like the SDXL tagged template, clear it
+        if '<p>' in current or '<k>' in current or '<n>' in current:
+            text.clear()
+            print(f"[Style Engine] Cleared prompt template for Gemini mode")
+    else:
+        # If content is empty (or was cleared for Gemini), restore SDXL template
+        if not current.strip():
+            text.clear()
+            text.write(SDXL_PROMPT_TEMPLATE)
+            print(f"[Style Engine] Restored prompt template for SDXL mode")
 
 
 def get_prompt_from_text_editor():

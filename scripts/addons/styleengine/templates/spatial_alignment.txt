@@ -1,0 +1,1 @@
+Use the exact edge alignment and spatial boundaries of image 1. Do not shift the silhouette; maintain 1-to-1 geometric parity with the source edges for projection mapping. Mantain Unified Control
