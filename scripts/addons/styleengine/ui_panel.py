@@ -355,6 +355,11 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         description="Enable spatial alignment (uses viewport render as reference image)",
         default=True
     )
+    gemini_remove_bg: bpy.props.BoolProperty(
+        name="Remove Background",
+        description="Remove background from Gemini output image (uses InspyrenetRembg)",
+        default=False
+    )
     gemini_instructions: bpy.props.EnumProperty(
         name="Instructions",
         description="Style instructions to append to the prompt",
@@ -2261,6 +2266,277 @@ class WM_OT_Nano3DGenerate(bpy.types.Operator):
             import traceback
             traceback.print_exc()
             return {'CANCELLED'}
+
+
+# ================================================================
+# OMNI 3D GENERATION (Hunyuan3D-Omni via VM server)
+# ================================================================
+
+OMNI_PORT = 8190
+
+def _get_omni_url():
+    """Derive the Omni server URL from addon preferences (same host as ComfyUI, port 8190)."""
+    from urllib.parse import urlparse
+    try:
+        prefs = bpy.context.preferences.addons['styleengine'].preferences
+        base_url = prefs.gcs_server_url
+        if not base_url:
+            return None
+        parsed = urlparse(base_url)
+        host = parsed.hostname or parsed.path.split('/')[0].split(':')[0]
+        scheme = parsed.scheme if parsed.scheme else 'http'
+        return f"{scheme}://{host}:{OMNI_PORT}"
+    except Exception:
+        return None
+
+
+def _get_proportional_bbox(obj):
+    """Extract a ratio-safe bounding box from a Blender mesh object.
+    Returns [x_min, y_min, z_min, x_max, y_max, z_max] normalized to unit cube."""
+    from mathutils import Vector
+    corners = [obj.matrix_world @ Vector(c) for c in obj.bound_box]
+    xs = [c.x for c in corners]
+    ys = [c.y for c in corners]
+    zs = [c.z for c in corners]
+    width = max(xs) - min(xs)
+    depth = max(ys) - min(ys)
+    height = max(zs) - min(zs)
+    max_dim = max(width, depth, height, 0.001)
+    hx = (width / max_dim) * 0.5
+    hy = (depth / max_dim) * 0.5
+    hz = (height / max_dim) * 0.5
+    return [-hx, -hy, -hz, hx, hy, hz]
+
+
+class WM_OT_OmniGenerate(bpy.types.Operator):
+    """Generate 3D mesh using Hunyuan3D-Omni with bounding box from selected object"""
+    bl_idname = "style_engine.omni_generate"
+    bl_label = "Omni Mesh"
+    bl_description = "Send current_ai.png + active mesh bounding box to Hunyuan3D-Omni for 3D generation"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        if not context.active_object or context.active_object.type != 'MESH':
+            return False
+        from . import workspace_setup
+        temp_dir = workspace_setup.get_temp_directory(context)
+        return (temp_dir / "current_ai.png").exists()
+
+    def execute(self, context):
+        import json
+        import time
+        import uuid
+        import threading
+        import urllib.request
+        import urllib.error
+        from pathlib import Path
+        from . import workspace_setup
+
+        obj = context.active_object
+        omni_url = _get_omni_url()
+        if not omni_url:
+            self.report({'ERROR'}, "Server URL not configured in preferences")
+            return {'CANCELLED'}
+
+        temp_dir = workspace_setup.get_temp_directory(context)
+        image_path = temp_dir / "current_ai.png"
+
+        print(f"[Omni] ============================================")
+        print(f"[Omni] STARTING OMNI 3D GENERATION")
+        print(f"[Omni] Server: {omni_url}")
+        print(f"[Omni] Proxy object: {obj.name}")
+        print(f"[Omni] ============================================")
+
+        # Extract bbox
+        bbox = _get_proportional_bbox(obj)
+        print(f"[Omni] Bbox (normalized): {[f'{v:.3f}' for v in bbox]}")
+
+        # Capture proxy placement data for post-import
+        proxy_location = obj.matrix_world.translation.copy()
+        from mathutils import Vector
+        corners = [obj.matrix_world @ Vector(c) for c in obj.bound_box]
+        xs = [c.x for c in corners]
+        ys = [c.y for c in corners]
+        zs = [c.z for c in corners]
+        proxy_max_dim = max(max(xs) - min(xs), max(ys) - min(ys), max(zs) - min(zs), 0.001)
+        proxy_name = obj.name
+        print(f"[Omni] Proxy location: {proxy_location}, max_dim: {proxy_max_dim:.3f}")
+
+        # Read image
+        with open(str(image_path), 'rb') as f:
+            image_data = f.read()
+
+        # Build multipart POST
+        boundary = f"----OmniBoundary{uuid.uuid4().hex}"
+        body_parts = []
+
+        # Image file field
+        body_parts.append(f'--{boundary}'.encode())
+        body_parts.append(f'Content-Disposition: form-data; name="image"; filename="current_ai.png"'.encode())
+        body_parts.append(b'Content-Type: image/png')
+        body_parts.append(b'')
+        body_parts.append(image_data)
+
+        # Bbox form fields
+        field_names = ['x_min', 'y_min', 'z_min', 'x_max', 'y_max', 'z_max']
+        for name, val in zip(field_names, bbox):
+            body_parts.append(f'--{boundary}'.encode())
+            body_parts.append(f'Content-Disposition: form-data; name="{name}"'.encode())
+            body_parts.append(b'')
+            body_parts.append(str(val).encode())
+
+        body_parts.append(f'--{boundary}--'.encode())
+        body_parts.append(b'')
+        request_body = b'\r\n'.join(body_parts)
+
+        # Submit to Omni server
+        try:
+            req = urllib.request.Request(
+                f"{omni_url}/generate",
+                data=request_body,
+                headers={
+                    'Content-Type': f'multipart/form-data; boundary={boundary}',
+                    'User-Agent': 'StyleEngine-Blender/1.0'
+                },
+                method='POST'
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                resp_data = json.loads(resp.read().decode('utf-8'))
+            job_id = resp_data.get('job_id')
+            if not job_id:
+                self.report({'ERROR'}, "Omni server returned no job_id")
+                return {'CANCELLED'}
+        except Exception as e:
+            self.report({'ERROR'}, f"Failed to reach Omni server: {e}")
+            print(f"[Omni] Connection error: {e}")
+            return {'CANCELLED'}
+
+        print(f"[Omni] Submitted job: {job_id[:8]}...")
+        self.report({'INFO'}, "Omni 3D generation submitted... (watch progress bar)")
+
+        # Polling + download via bpy.app.timers
+        captured = {
+            'job_id': job_id,
+            'omni_url': omni_url,
+            'proxy_location': proxy_location,
+            'proxy_max_dim': proxy_max_dim,
+            'proxy_name': proxy_name,
+            'start_time': time.time(),
+        }
+
+        def _poll_omni():
+            job_id = captured['job_id']
+            url = captured['omni_url']
+            elapsed = time.time() - captured['start_time']
+
+            if elapsed > 600:
+                print(f"[Omni] Timeout after {elapsed:.0f}s")
+                return None
+
+            try:
+                req = urllib.request.Request(f"{url}/status/{job_id}")
+                req.add_header('User-Agent', 'StyleEngine-Blender/1.0')
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    data = json.loads(resp.read().decode('utf-8'))
+            except Exception as e:
+                print(f"[Omni] Poll error: {e}")
+                return 4.0
+
+            status = data.get('status', 'unknown')
+            progress = data.get('progress', 0)
+
+            if status == 'completed':
+                print(f"[Omni] Generation complete! Downloading...")
+
+                def _download_thread():
+                    try:
+                        dl_req = urllib.request.Request(f"{url}/download/{job_id}")
+                        dl_req.add_header('User-Agent', 'StyleEngine-Blender/1.0')
+                        with urllib.request.urlopen(dl_req, timeout=60) as dl_resp:
+                            glb_data = dl_resp.read()
+
+                        dl_path = Path(workspace_setup.get_temp_directory(bpy.context)) / f"omni_{job_id[:8]}.glb"
+                        with open(str(dl_path), 'wb') as f:
+                            f.write(glb_data)
+
+                        print(f"[Omni] Downloaded: {dl_path.name} ({len(glb_data) / 1024:.1f} KB)")
+
+                        def _do_import():
+                            try:
+                                original_set = set(bpy.data.objects)
+                                bpy.ops.import_scene.gltf(filepath=str(dl_path))
+                                newly = [o for o in bpy.data.objects if o not in original_set]
+
+                                if not newly:
+                                    print(f"[Omni] Import succeeded but no new objects found")
+                                    return None
+
+                                # Separate mesh objects from empties/other types
+                                mesh_objs = [o for o in newly if o.type == 'MESH']
+                                non_mesh = [o for o in newly if o.type != 'MESH']
+
+                                # Unparent mesh objects, keeping world transform
+                                for mo in mesh_objs:
+                                    if mo.parent:
+                                        world_mat = mo.matrix_world.copy()
+                                        mo.parent = None
+                                        mo.matrix_world = world_mat
+
+                                # Delete empties/non-mesh imports (scene roots from GLTF)
+                                for nm in non_mesh:
+                                    bpy.data.objects.remove(nm, do_unlink=True)
+
+                                if not mesh_objs:
+                                    print(f"[Omni] No mesh objects found after import")
+                                    return None
+
+                                mesh_name = f"Omni_Mesh_{int(time.time())}"
+                                for i, mo in enumerate(mesh_objs):
+                                    mo.name = mesh_name if i == 0 else f"{mesh_name}_{i}"
+                                    # Apply 0.001 scale (unit correction: GLB in mm -> Blender meters)
+                                    mo.scale = (mo.scale[0] * 0.001,
+                                                mo.scale[1] * 0.001,
+                                                mo.scale[2] * 0.001)
+                                    # Position at proxy location
+                                    mo.location = captured['proxy_location']
+
+                                # Hide proxy
+                                proxy = bpy.data.objects.get(captured['proxy_name'])
+                                if proxy:
+                                    proxy.hide_set(True)
+
+                                workspace_setup.save_mesh_to_library(bpy.context, dl_path, mesh_type='mesh')
+                                print(f"[Omni] Imported: {mesh_name} ({len(mesh_objs)} mesh(es)) at {captured['proxy_location']}")
+                                print(f"[Omni] ============================================")
+                                print(f"[Omni] OMNI 3D COMPLETE")
+                                print(f"[Omni] ============================================")
+                            except Exception as e:
+                                print(f"[Omni] Import error: {e}")
+                                import traceback
+                                traceback.print_exc()
+                            return None
+
+                        bpy.app.timers.register(_do_import, first_interval=0.1)
+
+                    except Exception as e:
+                        print(f"[Omni] Download error: {e}")
+                        import traceback
+                        traceback.print_exc()
+
+                threading.Thread(target=_download_thread, daemon=True).start()
+                return None
+
+            elif status == 'failed':
+                print(f"[Omni] Generation failed on server")
+                return None
+
+            return 4.0
+
+        bpy.app.timers.register(_poll_omni, first_interval=4.0)
+        print(f"[Omni] Polling started (every 4s, timeout 10min)")
+
+        return {'FINISHED'}
 
 
 # ================================================================
@@ -4887,11 +5163,12 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                 # Instructions dropdown
                 col.prop(style_props, "gemini_instructions", text="Instructions")
                 
-                # Alignment toggle
+                # Alignment + Remove Background toggles
                 img_gen_box.separator()
-                row = img_gen_box.row()
+                row = img_gen_box.row(align=True)
                 row.scale_y = 1.3
                 row.prop(style_props, "gemini_alignment", text="Alignment", toggle=True, icon='CON_LOCLIKE')
+                row.prop(style_props, "gemini_remove_bg", text="Remove BG", toggle=True, icon='IMAGE_ALPHA')
                 
                 # Show auto-detected aspect ratio from render resolution
                 w = context.scene.render.resolution_x
@@ -5154,7 +5431,8 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                 col.operator("style_engine.create_textured_object", text="Generate Textured Mesh", icon='SHADING_TEXTURE')
                 col.operator("style_engine.uv_texture", text="UV Texture", icon='UV')
                 col.operator("style_engine.nano_3d_generate", text="Nano", icon='OUTLINER_OB_LIGHT')
-            
+                col.operator("style_engine.omni_generate", text="Omni Mesh", icon='MESH_CUBE')
+
             # ────────────────────────────────────────────────────────────
             # 3D FROM MULTIVIEW SUB-CATEGORY (Collapsible, closed by default)
             # ────────────────────────────────────────────────────────────
@@ -6096,6 +6374,7 @@ classes = (
     WM_OT_ProjectTexture,
     WM_OT_NanoGenerate,
     WM_OT_Nano3DGenerate,
+    WM_OT_OmniGenerate,
     WM_OT_TogglePatchCamera,
     WM_OT_ApplyPatch,
     WM_OT_MultiviewFromProjected,

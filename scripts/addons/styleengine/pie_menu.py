@@ -1374,10 +1374,11 @@ class STYLEENGINE_MT_pie_main(Menu):
         col.separator()
         
         if style_props.ai_model == 'GEMINI':
-            # Gemini: only show Alignment toggle
-            row = col.row()
+            # Gemini: Alignment + Remove Background toggles
+            row = col.row(align=True)
             row.scale_y = 1.5
             row.prop(style_props, "gemini_alignment", text="Alignment", toggle=True, icon='CON_LOCLIKE')
+            row.prop(style_props, "gemini_remove_bg", text="Remove BG", toggle=True, icon='IMAGE_ALPHA')
         else:
             # SDXL: Influence sliders
             influence_box = col.box()

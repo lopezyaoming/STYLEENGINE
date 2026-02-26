@@ -2793,13 +2793,14 @@ def generate_ai_image_cloud(context):
                 addon_dir = Path(__file__).parent
                 workflows_dir = addon_dir / "workflows" / "Image"
                 
-                # Select workflow based on alignment toggle
+                # Select workflow based on alignment and remove-bg toggles
+                remove_bg = getattr(props, 'gemini_remove_bg', False)
                 if props.gemini_alignment:
-                    gemini_wf_path = workflows_dir / "ImageNanoAlignment.json"
-                    print(f"[GCS] Alignment ON - using ImageNanoAlignment.json")
+                    wf_name = "ImageNanoAlignmentRB.json" if remove_bg else "ImageNanoAlignment.json"
                 else:
-                    gemini_wf_path = workflows_dir / "ImageNanoText.json"
-                    print(f"[GCS] Alignment OFF - using ImageNanoText.json")
+                    wf_name = "ImageNanoTextRB.json" if remove_bg else "ImageNanoText.json"
+                gemini_wf_path = workflows_dir / wf_name
+                print(f"[GCS] Alignment {'ON' if props.gemini_alignment else 'OFF'}, RemoveBG {'ON' if remove_bg else 'OFF'} - using {wf_name}")
                 
                 if not gemini_wf_path.exists():
                     print(f"[GCS] {gemini_wf_path.name} not found")
