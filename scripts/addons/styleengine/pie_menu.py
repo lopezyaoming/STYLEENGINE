@@ -403,7 +403,15 @@ class WM_OT_UVTexture(Operator):
                                             
                                             if space_3d:
                                                 space_3d.region_3d.view_perspective = 'CAMERA'
-                                                bpy.ops.uv.project_from_view(camera_bounds=True, correct_aspect=True, scale_to_bounds=False)
+                                                _proj_img = bpy.data.images.get("current_ai.png")
+                                                _orig_rx = bpy.context.scene.render.resolution_x
+                                                _orig_ry = bpy.context.scene.render.resolution_y
+                                                if _proj_img and _proj_img.size[0] > 0 and _proj_img.size[1] > 0:
+                                                    bpy.context.scene.render.resolution_x = _proj_img.size[0]
+                                                    bpy.context.scene.render.resolution_y = _proj_img.size[1]
+                                                bpy.ops.uv.project_from_view(camera_bounds=True, correct_aspect=False, scale_to_bounds=False)
+                                                bpy.context.scene.render.resolution_x = _orig_rx
+                                                bpy.context.scene.render.resolution_y = _orig_ry
                                                 space_3d.region_3d.view_perspective = original_persp
                                                 print(f"[UV Texture] ✓ Projected front texture from camera view")
                                             

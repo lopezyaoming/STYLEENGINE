@@ -208,7 +208,7 @@
       "torchscript_jit": "default",
       "image": [
         "14",
-        0
+        2
       ]
     },
     "class_type": "InspyrenetRembg",

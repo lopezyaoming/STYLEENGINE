@@ -1,6 +1,1 @@
-# Keywords
-<k>concept art, matte painting, visual development, highly detailed, 8k, cinematic lighting</k>
-# Prompt
-<p>expansive fantasy landscape with ancient ruins, dramatic clouds, golden hour lighting, sense of scale and wonder</p>
-# Negative Prompt
-<n>blurry, low quality, watermark, oversaturated, photorealistic, photograph, amateur</n>
+

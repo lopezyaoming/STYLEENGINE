@@ -360,6 +360,34 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         description="Remove background from Gemini output image (uses InspyrenetRembg)",
         default=False
     )
+
+    # Gemini reference images (5 slots, no weights)
+    show_gemini_references: bpy.props.BoolProperty(
+        name="Show Gemini References",
+        description="Expand or collapse the Gemini Reference Images section",
+        default=False
+    )
+    gemini_ref1_image: bpy.props.PointerProperty(
+        type=bpy.types.Image,
+        name="Gemini Reference 1"
+    )
+    gemini_ref2_image: bpy.props.PointerProperty(
+        type=bpy.types.Image,
+        name="Gemini Reference 2"
+    )
+    gemini_ref3_image: bpy.props.PointerProperty(
+        type=bpy.types.Image,
+        name="Gemini Reference 3"
+    )
+    gemini_ref4_image: bpy.props.PointerProperty(
+        type=bpy.types.Image,
+        name="Gemini Reference 4"
+    )
+    gemini_ref5_image: bpy.props.PointerProperty(
+        type=bpy.types.Image,
+        name="Gemini Reference 5"
+    )
+
     gemini_instructions: bpy.props.EnumProperty(
         name="Instructions",
         description="Style instructions to append to the prompt",
@@ -1568,12 +1596,23 @@ class WM_OT_ProjectTexture(bpy.types.Operator):
                 space_3d.region_3d.view_perspective = 'CAMERA'
                 print(f"[Style Engine] Temporarily switched viewport to camera view for projection")
             
-            # Project from ai_camera (matches the texture that was rendered from this camera)
+            # Temporarily match render resolution to the actual texture dimensions so the
+            # camera projection matrix is pixel-perfect regardless of image aspect ratio.
+            # correct_aspect=False: camera_bounds=True already bakes aspect into the projection
+            # matrix; the additional viewport-pixel correction would distort non-square images.
+            _proj_img = bpy.data.images.get("current_ai.png")
+            _orig_rx = context.scene.render.resolution_x
+            _orig_ry = context.scene.render.resolution_y
+            if _proj_img and _proj_img.size[0] > 0 and _proj_img.size[1] > 0:
+                context.scene.render.resolution_x = _proj_img.size[0]
+                context.scene.render.resolution_y = _proj_img.size[1]
             bpy.ops.uv.project_from_view(
-                camera_bounds=True,  # Use camera projection bounds
-                correct_aspect=True,
+                camera_bounds=True,
+                correct_aspect=False,
                 scale_to_bounds=False
             )
+            context.scene.render.resolution_x = _orig_rx
+            context.scene.render.resolution_y = _orig_ry
             
             # Restore original viewport perspective
             if space_3d and original_view_perspective:
@@ -2305,7 +2344,9 @@ def _get_proportional_bbox(obj):
     hx = (width / max_dim) * 0.5
     hy = (depth / max_dim) * 0.5
     hz = (height / max_dim) * 0.5
-    return [-hx, -hy, -hz, hx, hy, hz]
+    # Swap y↔z: Blender is Z-up, Omni/GLTF is Y-up
+    # Blender Z (height) → Omni Y, Blender Y (depth) → Omni Z
+    return [-hx, -hz, -hy, hx, hz, hy]
 
 
 class WM_OT_OmniGenerate(bpy.types.Operator):
@@ -2352,16 +2393,20 @@ class WM_OT_OmniGenerate(bpy.types.Operator):
         bbox = _get_proportional_bbox(obj)
         print(f"[Omni] Bbox (normalized): {[f'{v:.3f}' for v in bbox]}")
 
-        # Capture proxy placement data for post-import
-        proxy_location = obj.matrix_world.translation.copy()
+        # Capture proxy bbox for post-import matching
         from mathutils import Vector
         corners = [obj.matrix_world @ Vector(c) for c in obj.bound_box]
         xs = [c.x for c in corners]
         ys = [c.y for c in corners]
         zs = [c.z for c in corners]
-        proxy_max_dim = max(max(xs) - min(xs), max(ys) - min(ys), max(zs) - min(zs), 0.001)
+        proxy_bbox_min = Vector((min(xs), min(ys), min(zs)))
+        proxy_bbox_max = Vector((max(xs), max(ys), max(zs)))
+        proxy_bbox_center = (proxy_bbox_min + proxy_bbox_max) / 2
+        proxy_max_dim = max(proxy_bbox_max.x - proxy_bbox_min.x,
+                            proxy_bbox_max.y - proxy_bbox_min.y,
+                            proxy_bbox_max.z - proxy_bbox_min.z, 0.001)
         proxy_name = obj.name
-        print(f"[Omni] Proxy location: {proxy_location}, max_dim: {proxy_max_dim:.3f}")
+        print(f"[Omni] Proxy bbox center: {proxy_bbox_center}, max_dim: {proxy_max_dim:.3f}")
 
         # Read image
         with open(str(image_path), 'rb') as f:
@@ -2419,7 +2464,7 @@ class WM_OT_OmniGenerate(bpy.types.Operator):
         captured = {
             'job_id': job_id,
             'omni_url': omni_url,
-            'proxy_location': proxy_location,
+            'proxy_bbox_center': proxy_bbox_center,
             'proxy_max_dim': proxy_max_dim,
             'proxy_name': proxy_name,
             'start_time': time.time(),
@@ -2464,6 +2509,12 @@ class WM_OT_OmniGenerate(bpy.types.Operator):
 
                         def _do_import():
                             try:
+                                from mathutils import Vector
+
+                                # Ensure object mode before any operations
+                                if bpy.context.mode != 'OBJECT':
+                                    bpy.ops.object.mode_set(mode='OBJECT')
+
                                 original_set = set(bpy.data.objects)
                                 bpy.ops.import_scene.gltf(filepath=str(dl_path))
                                 newly = [o for o in bpy.data.objects if o not in original_set]
@@ -2483,7 +2534,7 @@ class WM_OT_OmniGenerate(bpy.types.Operator):
                                         mo.parent = None
                                         mo.matrix_world = world_mat
 
-                                # Delete empties/non-mesh imports (scene roots from GLTF)
+                                # Delete empties/non-mesh imports (GLTF scene roots)
                                 for nm in non_mesh:
                                     bpy.data.objects.remove(nm, do_unlink=True)
 
@@ -2491,15 +2542,41 @@ class WM_OT_OmniGenerate(bpy.types.Operator):
                                     print(f"[Omni] No mesh objects found after import")
                                     return None
 
+                                # Apply transforms so bound_box reflects real geometry size
+                                bpy.ops.object.select_all(action='DESELECT')
+                                for mo in mesh_objs:
+                                    mo.select_set(True)
+                                bpy.context.view_layer.objects.active = mesh_objs[0]
+                                bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
+
+                                # Measure imported mesh world-space bounding box
+                                all_corners = []
+                                for mo in mesh_objs:
+                                    all_corners += [mo.matrix_world @ Vector(c) for c in mo.bound_box]
+                                imp_xs = [c.x for c in all_corners]
+                                imp_ys = [c.y for c in all_corners]
+                                imp_zs = [c.z for c in all_corners]
+                                imp_max_dim = max(max(imp_xs)-min(imp_xs),
+                                                 max(imp_ys)-min(imp_ys),
+                                                 max(imp_zs)-min(imp_zs), 0.001)
+                                imp_center = Vector((
+                                    (min(imp_xs) + max(imp_xs)) / 2,
+                                    (min(imp_ys) + max(imp_ys)) / 2,
+                                    (min(imp_zs) + max(imp_zs)) / 2,
+                                ))
+
+                                # Scale: match proxy's largest dimension
+                                scale_factor = captured['proxy_max_dim'] / imp_max_dim
+                                proxy_center = captured['proxy_bbox_center']
+
                                 mesh_name = f"Omni_Mesh_{int(time.time())}"
                                 for i, mo in enumerate(mesh_objs):
                                     mo.name = mesh_name if i == 0 else f"{mesh_name}_{i}"
-                                    # Apply 0.001 scale (unit correction: GLB in mm -> Blender meters)
-                                    mo.scale = (mo.scale[0] * 0.001,
-                                                mo.scale[1] * 0.001,
-                                                mo.scale[2] * 0.001)
-                                    # Position at proxy location
-                                    mo.location = captured['proxy_location']
+                                    mo.scale = mo.scale * scale_factor
+                                    # Shift so imported bbox center lands on proxy bbox center
+                                    mo.location = mo.location + (proxy_center - imp_center * scale_factor)
+
+                                print(f"[Omni] Scale factor: {scale_factor:.4f} (proxy {captured['proxy_max_dim']:.3f}m / imported {imp_max_dim:.3f}m)")
 
                                 # Hide proxy
                                 proxy = bpy.data.objects.get(captured['proxy_name'])
@@ -2507,7 +2584,7 @@ class WM_OT_OmniGenerate(bpy.types.Operator):
                                     proxy.hide_set(True)
 
                                 workspace_setup.save_mesh_to_library(bpy.context, dl_path, mesh_type='mesh')
-                                print(f"[Omni] Imported: {mesh_name} ({len(mesh_objs)} mesh(es)) at {captured['proxy_location']}")
+                                print(f"[Omni] Imported: {mesh_name} ({len(mesh_objs)} mesh(es)), centered at {proxy_center}")
                                 print(f"[Omni] ============================================")
                                 print(f"[Omni] OMNI 3D COMPLETE")
                                 print(f"[Omni] ============================================")
@@ -2536,6 +2613,81 @@ class WM_OT_OmniGenerate(bpy.types.Operator):
         bpy.app.timers.register(_poll_omni, first_interval=4.0)
         print(f"[Omni] Polling started (every 4s, timeout 10min)")
 
+        return {'FINISHED'}
+
+
+class WM_OT_OmniBBoxDebug(bpy.types.Operator):
+    """Calculate and visualise the bounding box that would be sent to Hunyuan3D-Omni"""
+    bl_idname = "style_engine.omni_bbox_debug"
+    bl_label = "Calculate BBox"
+    bl_description = "Print normalised Omni bbox to console and create a wireframe cube showing the actual bounding box"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return context.active_object and context.active_object.type == 'MESH'
+
+    def execute(self, context):
+        from mathutils import Vector
+
+        obj = context.active_object
+
+        # --- World-space corners ---
+        corners = [obj.matrix_world @ Vector(c) for c in obj.bound_box]
+        xs = [c.x for c in corners]
+        ys = [c.y for c in corners]
+        zs = [c.z for c in corners]
+
+        # Actual world dimensions
+        w = max(xs) - min(xs)
+        d = max(ys) - min(ys)
+        h = max(zs) - min(zs)
+        center = Vector(((min(xs)+max(xs))/2, (min(ys)+max(ys))/2, (min(zs)+max(zs))/2))
+
+        # Normalised bbox (what Omni receives)
+        max_dim = max(w, d, h, 0.001)
+        hx = (w / max_dim) * 0.5
+        hy = (d / max_dim) * 0.5
+        hz = (h / max_dim) * 0.5
+        norm_bbox = [-hx, -hy, -hz, hx, hy, hz]
+
+        print(f"[BBox Debug] =============================================")
+        print(f"[BBox Debug] Object: {obj.name}")
+        print(f"[BBox Debug] World dimensions: W={w:.4f}  D={d:.4f}  H={h:.4f}")
+        print(f"[BBox Debug] World center: ({center.x:.4f}, {center.y:.4f}, {center.z:.4f})")
+        print(f"[BBox Debug] Largest dimension: {max_dim:.4f}")
+        print(f"[BBox Debug] Normalised bbox sent to Omni:")
+        print(f"[BBox Debug]   x_min={norm_bbox[0]:.4f}  y_min={norm_bbox[1]:.4f}  z_min={norm_bbox[2]:.4f}")
+        print(f"[BBox Debug]   x_max={norm_bbox[3]:.4f}  y_max={norm_bbox[4]:.4f}  z_max={norm_bbox[5]:.4f}")
+        print(f"[BBox Debug] =============================================")
+
+        self.report({'INFO'}, f"BBox: [{', '.join(f'{v:.3f}' for v in norm_bbox)}]  — see console for details")
+
+        # --- Create wireframe cube matching the actual world bbox ---
+        cube_name = f"BBox_{obj.name}"
+        # Remove existing debug cube for this object if present
+        existing = bpy.data.objects.get(cube_name)
+        if existing:
+            bpy.data.objects.remove(existing, do_unlink=True)
+
+        bpy.ops.mesh.primitive_cube_add(size=1, location=center)
+        cube = context.active_object
+        cube.name = cube_name
+        cube.scale = (w, d, h)
+
+        # Wireframe display — no fill, just edges
+        cube.display_type = 'WIRE'
+
+        # Make it non-renderable and non-selectable-in-viewport so it doesn't get in the way
+        cube.hide_render = True
+        cube.hide_select = True
+
+        # Re-select original object
+        bpy.ops.object.select_all(action='DESELECT')
+        obj.select_set(True)
+        context.view_layer.objects.active = obj
+
+        print(f"[BBox Debug] Wireframe cube created: '{cube_name}' at {center}")
         return {'FINISHED'}
 
 
@@ -2983,7 +3135,15 @@ class WM_OT_ApplyPatch(bpy.types.Operator):
                             
                             if space_3d:
                                 space_3d.region_3d.view_perspective = 'CAMERA'
-                                bpy.ops.uv.project_from_view(camera_bounds=True, correct_aspect=True, scale_to_bounds=False)
+                                _proj_img = bpy.data.images.get("current_ai.png")
+                                _orig_rx = bpy.context.scene.render.resolution_x
+                                _orig_ry = bpy.context.scene.render.resolution_y
+                                if _proj_img and _proj_img.size[0] > 0 and _proj_img.size[1] > 0:
+                                    bpy.context.scene.render.resolution_x = _proj_img.size[0]
+                                    bpy.context.scene.render.resolution_y = _proj_img.size[1]
+                                bpy.ops.uv.project_from_view(camera_bounds=True, correct_aspect=False, scale_to_bounds=False)
+                                bpy.context.scene.render.resolution_x = _orig_rx
+                                bpy.context.scene.render.resolution_y = _orig_ry
                                 space_3d.region_3d.view_perspective = original_persp
                                 print(f"[Patch] Projected UVs from patch angle")
                             
@@ -3404,7 +3564,7 @@ class WM_OT_MultiviewFromProjected(bpy.types.Operator):
                     ai_camera.matrix_world = original_cam_matrix
                     if space_3d:
                         space_3d.region_3d.view_perspective = 'CAMERA'
-                    bpy.ops.uv.project_from_view(camera_bounds=True)
+                    bpy.ops.uv.project_from_view(camera_bounds=True, correct_aspect=False)
                     print(f"[Multiview] Projected front faces")
                     
                     # Project left
@@ -3413,7 +3573,7 @@ class WM_OT_MultiviewFromProjected(bpy.types.Operator):
                     bmesh.update_edit_mesh(target_obj.data)
                     
                     ai_camera.rotation_euler.z = original_cam_matrix.to_euler().z + math.radians(120)
-                    bpy.ops.uv.project_from_view(camera_bounds=True)
+                    bpy.ops.uv.project_from_view(camera_bounds=True, correct_aspect=False)
                     print(f"[Multiview] Projected left faces")
                     
                     # Project right
@@ -3422,7 +3582,7 @@ class WM_OT_MultiviewFromProjected(bpy.types.Operator):
                     bmesh.update_edit_mesh(target_obj.data)
                     
                     ai_camera.rotation_euler.z = original_cam_matrix.to_euler().z + math.radians(-120)
-                    bpy.ops.uv.project_from_view(camera_bounds=True)
+                    bpy.ops.uv.project_from_view(camera_bounds=True, correct_aspect=False)
                     print(f"[Multiview] Projected right faces")
                     
                     # Restore viewport and camera
@@ -3867,52 +4027,72 @@ class WM_OT_PBRFromText(bpy.types.Operator):
             self.report({'ERROR'}, "PBR generation only works in Server mode (GCS)")
             return {'CANCELLED'}
         
-        # 2. Parse prompts from text editor
-        prompt_from_editor = utils.get_prompt_from_text_editor()
-        if not prompt_from_editor:
-            self.report({'ERROR'}, "No prompt found in STYLEENGINE_Prompt text block")
-            return {'CANCELLED'}
-        
-        positive_prompt, negative_prompt = utils.process_prompt_builder(prompt_from_editor)
-        
-        if not positive_prompt:
-            self.report({'ERROR'}, "No positive prompt found. Write a texture description in the <p> tag.")
-            return {'CANCELLED'}
-        
-        print(f"[PBR Text] Positive: {positive_prompt[:80]}...")
-        print(f"[PBR Text] Negative: {negative_prompt[:80]}..." if negative_prompt else "[PBR Text] Negative: (none)")
-        
+        # 2. Read prompt from text editor — raw for Gemini, tag-parsed for SDXL
+        props = context.scene.style_engine_props
+        _is_gemini = getattr(props, 'ai_model', 'SDXL') == 'GEMINI'
+
+        if _is_gemini:
+            text_block = bpy.data.texts.get("STYLEENGINE_Prompt")
+            raw_prompt = text_block.as_string().strip() if text_block else ""
+            if not raw_prompt:
+                self.report({'ERROR'}, "No prompt found in STYLEENGINE_Prompt text block")
+                return {'CANCELLED'}
+            print(f"[PBR Text] Gemini mode — prompt: {raw_prompt[:80]}...")
+        else:
+            prompt_from_editor = utils.get_prompt_from_text_editor()
+            if not prompt_from_editor:
+                self.report({'ERROR'}, "No prompt found in STYLEENGINE_Prompt text block")
+                return {'CANCELLED'}
+            positive_prompt, negative_prompt = utils.process_prompt_builder(prompt_from_editor)
+            if not positive_prompt:
+                self.report({'ERROR'}, "No positive prompt found. Write a texture description in the <p> tag.")
+                return {'CANCELLED'}
+            print(f"[PBR Text] Positive: {positive_prompt[:80]}...")
+            print(f"[PBR Text] Negative: {negative_prompt[:80]}..." if negative_prompt else "[PBR Text] Negative: (none)")
+
         try:
             server_client = runcomfy_deployment.get_server_client()
-            
-            # 3. Load and patch workflow
+
+            # 3. Load and patch workflow — Gemini uses objectNanoPBRtext.json
             addon_dir = Path(__file__).parent
-            workflow_file = addon_dir / "workflows" / "Object" / "objectPBRtext.json"
-            
+            if _is_gemini:
+                workflow_file = addon_dir / "workflows" / "Object" / "objectNanoPBRtext.json"
+            else:
+                workflow_file = addon_dir / "workflows" / "Object" / "objectPBRtext.json"
+
             if not workflow_file.exists():
-                self.report({'ERROR'}, "objectPBRtext.json not found")
+                self.report({'ERROR'}, f"{workflow_file.name} not found")
                 return {'CANCELLED'}
-            
+
             with open(workflow_file, 'r') as f:
                 workflow = json.load(f)
-            
+
             print(f"[PBR Text] Loaded workflow: {workflow_file.name}")
-            
-            # Patch Node 38 (Text Multiline) with positive prompt
-            if "38" in workflow:
-                workflow["38"]["inputs"]["text"] = positive_prompt
-                print(f"[PBR Text] Patched node 38 (prompt): {positive_prompt[:60]}...")
-            
-            # Patch Node 25 (CLIPTextEncode) with negative prompt
-            if "25" in workflow:
-                workflow["25"]["inputs"]["text"] = negative_prompt or ""
-                print(f"[PBR Text] Patched node 25 (negative): {negative_prompt[:60]}..." if negative_prompt else "[PBR Text] Patched node 25 (negative): empty")
-            
-            # Patch seed (Node 26 - KSampler)
-            seed = context.scene.style_engine_props.seed_value
-            if "26" in workflow:
-                workflow["26"]["inputs"]["seed"] = seed
-                print(f"[PBR Text] Patched node 26 (seed): {seed}")
+
+            if _is_gemini:
+                # Patch Node 44 (Text Prompt) with raw prompt
+                if "44" in workflow:
+                    workflow["44"]["inputs"]["text"] = raw_prompt
+                    print(f"[PBR Text] Patched node 44 (prompt): {raw_prompt[:60]}...")
+                # Patch Node 41 (NanoBananaAIO) — temperature and image_size from Gemini prefs
+                if "41" in workflow:
+                    workflow["41"]["inputs"]["temperature"] = props.gemini_temperature
+                    workflow["41"]["inputs"]["image_size"] = props.gemini_image_size
+                    print(f"[PBR Text] Patched node 41: temperature={props.gemini_temperature}, size={props.gemini_image_size}")
+            else:
+                # Patch Node 38 (Text Multiline) with positive prompt
+                if "38" in workflow:
+                    workflow["38"]["inputs"]["text"] = positive_prompt
+                    print(f"[PBR Text] Patched node 38 (prompt): {positive_prompt[:60]}...")
+                # Patch Node 25 (CLIPTextEncode) with negative prompt
+                if "25" in workflow:
+                    workflow["25"]["inputs"]["text"] = negative_prompt or ""
+                    print(f"[PBR Text] Patched node 25 (negative): {negative_prompt[:60]}..." if negative_prompt else "[PBR Text] Patched node 25 (negative): empty")
+                # Patch seed (Node 26 - KSampler)
+                seed = props.seed_value
+                if "26" in workflow:
+                    workflow["26"]["inputs"]["seed"] = seed
+                    print(f"[PBR Text] Patched node 26 (seed): {seed}")
             
             # 4. Submit to ComfyUI
             print(f"[PBR Text] Submitting workflow...")
@@ -4262,13 +4442,14 @@ class WM_OT_LoadReferenceImage(bpy.types.Operator):
             print(f"[Reference Image Load] Assigning to property: {img_prop}")
             setattr(props, img_prop, img)
             
-            # Auto-enable by setting weight to 1.0 (user can adjust)
-            current_weight = getattr(props, weight_prop)
-            if current_weight == 0.0:
-                setattr(props, weight_prop, 1.0)
-                print(f"[Reference Image Load] Weight set to 1.0")
-            else:
-                print(f"[Reference Image Load] Weight already at {current_weight}")
+            # Auto-enable by setting weight to 1.0 (SDXL slots only; Gemini slots have no weights)
+            if hasattr(props, weight_prop):
+                current_weight = getattr(props, weight_prop)
+                if current_weight == 0.0:
+                    setattr(props, weight_prop, 1.0)
+                    print(f"[Reference Image Load] Weight set to 1.0")
+                else:
+                    print(f"[Reference Image Load] Weight already at {current_weight}")
             
             # Force UI redraw for thumbnail to appear
             print(f"[Reference Image Load] Forcing UI redraw...")
@@ -5174,7 +5355,81 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                 w = context.scene.render.resolution_x
                 h = context.scene.render.resolution_y
                 img_gen_box.label(text=f"Aspect: {w}x{h}", icon='FULLSCREEN_ENTER')
-            
+
+                # ── GEMINI REFERENCE IMAGES ──
+                img_gen_box.separator()
+                gref_box = img_gen_box.box()
+                gref_header = gref_box.row(align=True)
+                gref_icon = 'TRIA_DOWN' if style_props.show_gemini_references else 'TRIA_RIGHT'
+                gref_header.prop(style_props, "show_gemini_references", text="Reference Images", icon=gref_icon, emboss=False, toggle=True)
+                gref_header.label(text="", icon='IMAGE_REFERENCE')
+
+                if style_props.show_gemini_references:
+                    gemini_ref_slots = [
+                        ("gemini_ref1", "gemini_ref1_image", "REF1"),
+                        ("gemini_ref2", "gemini_ref2_image", "REF2"),
+                        ("gemini_ref3", "gemini_ref3_image", "REF3"),
+                        ("gemini_ref4", "gemini_ref4_image", "REF4"),
+                        ("gemini_ref5", "gemini_ref5_image", "REF5"),
+                    ]
+
+                    gref_box.separator()
+                    grid = gref_box.grid_flow(row_major=True, columns=3, even_columns=True, even_rows=True, align=True)
+
+                    for slot_id, img_prop, label in gemini_ref_slots:
+                        img = getattr(style_props, img_prop)
+                        card = grid.box()
+                        card.scale_y = 1.0
+
+                        if img:
+                            col = card.column(align=True)
+                            preview_box = col.box()
+                            preview_col = preview_box.column(align=True)
+                            try:
+                                pcoll = preview_collections.get("ref_images")
+                                if pcoll is not None:
+                                    thumb_key = f"{slot_id}_{img.name}"
+                                    if thumb_key not in pcoll:
+                                        if img.filepath:
+                                            abs_path = bpy.path.abspath(img.filepath)
+                                            try:
+                                                pcoll.load(thumb_key, abs_path, 'IMAGE')
+                                            except Exception:
+                                                pass
+                                    if thumb_key in pcoll and pcoll[thumb_key].icon_id > 0:
+                                        preview_col.template_icon(icon_value=pcoll[thumb_key].icon_id, scale=5.0)
+                                    else:
+                                        preview_col.label(text="[Preview]", icon='IMAGE_DATA')
+                                else:
+                                    preview_col.label(text="[No Collection]", icon='ERROR')
+                            except Exception:
+                                preview_col.label(text="[Error]", icon='ERROR')
+
+                            col.separator(factor=0.2)
+                            info_col = col.column(align=True)
+                            info_col.scale_y = 0.7
+                            lbl_row = info_col.row()
+                            lbl_row.alignment = 'CENTER'
+                            lbl_row.label(text=label, icon='IMAGE_DATA')
+                            name_row = info_col.row()
+                            name_row.alignment = 'CENTER'
+                            display_name = img.name[:10] + "..." if len(img.name) > 13 else img.name
+                            name_row.label(text=display_name)
+                            col.separator(factor=0.3)
+                            btn_row = col.row(align=True)
+                            btn_row.scale_y = 0.7
+                            reload_op = btn_row.operator("style_engine.reload_reference", text="", icon='FILE_REFRESH')
+                            reload_op.slot = slot_id
+                            clear_op = btn_row.operator("style_engine.clear_reference", text="", icon='X')
+                            clear_op.slot = slot_id
+                        else:
+                            col = card.column(align=True)
+                            col.scale_y = 2.5
+                            col.separator()
+                            load_op = col.operator("style_engine.load_reference", text=f"{label}\n+", icon='ADD', emboss=True)
+                            load_op.slot = slot_id
+                            col.separator()
+
             else:
                 # ────────────────────────────────────────────────────────────
                 # SDXL CONTROLS
@@ -5432,6 +5687,7 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                 col.operator("style_engine.uv_texture", text="UV Texture", icon='UV')
                 col.operator("style_engine.nano_3d_generate", text="Nano", icon='OUTLINER_OB_LIGHT')
                 col.operator("style_engine.omni_generate", text="Omni Mesh", icon='MESH_CUBE')
+                col.operator("style_engine.omni_bbox_debug", text="Calculate BBox", icon='SNAP_VOLUME')
 
             # ────────────────────────────────────────────────────────────
             # 3D FROM MULTIVIEW SUB-CATEGORY (Collapsible, closed by default)
@@ -6375,6 +6631,7 @@ classes = (
     WM_OT_NanoGenerate,
     WM_OT_Nano3DGenerate,
     WM_OT_OmniGenerate,
+    WM_OT_OmniBBoxDebug,
     WM_OT_TogglePatchCamera,
     WM_OT_ApplyPatch,
     WM_OT_MultiviewFromProjected,

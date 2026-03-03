@@ -911,6 +911,38 @@ def write_session_json(context):
         print(f"[Style Engine] Error writing session.json: {e}")
 
 
+def compress_image_for_upload(image_path, max_side=1920):
+    """
+    Downscale an image if either dimension exceeds max_side, preserving aspect ratio.
+    Saves as JPEG quality 90 to a temp file. Returns the (possibly new) path.
+    """
+    from pathlib import Path
+    try:
+        img = bpy.data.images.load(str(image_path), check_existing=False)
+        w, h = img.size[0], img.size[1]
+        if w <= max_side and h <= max_side:
+            bpy.data.images.remove(img)
+            return Path(image_path)
+
+        scale = max_side / max(w, h)
+        new_w = int(w * scale)
+        new_h = int(h * scale)
+        img.scale(new_w, new_h)
+
+        temp_dir = get_temp_directory(bpy.context)
+        out_path = temp_dir / f"ref_compressed_{Path(image_path).stem}.jpg"
+        img.filepath_raw = str(out_path)
+        img.file_format = 'JPEG'
+        img.save()
+        bpy.data.images.remove(img)
+
+        print(f"[Compress] {w}x{h} -> {new_w}x{new_h}: {out_path.name}")
+        return out_path
+    except Exception as e:
+        print(f"[Compress] Failed, using original: {e}")
+        return Path(image_path)
+
+
 def refresh_ai_image():
     """
     Reload current_ai.png in Blender when called.
@@ -1692,7 +1724,8 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
         bg_img.display_depth = 'FRONT'  # Display in front (default - can be changed via UI)
         bg_img.frame_method = 'STRETCH'
 
-        if not skip_resolution_override:
+        _is_gemini = getattr(props, 'ai_model', 'SDXL') == 'GEMINI'
+        if not skip_resolution_override and not _is_gemini:
             res_str = props.ai_resolution
             render_width, render_height = map(int, res_str.split('x'))
             context.scene.render.resolution_x = render_width
@@ -1700,8 +1733,9 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
             print(f"[Style Engine] Background image set: {img_path}")
             print(f"[Style Engine] Render resolution set to: {render_width}x{render_height} (from ai_resolution setting)")
         else:
+            _reason = "Gemini mode" if _is_gemini else "Gemini sync from scene camera"
             print(f"[Style Engine] Background image set: {img_path}")
-            print(f"[Style Engine] Render resolution preserved: {width}x{height} (Gemini sync from scene camera)")
+            print(f"[Style Engine] Render resolution preserved: {width}x{height} ({_reason})")
     
     # NOTE: HeavyPoly hijacking disabled - now using standard Layout workspace
     # Code kept latent for future reference
@@ -1997,13 +2031,16 @@ class WM_OT_SetupWorkspace(bpy.types.Operator):
         if hasattr(scene.display, 'viewport_aa'):
             scene.display.viewport_aa = 'OFF'
         
-        # Ensure render resolution is set correctly
+        # Ensure render resolution is set correctly.
+        # In Gemini mode the resolution is owned by the scene camera sync and the
+        # Gemini aspect-ratio detection — never override it from the ai_resolution dropdown.
         props = context.scene.style_engine_props
-        res_str = props.ai_resolution
-        width, height = map(int, res_str.split('x'))
-        scene.render.resolution_x = width
-        scene.render.resolution_y = height
-        scene.render.resolution_percentage = 100  # Always 100% for SDXL native resolution
+        if getattr(props, 'ai_model', 'SDXL') != 'GEMINI':
+            res_str = props.ai_resolution
+            width, height = map(int, res_str.split('x'))
+            scene.render.resolution_x = width
+            scene.render.resolution_y = height
+        scene.render.resolution_percentage = 100
         
         # Set output format - JPEG for smaller file size (faster upload)
         scene.render.image_settings.file_format = 'JPEG'
@@ -2792,15 +2829,47 @@ def generate_ai_image_cloud(context):
                 from pathlib import Path
                 addon_dir = Path(__file__).parent
                 workflows_dir = addon_dir / "workflows" / "Image"
-                
-                # Select workflow based on alignment and remove-bg toggles
+
+                # Ensure blank.png exists on the server so that Reference workflow
+                # LoadImage nodes that are left at their default ("blank.png") always
+                # pass ComfyUI validation, even if the slot-disconnect logic misses
+                # an edge case. We upload once per generation from the bundled copy
+                # in templates/ so the path is always relative to the addon directory.
+                _blank_src = addon_dir / "templates" / "blank.png"
+                if _blank_src.exists():
+                    try:
+                        server_client.upload_image(str(_blank_src), overwrite=True)
+                        print(f"[GCS] ✓ blank.png uploaded to server")
+                    except Exception as _be:
+                        print(f"[GCS] ⚠️ blank.png upload failed (non-critical): {_be}")
+                else:
+                    print(f"[GCS] ⚠️ blank.png not found at {_blank_src}")
+
+                # Select workflow based on references, alignment, and remove-bg toggles
                 remove_bg = getattr(props, 'gemini_remove_bg', False)
-                if props.gemini_alignment:
+                def _gemini_ref_has_valid_file(img):
+                    if not img:
+                        return False
+                    fp = img.filepath
+                    if not fp:
+                        return False
+                    abs_fp = bpy.path.abspath(fp)
+                    return bool(abs_fp) and os.path.isfile(abs_fp)
+
+                has_gemini_refs = any(
+                    _gemini_ref_has_valid_file(getattr(props, f'gemini_ref{i}_image', None))
+                    for i in range(1, 6)
+                )
+
+                if has_gemini_refs:
+                    wf_name = "ImageNanoReferenceRB.json" if remove_bg else "ImageNanoReference.json"
+                elif props.gemini_alignment:
                     wf_name = "ImageNanoAlignmentRB.json" if remove_bg else "ImageNanoAlignment.json"
                 else:
                     wf_name = "ImageNanoTextRB.json" if remove_bg else "ImageNanoText.json"
                 gemini_wf_path = workflows_dir / wf_name
-                print(f"[GCS] Alignment {'ON' if props.gemini_alignment else 'OFF'}, RemoveBG {'ON' if remove_bg else 'OFF'} - using {wf_name}")
+                ref_label = f", Refs={'ON' if has_gemini_refs else 'OFF'}" if has_gemini_refs else ""
+                print(f"[GCS] Alignment {'ON' if props.gemini_alignment else 'OFF'}, RemoveBG {'ON' if remove_bg else 'OFF'}{ref_label} - using {wf_name}")
                 
                 if not gemini_wf_path.exists():
                     print(f"[GCS] {gemini_wf_path.name} not found")
@@ -2819,8 +2888,8 @@ def generate_ai_image_cloud(context):
                 instr_text = instr_block.as_string().strip() if instr_block else ""
                 workflow_json["65"]["inputs"]["value"] = instr_text
                 
-                # Alignment-specific patching
-                if props.gemini_alignment:
+                # Alignment-specific patching (also active for reference workflows which include Node 56)
+                if props.gemini_alignment or has_gemini_refs:
                     workflow_json["56"]["inputs"]["image"] = uploaded_filename
                     # Load spatial alignment text
                     alignment_file = addon_dir / "templates" / "spatial_alignment.txt"
@@ -2847,12 +2916,47 @@ def generate_ai_image_cloud(context):
                 computed_aspect = best_ratio[2]
                 workflow_json["50"]["inputs"]["aspect_ratio"] = computed_aspect
                 
+                # Upload Gemini reference images.
+                # Nodes 67-71 are LoadImage ref slots ONLY in ImageNanoReference[RB].json.
+                # In all other workflows (Text, Alignment, their RB variants) node 67 is
+                # InspyrenetRembg or simply absent — patching those IDs would corrupt or
+                # crash them. Guard this entire block with has_gemini_refs so it only
+                # runs when the Reference workflow was actually loaded.
+                gemini_ref_count = 0
+                if has_gemini_refs:
+                    ref_node_map = [
+                        ('gemini_ref1_image', '67'),
+                        ('gemini_ref2_image', '68'),
+                        ('gemini_ref3_image', '69'),
+                        ('gemini_ref4_image', '70'),
+                        ('gemini_ref5_image', '71'),
+                    ]
+                    for prop_name, node_id in ref_node_map:
+                        img = getattr(props, prop_name, None)
+                        abs_path = bpy.path.abspath(img.filepath) if (img and img.filepath) else ""
+                        if abs_path and os.path.isfile(abs_path):
+                            try:
+                                compressed = compress_image_for_upload(abs_path)
+                                resp = server_client.upload_image(str(compressed))
+                                workflow_json[node_id]["inputs"]["image"] = resp['name']
+                                gemini_ref_count += 1
+                                print(f"[GCS]   - Ref {prop_name}: {resp['name']}")
+                            except Exception as _e:
+                                print(f"[GCS]   - Ref {prop_name}: upload failed ({_e}), using blank.png")
+                                workflow_json[node_id]["inputs"]["image"] = "blank.png"
+                        else:
+                            # Slot is empty — reset to blank.png (valid, exists on server)
+                            workflow_json[node_id]["inputs"]["image"] = "blank.png"
+                            print(f"[GCS]   - Ref {prop_name}: empty → blank.png")
+
                 print(f"[GCS] Patched Gemini workflow:")
                 print(f"[GCS]   - Prompt: {raw_prompt[:60]}...")
                 print(f"[GCS]   - Instructions: {instr_text[:40]}..." if instr_text else "[GCS]   - Instructions: (none)")
                 print(f"[GCS]   - Temperature: {props.gemini_temperature}")
                 print(f"[GCS]   - Size: {props.gemini_image_size}")
                 print(f"[GCS]   - Aspect: {computed_aspect} (from {rw}x{rh})")
+                if gemini_ref_count > 0:
+                    print(f"[GCS]   - Reference images: {gemini_ref_count}")
                 
                 from . import progress_bar
                 
@@ -3679,24 +3783,42 @@ def on_generation_complete_server(context, success, result, error, workflow_type
         
         # Update camera background if main image was downloaded
         if main_image_downloaded:
-            # Reset visualization to COMBINED (final image) after generation
-            props = context.scene.style_engine_props
-            if hasattr(props, 'visualization_type'):
-                props.visualization_type = 'COMBINED'
-            
-            # Save to project library with new system
-            current_ai_path = temp_dir / "current_ai.png"
-            saved_path = save_generation_to_library(context, current_ai_path, backend='GCS')
-            
-            if saved_path:
-                print(f"[GCS] ✅ Generation saved to library")
-            
-            # Refresh camera background
-            refresh_ai_image()
-            print(f"[GCS] ✓ Camera background updated with new AI image")
-        
-        # Trigger next generation cycle if auto-generate is enabled
-        trigger_next_generation_cycle(context)
+            # Defer all ID property writes to the next safe main-loop tick.
+            # Writing to bpy ID data inside a timer/thread callback can be
+            # blocked by Blender when the context is temporarily restricted
+            # (e.g. during UI redraw or while rendering).
+            _current_ai_path = temp_dir / "current_ai.png"
+
+            def _deferred_post_download():
+                try:
+                    # Reset visualization to COMBINED (final image) after generation
+                    _props = context.scene.style_engine_props
+                    if hasattr(_props, 'visualization_type'):
+                        _props.visualization_type = 'COMBINED'
+
+                    # Save to project library
+                    saved_path = save_generation_to_library(context, _current_ai_path, backend='GCS')
+                    if saved_path:
+                        print(f"[GCS] ✅ Generation saved to library")
+
+                    # Refresh camera background
+                    refresh_ai_image()
+                    print(f"[GCS] ✓ Camera background updated with new AI image")
+
+                    # Trigger next generation cycle if auto-generate is enabled
+                    trigger_next_generation_cycle(context)
+                except Exception as _e:
+                    print(f"[GCS] Error in deferred post-download: {_e}")
+                    import traceback
+                    traceback.print_exc()
+                    trigger_next_generation_cycle(context)
+                return None
+
+            import bpy as _bpy
+            _bpy.app.timers.register(_deferred_post_download, first_interval=0.05)
+        else:
+            # No main image — still trigger next cycle
+            trigger_next_generation_cycle(context)
     
     except Exception as e:
         print(f"[GCS] Error in completion callback: {e}")
