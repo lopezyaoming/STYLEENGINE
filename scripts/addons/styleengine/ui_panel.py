@@ -461,7 +461,28 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         description="Expand or collapse the 3D from Multiview section",
         default=False
     )
-    
+
+    omni_control_type: bpy.props.EnumProperty(
+        name="Control Mode",
+        description="Spatial conditioning method sent to Hunyuan3D-Omni",
+        items=[
+            ('BBOX',  "Bounding Box", "Send normalised bounding box (fast, no extra export)"),
+            ('POINT', "Point Cloud",  "Export active mesh as a uniform point cloud (.ply)"),
+        ],
+        default='BBOX',
+    )
+
+    omni_mc_res: bpy.props.EnumProperty(
+        name="Mesh Quality",
+        description="Marching-cubes resolution used by Omni (higher = more detail, slower)",
+        items=[
+            ('256', "Fast",        "~200k faces — quick preview"),
+            ('384', "Balanced",    "~600k faces"),
+            ('512', "High Detail", "~1.5M faces — production quality"),
+        ],
+        default='512',
+    )
+
     show_groups: bpy.props.BoolProperty(
         name="Groups",
         description="Expand or collapse the groups section",
@@ -2313,6 +2334,116 @@ class WM_OT_Nano3DGenerate(bpy.types.Operator):
 
 OMNI_PORT = 8190
 
+
+def _has_pointcloud_exporter():
+    """
+    Point cloud export is handled internally via a pure-Python PLY writer —
+    no external addon required.  Always returns True so the UI warning is
+    never shown.
+    """
+    return True
+
+
+def _write_ply_pointcloud(mesh_obj, out_path):
+    """
+    Write the world-space vertices of mesh_obj to a binary-little-endian PLY
+    file at out_path.  No external addon required — pure Python + mathutils.
+    Returns out_path (Path) on success, raises on failure.
+    """
+    import struct
+    from pathlib import Path
+    from mathutils import Vector
+
+    verts = [mesh_obj.matrix_world @ v.co for v in mesh_obj.data.vertices]
+    n = len(verts)
+    header = (
+        "ply\n"
+        "format binary_little_endian 1.0\n"
+        f"element vertex {n}\n"
+        "property float x\n"
+        "property float y\n"
+        "property float z\n"
+        "end_header\n"
+    ).encode('ascii')
+
+    out = Path(out_path)
+    with out.open('wb') as f:
+        f.write(header)
+        for v in verts:
+            f.write(struct.pack('<fff', v.x, v.y, v.z))
+    return out
+
+
+def _export_mesh_as_pointcloud(obj, out_path):
+    """
+    Duplicate obj, apply a smooth remesh for uniform surface sampling, write
+    the resulting vertices as a binary PLY point cloud file (no addon needed),
+    then remove the duplicate.  The original object is never modified.
+
+    Returns out_path (Path) on success, or None on failure.
+    """
+    from pathlib import Path
+
+    original_active = bpy.context.view_layer.objects.active
+    original_selected = list(bpy.context.selected_objects)
+
+    try:
+        # --- 1. Duplicate the source mesh ---
+        bpy.ops.object.select_all(action='DESELECT')
+        obj.select_set(True)
+        bpy.context.view_layer.objects.active = obj
+        bpy.ops.object.duplicate()
+        temp_obj = bpy.context.active_object
+        print(f"[Omni] Duplicated '{obj.name}' → '{temp_obj.name}' for point cloud export")
+
+        # --- 2. Smooth remesh for uniform vertex distribution ---
+        # Use the data API (returns the modifier directly) to avoid index
+        # confusion with pre-existing Geometry Nodes or other modifiers.
+        remesh_mod = temp_obj.modifiers.new(name="OmniRemesh", type='REMESH')
+        if remesh_mod is None or remesh_mod.type != 'REMESH':
+            raise RuntimeError("Failed to add REMESH modifier to duplicate")
+        remesh_mod.mode = 'SMOOTH'
+        remesh_mod.octree_depth = 8
+        remesh_mod.use_remove_disconnected = False
+        print(f"[Omni] Added Smooth Remesh (depth=8)")
+
+        # --- 3. Apply all modifiers so we have a plain mesh to sample ---
+        bpy.ops.object.convert(target='MESH')
+        print(f"[Omni] Applied modifiers — {len(temp_obj.data.vertices)} vertices")
+
+        # --- 4. Write vertices directly to PLY (no addon dependency) ---
+        ply_path = _write_ply_pointcloud(temp_obj, out_path)
+        print(f"[Omni] Exported point cloud: {ply_path.name} ({ply_path.stat().st_size // 1024} KB)")
+
+        return ply_path
+
+    except Exception as e:
+        print(f"[Omni] Point cloud export error: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+    finally:
+        # --- 5. Always clean up the duplicate ---
+        try:
+            temp_ref = bpy.context.active_object
+            if temp_ref and temp_ref != obj:
+                bpy.data.objects.remove(temp_ref, do_unlink=True)
+        except Exception:
+            pass
+        # Restore original selection state
+        bpy.ops.object.select_all(action='DESELECT')
+        for o in original_selected:
+            try:
+                o.select_set(True)
+            except Exception:
+                pass
+        try:
+            bpy.context.view_layer.objects.active = original_active
+        except Exception:
+            pass
+
+
 def _get_omni_url():
     """Derive the Omni server URL from addon preferences (same host as ComfyUI, port 8190)."""
     from urllib.parse import urlparse
@@ -2358,11 +2489,7 @@ class WM_OT_OmniGenerate(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        if not context.active_object or context.active_object.type != 'MESH':
-            return False
-        from . import workspace_setup
-        temp_dir = workspace_setup.get_temp_directory(context)
-        return (temp_dir / "current_ai.png").exists()
+        return bool(context.active_object and context.active_object.type == 'MESH')
 
     def execute(self, context):
         import json
@@ -2382,6 +2509,10 @@ class WM_OT_OmniGenerate(bpy.types.Operator):
 
         temp_dir = workspace_setup.get_temp_directory(context)
         image_path = temp_dir / "current_ai.png"
+
+        if not image_path.exists():
+            self.report({'ERROR'}, "No AI image found — generate an image first (Generate Image button)")
+            return {'CANCELLED'}
 
         print(f"[Omni] ============================================")
         print(f"[Omni] STARTING OMNI 3D GENERATION")
@@ -2408,6 +2539,25 @@ class WM_OT_OmniGenerate(bpy.types.Operator):
         proxy_name = obj.name
         print(f"[Omni] Proxy bbox center: {proxy_bbox_center}, max_dim: {proxy_max_dim:.3f}")
 
+        # Read new Omni settings from scene properties
+        props = context.scene.style_engine_props
+        omni_control = getattr(props, 'omni_control_type', 'BBOX')
+        omni_mc_res  = getattr(props, 'omni_mc_res', '512')
+
+        print(f"[Omni] Control mode: {omni_control} | Quality (mc_res): {omni_mc_res}")
+
+        # --- Point cloud: validate exporter, build .ply guide file ---
+        guide_ply_data = None
+        if omni_control == 'POINT':
+            ply_path = temp_dir / f"omni_pc_{uuid.uuid4().hex[:8]}.ply"
+            result_path = _export_mesh_as_pointcloud(obj, ply_path)
+            if result_path is None:
+                self.report({'ERROR'}, "Point cloud export failed — check console for details")
+                return {'CANCELLED'}
+            with open(str(result_path), 'rb') as f:
+                guide_ply_data = f.read()
+            print(f"[Omni] Point cloud ready: {result_path.name} ({len(guide_ply_data) / 1024:.1f} KB)")
+
         # Read image
         with open(str(image_path), 'rb') as f:
             image_data = f.read()
@@ -2423,13 +2573,32 @@ class WM_OT_OmniGenerate(bpy.types.Operator):
         body_parts.append(b'')
         body_parts.append(image_data)
 
-        # Bbox form fields
-        field_names = ['x_min', 'y_min', 'z_min', 'x_max', 'y_max', 'z_max']
-        for name, val in zip(field_names, bbox):
+        # Spatial conditioning — bbox fields OR point cloud guide file
+        if omni_control == 'BBOX':
+            field_names = ['x_min', 'y_min', 'z_min', 'x_max', 'y_max', 'z_max']
+            for name, val in zip(field_names, bbox):
+                body_parts.append(f'--{boundary}'.encode())
+                body_parts.append(f'Content-Disposition: form-data; name="{name}"'.encode())
+                body_parts.append(b'')
+                body_parts.append(str(val).encode())
+        elif omni_control == 'POINT' and guide_ply_data is not None:
             body_parts.append(f'--{boundary}'.encode())
-            body_parts.append(f'Content-Disposition: form-data; name="{name}"'.encode())
+            body_parts.append(b'Content-Disposition: form-data; name="guide_file"; filename="guide.ply"')
+            body_parts.append(b'Content-Type: application/octet-stream')
             body_parts.append(b'')
-            body_parts.append(str(val).encode())
+            body_parts.append(guide_ply_data)
+
+        # control_type scalar field
+        body_parts.append(f'--{boundary}'.encode())
+        body_parts.append(b'Content-Disposition: form-data; name="control_type"')
+        body_parts.append(b'')
+        body_parts.append(omni_control.lower().encode())
+
+        # mc_res scalar field
+        body_parts.append(f'--{boundary}'.encode())
+        body_parts.append(b'Content-Disposition: form-data; name="mc_res"')
+        body_parts.append(b'')
+        body_parts.append(omni_mc_res.encode())
 
         body_parts.append(f'--{boundary}--'.encode())
         body_parts.append(b'')
@@ -5686,8 +5855,24 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                 col.operator("style_engine.create_textured_object", text="Generate Textured Mesh", icon='SHADING_TEXTURE')
                 col.operator("style_engine.uv_texture", text="UV Texture", icon='UV')
                 col.operator("style_engine.nano_3d_generate", text="Nano", icon='OUTLINER_OB_LIGHT')
-                col.operator("style_engine.omni_generate", text="Omni Mesh", icon='MESH_CUBE')
-                col.operator("style_engine.omni_bbox_debug", text="Calculate BBox", icon='SNAP_VOLUME')
+
+                # ── Omni sub-section ──────────────────────────────────────
+                omni_col = single_box.column(align=True)
+                omni_col.scale_y = 1.1
+                omni_col.prop(style_props, "omni_control_type", text="")
+                omni_col.prop(style_props, "omni_mc_res", text="Quality")
+
+                # Warning when Point Cloud selected but exporter is absent
+                if style_props.omni_control_type == 'POINT' and not _has_pointcloud_exporter():
+                    warn = single_box.row()
+                    warn.alert = True
+                    warn.label(text="PointCloud Exporter not detected", icon='ERROR')
+
+                omni_col.operator("style_engine.omni_generate", text="Omni Mesh", icon='MESH_CUBE')
+
+                # BBox debug is only meaningful in bbox mode
+                if style_props.omni_control_type == 'BBOX':
+                    omni_col.operator("style_engine.omni_bbox_debug", text="Calculate BBox", icon='SNAP_VOLUME')
 
             # ────────────────────────────────────────────────────────────
             # 3D FROM MULTIVIEW SUB-CATEGORY (Collapsible, closed by default)

@@ -129,7 +129,7 @@ def ensure_project_library(context):
     (project_lib / "Models").mkdir(parents=True, exist_ok=True)
     (project_lib / "temp").mkdir(parents=True, exist_ok=True)
     
-    print(f"[Style Engine] 📁 Project library: {project_lib}")
+    # project_lib path logged at debug level only
     
     return project_lib
 
