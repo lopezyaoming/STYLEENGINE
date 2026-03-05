@@ -3021,16 +3021,17 @@ def generate_ai_image_cloud(context):
             
             # Determine if we should use reference image workflow
             use_ref_images = ref_upload_count > 0
-            
+            sdxl_remove_bg = getattr(props, 'sdxl_remove_bg', False)
+
             if ref_upload_count > 0:
                 print(f"[GCS] ✓ Uploaded {ref_upload_count} reference images")
-                print(f"[GCS] Using ImageRef workflow (with IPAdapter)")
+                print(f"[GCS] Using ImageRef workflow (with IPAdapter), RemoveBG={'ON' if sdxl_remove_bg else 'OFF'}")
             else:
-                print(f"[GCS] No reference images - using basic Image workflow (faster)")
+                print(f"[GCS] No reference images - using basic Image workflow, RemoveBG={'ON' if sdxl_remove_bg else 'OFF'}")
             print(f"[GCS]")
-            
-            # Load appropriate workflow JSON (Image.json or ImageRef.json)
-            workflow_json = load_workflow_json_for_gcs(use_ref_images=use_ref_images)
+
+            # Load appropriate workflow JSON
+            workflow_json = load_workflow_json_for_gcs(use_ref_images=use_ref_images, remove_bg=sdxl_remove_bg)
             if not workflow_json:
                 print("[GCS] Failed to load workflow JSON")
                 return
@@ -3581,38 +3582,41 @@ def load_workflow_json_for_server(workflow_type):
         return None
 
 
-def load_workflow_json_for_gcs(use_ref_images=False):
+def load_workflow_json_for_gcs(use_ref_images=False, remove_bg=False):
     """
     Load workflow JSON file for GCS mode (self-hosted ComfyUI).
     
-    Selects the appropriate workflow based on whether reference images are used:
-    - Image/Image.json: Basic workflow (faster, no IPAdapter reference image nodes)
-    - Image/ImageRef.json: Full workflow with IPAdapter reference image support
-    
-    Both workflows include:
-    - SaveImage nodes for Canny (133) and Depth (134) preview images
-    - VAEEncode (132) for img2img workflow
-    - Texture control (135) for denoise strength (0=keep render, 1=full AI)
-    - Dual LoRa support (Node 136 → Node 34 chain)
-    
+    Selects the appropriate workflow based on whether reference images are used
+    and whether background removal is requested:
+    - Image/Image.json:       Basic workflow (no refs, no rembg)
+    - Image/ImageRB.json:     Basic workflow + InspyrenetRembg
+    - Image/ImageRef.json:    IPAdapter reference images (no rembg)
+    - Image/ImageRefRB.json:  IPAdapter reference images + InspyrenetRembg
+
     Args:
-        use_ref_images: If True, load ImageRef.json (with IPAdapter). 
-                        If False, load Image.json (basic, faster).
-    
+        use_ref_images: If True, use the ImageRef variant (with IPAdapter).
+        remove_bg:      If True, use the RB variant (adds rembg node).
+
     Returns:
         dict: Workflow JSON or None if failed
     """
     import json
     from pathlib import Path
-    
+
     # Determine workflow file path - workflows folder is inside the addon directory
     addon_dir = Path(__file__).parent  # This is scripts/addons/styleengine/
     workflows_dir = addon_dir / "workflows" / "Image"
-    
-    # Select workflow based on reference image usage
-    if use_ref_images:
+
+    # Select workflow based on reference image usage and remove-bg flag
+    if use_ref_images and remove_bg:
+        workflow_file = workflows_dir / "ImageRefRB.json"
+        workflow_desc = "ImageRefRB.json (IPAdapter + rembg)"
+    elif use_ref_images:
         workflow_file = workflows_dir / "ImageRef.json"
         workflow_desc = "ImageRef.json (with IPAdapter reference images)"
+    elif remove_bg:
+        workflow_file = workflows_dir / "ImageRB.json"
+        workflow_desc = "ImageRB.json (basic + rembg)"
     else:
         workflow_file = workflows_dir / "Image.json"
         workflow_desc = "Image.json (basic, faster)"

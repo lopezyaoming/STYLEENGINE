@@ -1388,6 +1388,11 @@ class STYLEENGINE_MT_pie_main(Menu):
             row.prop(style_props, "gemini_alignment", text="Alignment", toggle=True, icon='CON_LOCLIKE')
             row.prop(style_props, "gemini_remove_bg", text="Remove BG", toggle=True, icon='IMAGE_ALPHA')
         else:
+            # SDXL: Remove BG toggle
+            rembg_row = col.row(align=True)
+            rembg_row.scale_y = 1.5
+            rembg_row.prop(style_props, "sdxl_remove_bg", text="Remove BG", toggle=True, icon='IMAGE_ALPHA')
+
             # SDXL: Influence sliders
             influence_box = col.box()
             influence_col = influence_box.column(align=True)

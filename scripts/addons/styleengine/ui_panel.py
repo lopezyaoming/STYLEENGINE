@@ -355,6 +355,12 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         description="Enable spatial alignment (uses viewport render as reference image)",
         default=True
     )
+    sdxl_remove_bg: bpy.props.BoolProperty(
+        name="Remove Background",
+        description="Remove background from SDXL output image (uses InspyrenetRembg)",
+        default=False
+    )
+
     gemini_remove_bg: bpy.props.BoolProperty(
         name="Remove Background",
         description="Remove background from Gemini output image (uses InspyrenetRembg)",
@@ -468,6 +474,7 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         items=[
             ('BBOX',  "Bounding Box", "Send normalised bounding box (fast, no extra export)"),
             ('POINT', "Point Cloud",  "Export active mesh as a uniform point cloud (.ply)"),
+            ('VOXEL', "Voxel Mesh",   "Export remeshed watertight mesh as a .ply guide"),
         ],
         default='BBOX',
     )
@@ -2370,8 +2377,123 @@ def _write_ply_pointcloud(mesh_obj, out_path):
     with out.open('wb') as f:
         f.write(header)
         for v in verts:
-            f.write(struct.pack('<fff', v.x, v.y, v.z))
+            # Convert Blender Z-up → Y-up (Omni's expected convention):
+            #   X stays,  Blender-Z → Y,  Blender-Y → -Z
+            f.write(struct.pack('<fff', v.x, v.z, -v.y))
     return out
+
+
+def _write_ply_mesh(mesh_obj, out_path):
+    """
+    Write the world-space geometry of mesh_obj (vertices + triangulated faces) to
+    a binary-little-endian PLY file.  Coordinates are kept in Blender's native
+    Z-up space because omni_server.py's infer_voxel() applies its own -90° X-axis
+    rotation to convert Z-up → Y-up internally.
+    Returns out_path (Path) on success, raises on failure.
+    """
+    import struct
+    from pathlib import Path
+
+    mesh = mesh_obj.data
+    mw = mesh_obj.matrix_world
+
+    # Collect world-space vertices
+    verts = [mw @ v.co for v in mesh.vertices]
+
+    # Collect triangulated faces (loop_triangles is always triangle-based)
+    mesh.calc_loop_triangles()
+    tris = [(lt.vertices[0], lt.vertices[1], lt.vertices[2]) for lt in mesh.loop_triangles]
+
+    n_v = len(verts)
+    n_f = len(tris)
+
+    header = (
+        "ply\n"
+        "format binary_little_endian 1.0\n"
+        f"element vertex {n_v}\n"
+        "property float x\n"
+        "property float y\n"
+        "property float z\n"
+        f"element face {n_f}\n"
+        "property list uchar int vertex_indices\n"
+        "end_header\n"
+    ).encode('ascii')
+
+    out = Path(out_path)
+    with out.open('wb') as f:
+        f.write(header)
+        for v in verts:
+            f.write(struct.pack('<fff', v.x, v.y, v.z))
+        for tri in tris:
+            f.write(struct.pack('<Biii', 3, tri[0], tri[1], tri[2]))
+    return out
+
+
+def _export_mesh_as_voxel(obj, out_path):
+    """
+    Duplicate obj, apply a smooth remesh to make the geometry watertight and
+    uniform, then export as a full mesh PLY (vertices + faces) for Omni's voxel
+    conditioning path.  The original object is never modified.
+
+    Returns out_path (Path) on success, or None on failure.
+    """
+    from pathlib import Path
+
+    original_active = bpy.context.view_layer.objects.active
+    original_selected = list(bpy.context.selected_objects)
+
+    try:
+        # --- 1. Duplicate the source mesh ---
+        bpy.ops.object.select_all(action='DESELECT')
+        obj.select_set(True)
+        bpy.context.view_layer.objects.active = obj
+        bpy.ops.object.duplicate()
+        temp_obj = bpy.context.active_object
+        print(f"[Omni] Duplicated '{obj.name}' → '{temp_obj.name}' for voxel export")
+
+        # --- 2. Smooth remesh for watertight, uniform geometry ---
+        remesh_mod = temp_obj.modifiers.new(name="OmniRemesh", type='REMESH')
+        if remesh_mod is None or remesh_mod.type != 'REMESH':
+            raise RuntimeError("Failed to add REMESH modifier to duplicate")
+        remesh_mod.mode = 'SMOOTH'
+        remesh_mod.octree_depth = 8
+        remesh_mod.use_remove_disconnected = True
+        print(f"[Omni] Added Smooth Remesh (depth=8, watertight)")
+
+        # --- 3. Apply all modifiers ---
+        bpy.ops.object.convert(target='MESH')
+        print(f"[Omni] Applied modifiers — {len(temp_obj.data.vertices)} vertices, "
+              f"{len(temp_obj.data.polygons)} faces")
+
+        # --- 4. Write mesh PLY (Z-up; server applies -90° X rotation itself) ---
+        ply_path = _write_ply_mesh(temp_obj, out_path)
+        print(f"[Omni] Exported voxel mesh: {ply_path.name} ({ply_path.stat().st_size // 1024} KB)")
+
+        return ply_path
+
+    except Exception as e:
+        print(f"[Omni] Voxel mesh export error: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+    finally:
+        try:
+            temp_ref = bpy.context.active_object
+            if temp_ref and temp_ref != obj:
+                bpy.data.objects.remove(temp_ref, do_unlink=True)
+        except Exception:
+            pass
+        bpy.ops.object.select_all(action='DESELECT')
+        for o in original_selected:
+            try:
+                o.select_set(True)
+            except Exception:
+                pass
+        try:
+            bpy.context.view_layer.objects.active = original_active
+        except Exception:
+            pass
 
 
 def _export_mesh_as_pointcloud(obj, out_path):
@@ -2546,7 +2668,7 @@ class WM_OT_OmniGenerate(bpy.types.Operator):
 
         print(f"[Omni] Control mode: {omni_control} | Quality (mc_res): {omni_mc_res}")
 
-        # --- Point cloud: validate exporter, build .ply guide file ---
+        # --- Guide file: point cloud or voxel mesh ---
         guide_ply_data = None
         if omni_control == 'POINT':
             ply_path = temp_dir / f"omni_pc_{uuid.uuid4().hex[:8]}.ply"
@@ -2557,6 +2679,16 @@ class WM_OT_OmniGenerate(bpy.types.Operator):
             with open(str(result_path), 'rb') as f:
                 guide_ply_data = f.read()
             print(f"[Omni] Point cloud ready: {result_path.name} ({len(guide_ply_data) / 1024:.1f} KB)")
+
+        elif omni_control == 'VOXEL':
+            ply_path = temp_dir / f"omni_vox_{uuid.uuid4().hex[:8]}.ply"
+            result_path = _export_mesh_as_voxel(obj, ply_path)
+            if result_path is None:
+                self.report({'ERROR'}, "Voxel mesh export failed — check console for details")
+                return {'CANCELLED'}
+            with open(str(result_path), 'rb') as f:
+                guide_ply_data = f.read()
+            print(f"[Omni] Voxel mesh ready: {result_path.name} ({len(guide_ply_data) / 1024:.1f} KB)")
 
         # Read image
         with open(str(image_path), 'rb') as f:
@@ -2573,7 +2705,7 @@ class WM_OT_OmniGenerate(bpy.types.Operator):
         body_parts.append(b'')
         body_parts.append(image_data)
 
-        # Spatial conditioning — bbox fields OR point cloud guide file
+        # Spatial conditioning — bbox fields OR guide file (point cloud / voxel mesh)
         if omni_control == 'BBOX':
             field_names = ['x_min', 'y_min', 'z_min', 'x_max', 'y_max', 'z_max']
             for name, val in zip(field_names, bbox):
@@ -2581,7 +2713,7 @@ class WM_OT_OmniGenerate(bpy.types.Operator):
                 body_parts.append(f'Content-Disposition: form-data; name="{name}"'.encode())
                 body_parts.append(b'')
                 body_parts.append(str(val).encode())
-        elif omni_control == 'POINT' and guide_ply_data is not None:
+        elif omni_control in ('POINT', 'VOXEL') and guide_ply_data is not None:
             body_parts.append(f'--{boundary}'.encode())
             body_parts.append(b'Content-Disposition: form-data; name="guide_file"; filename="guide.ply"')
             body_parts.append(b'Content-Type: application/octet-stream')
@@ -5775,6 +5907,13 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                         info_row.scale_y = 0.7
                         info_row.label(text=", ".join(active_loras), icon='CHECKMARK')
             
+            # Remove BG toggle (SDXL only)
+            if style_props.ai_model != 'GEMINI':
+                img_gen_box.separator()
+                rembg_row = img_gen_box.row(align=True)
+                rembg_row.scale_y = 1.3
+                rembg_row.prop(style_props, "sdxl_remove_bg", text="Remove BG", toggle=True, icon='IMAGE_ALPHA')
+
             # ────────────────────────────────────────────────────────────
             # PROJECT TEXTURE & PBR BUTTONS
             # ────────────────────────────────────────────────────────────
@@ -5860,7 +5999,6 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                 omni_col = single_box.column(align=True)
                 omni_col.scale_y = 1.1
                 omni_col.prop(style_props, "omni_control_type", text="")
-                omni_col.prop(style_props, "omni_mc_res", text="Quality")
 
                 # Warning when Point Cloud selected but exporter is absent
                 if style_props.omni_control_type == 'POINT' and not _has_pointcloud_exporter():
