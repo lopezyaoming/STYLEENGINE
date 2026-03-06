@@ -490,6 +490,20 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         default='512',
     )
 
+    omni_guidance_scale: bpy.props.FloatProperty(
+        name="Guidance Scale",
+        description=(
+            "Controls how strictly the 3D output adheres to the spatial conditioning. "
+            "Low (1-3): smoother, more creative. High (7+): strict adherence, may produce "
+            "'chewed-up' geometry. Default 4.5 is a balanced midpoint."
+        ),
+        default=4.5,
+        min=1.0,
+        max=10.0,
+        step=50,
+        precision=1,
+    )
+
     show_groups: bpy.props.BoolProperty(
         name="Groups",
         description="Expand or collapse the groups section",
@@ -2663,10 +2677,14 @@ class WM_OT_OmniGenerate(bpy.types.Operator):
 
         # Read new Omni settings from scene properties
         props = context.scene.style_engine_props
-        omni_control = getattr(props, 'omni_control_type', 'BBOX')
-        omni_mc_res  = getattr(props, 'omni_mc_res', '512')
+        omni_control       = getattr(props, 'omni_control_type',    'BBOX')
+        omni_mc_res        = getattr(props, 'omni_mc_res',           '512')
+        omni_guidance      = getattr(props, 'omni_guidance_scale',    4.5)
+        omni_use_ema       = getattr(props, 'omni_use_ema',          False)
+        omni_flashvdm      = getattr(props, 'omni_flashvdm',         False)
 
-        print(f"[Omni] Control mode: {omni_control} | Quality (mc_res): {omni_mc_res}")
+        print(f"[Omni] Control mode: {omni_control} | Guidance: {omni_guidance:.1f} | "
+              f"EMA: {omni_use_ema} | FlashVDM: {omni_flashvdm}")
 
         # --- Guide file: point cloud or voxel mesh ---
         guide_ply_data = None
@@ -2731,6 +2749,24 @@ class WM_OT_OmniGenerate(bpy.types.Operator):
         body_parts.append(b'Content-Disposition: form-data; name="mc_res"')
         body_parts.append(b'')
         body_parts.append(omni_mc_res.encode())
+
+        # guidance_scale scalar field
+        body_parts.append(f'--{boundary}'.encode())
+        body_parts.append(b'Content-Disposition: form-data; name="guidance_scale"')
+        body_parts.append(b'')
+        body_parts.append(f"{omni_guidance:.1f}".encode())
+
+        # use_ema flag
+        body_parts.append(f'--{boundary}'.encode())
+        body_parts.append(b'Content-Disposition: form-data; name="use_ema"')
+        body_parts.append(b'')
+        body_parts.append(b'true' if omni_use_ema else b'false')
+
+        # flashvdm flag
+        body_parts.append(f'--{boundary}'.encode())
+        body_parts.append(b'Content-Disposition: form-data; name="flashvdm"')
+        body_parts.append(b'')
+        body_parts.append(b'true' if omni_flashvdm else b'false')
 
         body_parts.append(f'--{boundary}--'.encode())
         body_parts.append(b'')
@@ -5999,6 +6035,7 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                 omni_col = single_box.column(align=True)
                 omni_col.scale_y = 1.1
                 omni_col.prop(style_props, "omni_control_type", text="")
+                omni_col.prop(style_props, "omni_guidance_scale", text="Guidance", slider=True)
 
                 # Warning when Point Cloud selected but exporter is absent
                 if style_props.omni_control_type == 'POINT' and not _has_pointcloud_exporter():

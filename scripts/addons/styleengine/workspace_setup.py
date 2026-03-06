@@ -304,50 +304,32 @@ def get_generation_list(context):
 def load_generation_to_current(context, generation_path):
     """
     Load a specific generation to current_ai.png for viewing/projection.
-    
+    Writes exclusively to temp_dir/current_ai.png — the single canonical path
+    that Blender's image datablock tracks.
+
     Args:
         context: Blender context
         generation_path: Path to the generation to load
-    
+
     Returns:
         bool: True if successful
     """
     import shutil
-    
+
     if not generation_path.exists():
         print(f"[Style Engine] ⚠️ Generation not found: {generation_path}")
         return False
-    
-    # Determine current_ai.png location
-    project_lib = get_project_library(context)
-    
-    if project_lib:
-        # Saved .blend - use project library
-        current_ai_path = project_lib / "current_ai.png"
-    else:
-        # Unsaved - use session temp
-        import tempfile
-        session_id = get_session_id()
-        session_dir = Path(tempfile.gettempdir()) / "blender_styleengine" / "sessions" / session_id
-        session_dir.mkdir(parents=True, exist_ok=True)
-        current_ai_path = session_dir / "current_ai.png"
-    
-    # Also update legacy temp directory for compatibility
+
     temp_dir = get_temp_directory(context)
     temp_dir.mkdir(parents=True, exist_ok=True)
-    legacy_current_ai = temp_dir / "current_ai.png"
-    
+    current_ai_path = temp_dir / "current_ai.png"
+
     try:
-        # Copy generation to current_ai.png
         shutil.copy2(generation_path, current_ai_path)
-        shutil.copy2(generation_path, legacy_current_ai)
-        
-        # Refresh the image in Blender
         refresh_ai_image()
-        
         print(f"[Style Engine] 📷 Loaded generation: {generation_path.name}")
         return True
-    
+
     except Exception as e:
         print(f"[Style Engine] ❌ Failed to load generation: {e}")
         return False
@@ -654,28 +636,12 @@ def save_generation_to_library(context, source_image_path, backend='unknown'):
     except Exception as e:
         print(f"[Style Engine] ❌ Failed to save generation: {e}")
         return None
-    
-    # Update current_ai.png in the appropriate location
-    if bpy.data.is_saved:
-        # Project library
-        project_lib = get_project_library(context)
-        if project_lib:
-            current_ai_path = project_lib / "current_ai.png"
-            try:
-                shutil.copy2(source_image_path, current_ai_path)
-            except Exception as e:
-                print(f"[Style Engine] ⚠️ Failed to update current_ai.png: {e}")
-    else:
-        # Session temp
-        import tempfile
-        session_id = get_session_id()
-        session_dir = Path(tempfile.gettempdir()) / "blender_styleengine" / "sessions" / session_id
-        session_dir.mkdir(parents=True, exist_ok=True)
-        current_ai_path = session_dir / "current_ai.png"
-        try:
-            shutil.copy2(source_image_path, current_ai_path)
-        except Exception as e:
-            print(f"[Style Engine] ⚠️ Failed to update current_ai.png: {e}")
+
+    # Note: current_ai.png is NOT duplicated here.
+    # The download callback always writes directly to temp_dir/current_ai.png,
+    # which is the single canonical path that Blender's datablock tracks.
+    # Maintaining a second copy under project_lib/ or session_dir/ was the
+    # source of stale-image bugs when filepath_raw pointed to temp_dir.
     
     # Also save to output_path if set (user-specified backup location)
     props = context.scene.style_engine_props
@@ -943,45 +909,83 @@ def compress_image_for_upload(image_path, max_side=1920):
         return Path(image_path)
 
 
-def refresh_ai_image():
+def _reattach_camera_background(img):
     """
-    Reload current_ai.png in Blender when called.
-    OPTIMIZED: Called only when new image arrives (on_generation_complete), not on a timer.
-    This eliminates wasteful file system checks every 2 seconds.
+    Attach a Blender image datablock to the ai_camera background slot.
+    Called when the 'current_ai.png' datablock was lost and had to be re-created.
     """
     try:
-        # Get temp directory and image path
+        ai_camera_obj = bpy.data.objects.get("ai_camera")
+        if ai_camera_obj is None:
+            return
+        cam_data = ai_camera_obj.data
+        cam_data.show_background_images = True
+        if len(cam_data.background_images) > 0:
+            bg = cam_data.background_images[0]
+        else:
+            bg = cam_data.background_images.new()
+        bg.image = img
+        bg.display_depth = 'FRONT'
+        bg.frame_method = 'STRETCH'
+        print("[Style Engine] ✓ Re-attached current_ai.png to ai_camera background")
+    except Exception as e:
+        print(f"[Style Engine] Warning: Could not re-attach camera background: {e}")
+
+
+def refresh_ai_image():
+    """
+    Reload current_ai.png in Blender's image datablock so the camera background
+    shows the latest generation.
+
+    Robust against:
+    - filepath_raw drifting after a temp-dir move (re-asserts the canonical path)
+    - datablock being lost after Undo or manual deletion (re-creates and re-attaches)
+    - GPU texture not invalidating (calls img.update() after reload)
+    """
+    try:
+        # Always read from the locked temp_dir — this is the one canonical location
         temp_dir = get_temp_directory(bpy.context)
         img_path = temp_dir / "current_ai.png"
-        
-        # Check if file exists
+
         if not img_path.exists():
-            print(f"[Style Engine] Warning: Image not found at {img_path}")
+            print(f"[Style Engine] Warning: current_ai.png not found at {img_path}")
             return
-        
-        # Reload the image if it exists in Blender
+
+        canonical = str(img_path)
+
         if "current_ai.png" in bpy.data.images:
             img = bpy.data.images["current_ai.png"]
+
+            # Re-assert the path in case it drifted (e.g. after a workspace reset
+            # that moved the temp directory to a new location)
+            if img.filepath_raw != canonical:
+                print(f"[Style Engine] ↩ filepath_raw updated: {img.filepath_raw} → {canonical}")
+                img.filepath_raw = canonical
+
             img.reload()
-            
-            # Redraw ALL 3D viewports across ALL windows/screens
-            # Using only bpy.context.screen can miss viewports if the user
-            # switched workspaces or the callback runs in a different context
-            try:
-                for window in bpy.context.window_manager.windows:
-                    for area in window.screen.areas:
-                        if area.type == 'VIEW_3D':
-                            area.tag_redraw()
-            except Exception:
-                # Fallback: at minimum redraw current screen
-                for area in bpy.context.screen.areas:
+            img.update()  # ensures GPU texture is invalidated
+        else:
+            # Datablock was lost (Undo, user deleted it, etc.) — recover it
+            print("[Style Engine] ⚠ current_ai.png datablock lost — re-loading from disk")
+            img = bpy.data.images.load(canonical, check_existing=False)
+            img.name = "current_ai.png"
+            img.filepath_raw = canonical
+            img.update()
+            _reattach_camera_background(img)
+
+        # Tag all 3-D viewports for redraw across every window
+        try:
+            for window in bpy.context.window_manager.windows:
+                for area in window.screen.areas:
                     if area.type == 'VIEW_3D':
                         area.tag_redraw()
-            
-            print(f"[Style Engine] ✓ Image reloaded: {os.path.basename(img_path)}")
-        else:
-            print(f"[Style Engine] Warning: Image 'current_ai.png' not in Blender data")
-    
+        except Exception:
+            for area in bpy.context.screen.areas:
+                if area.type == 'VIEW_3D':
+                    area.tag_redraw()
+
+        print(f"[Style Engine] ✓ Image reloaded: {os.path.basename(img_path)}")
+
     except Exception as e:
         print(f"[Style Engine] Error reloading image: {e}")
 
@@ -3787,21 +3791,22 @@ def on_generation_complete_server(context, success, result, error, workflow_type
         
         # Update camera background if main image was downloaded
         if main_image_downloaded:
-            # Defer all ID property writes to the next safe main-loop tick.
-            # Writing to bpy ID data inside a timer/thread callback can be
-            # blocked by Blender when the context is temporarily restricted
-            # (e.g. during UI redraw or while rendering).
+            # Defer all ID-data writes to the next safe main-loop tick.
+            # - 'context' captured by closure may be stale/restricted by the time
+            #   the timer fires, so we use bpy.context inside the callback instead.
+            # - _current_ai_path is a plain Path value (safe to close over).
             _current_ai_path = temp_dir / "current_ai.png"
 
             def _deferred_post_download():
                 try:
+                    _ctx = bpy.context  # fresh, safe context at timer-fire time
                     # Reset visualization to COMBINED (final image) after generation
-                    _props = context.scene.style_engine_props
+                    _props = _ctx.scene.style_engine_props
                     if hasattr(_props, 'visualization_type'):
                         _props.visualization_type = 'COMBINED'
 
-                    # Save to project library
-                    saved_path = save_generation_to_library(context, _current_ai_path, backend='GCS')
+                    # Save timestamped copy to project library
+                    saved_path = save_generation_to_library(_ctx, _current_ai_path, backend='GCS')
                     if saved_path:
                         print(f"[GCS] ✅ Generation saved to library")
 
@@ -3810,16 +3815,15 @@ def on_generation_complete_server(context, success, result, error, workflow_type
                     print(f"[GCS] ✓ Camera background updated with new AI image")
 
                     # Trigger next generation cycle if auto-generate is enabled
-                    trigger_next_generation_cycle(context)
+                    trigger_next_generation_cycle(_ctx)
                 except Exception as _e:
                     print(f"[GCS] Error in deferred post-download: {_e}")
                     import traceback
                     traceback.print_exc()
-                    trigger_next_generation_cycle(context)
+                    trigger_next_generation_cycle(bpy.context)
                 return None
 
-            import bpy as _bpy
-            _bpy.app.timers.register(_deferred_post_download, first_interval=0.05)
+            bpy.app.timers.register(_deferred_post_download, first_interval=0.05)
         else:
             # No main image — still trigger next cycle
             trigger_next_generation_cycle(context)
