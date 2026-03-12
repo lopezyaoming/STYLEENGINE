@@ -61,6 +61,40 @@ class SE_OT_generate_ai_quick(Operator):
             return {'CANCELLED'}
 
 
+class SE_OT_refine_current_image(Operator):
+    """Refine current_ai.png without re-rendering the 3D viewport"""
+    bl_idname = "style_engine.refine_current_image"
+    bl_label = "Refine Current Image"
+    bl_description = (
+        "Use the current AI image as input instead of re-rendering. "
+        "Iteratively refine an existing generation or uploaded image."
+    )
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        from pathlib import Path
+        import tempfile, os
+        temp_dir = Path(tempfile.gettempdir()) / "blender_styleengine" / "temp"
+        # Try to resolve via workspace_setup for robustness
+        try:
+            from . import workspace_setup
+            td = workspace_setup.get_temp_directory(context)
+            return (td / "current_ai.png").exists()
+        except Exception:
+            return (temp_dir / "current_ai.png").exists()
+
+    def execute(self, context):
+        try:
+            from . import workspace_setup
+            workspace_setup.generate_ai_image_cloud(context, refine_mode=True)
+            self.report({'INFO'}, "Refine started!")
+            return {'FINISHED'}
+        except Exception as e:
+            self.report({'ERROR'}, f"Refine failed: {e}")
+            return {'CANCELLED'}
+
+
 # ----------------------------------------------------------------
 # Paratrooper Injection into HeavyPoly's Z Pie (Shading)
 # ----------------------------------------------------------------
@@ -109,6 +143,7 @@ def inject_into_heavypoly_shading(self, context):
 classes = (
     SE_OT_render_ai_passes_quick,
     SE_OT_generate_ai_quick,
+    SE_OT_refine_current_image,
 )
 
 # Store draw handlers for clean unregister

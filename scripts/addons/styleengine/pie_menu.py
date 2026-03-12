@@ -1379,6 +1379,13 @@ class STYLEENGINE_MT_pie_main(Menu):
                      text="Generate Image", 
                      icon='IMAGE_DATA')
         
+        # Refine: feed current_ai.png back without re-rendering
+        refine_row = col.row()
+        refine_row.scale_y = 1.4
+        refine_row.operator("style_engine.refine_current_image",
+                            text="Refine Current Image",
+                            icon='IMAGE_REFERENCE')
+
         col.separator()
         
         if style_props.ai_model == 'GEMINI':

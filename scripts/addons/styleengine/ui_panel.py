@@ -504,6 +504,37 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         precision=1,
     )
 
+    omni_remesh_depth: bpy.props.IntProperty(
+        name="Remesh Depth",
+        description=(
+            "Octree depth for the smooth remesh applied before Point Cloud / Voxel export. "
+            "Lower (1-5): coarser but cleaner shape — better for complex or thin geometry. "
+            "Higher (7-9): denser but may produce 'blobby' results that confuse the model."
+        ),
+        default=5,
+        min=1,
+        max=9,
+    )
+
+    omni_pc_as_mesh: bpy.props.BoolProperty(
+        name="Export as Mesh PLY",
+        description=(
+            "Export the point cloud as a mesh PLY (vertices + faces) instead of a "
+            "point-only PLY. Ensures the server can correctly normalise the data."
+        ),
+        default=False,
+    )
+
+    omni_precenter: bpy.props.BoolProperty(
+        name="Pre-center Vertices",
+        description=(
+            "Subtract the mesh bounding-box centre from all vertices before export, "
+            "placing the guide at the world origin. Ensures reliable server-side "
+            "normalisation regardless of trimesh version."
+        ),
+        default=True,
+    )
+
     show_groups: bpy.props.BoolProperty(
         name="Groups",
         description="Expand or collapse the groups section",
@@ -2365,17 +2396,31 @@ def _has_pointcloud_exporter():
     return True
 
 
-def _write_ply_pointcloud(mesh_obj, out_path):
+def _write_ply_pointcloud(mesh_obj, out_path, precenter=True):
     """
     Write the world-space vertices of mesh_obj to a binary-little-endian PLY
     file at out_path.  No external addon required — pure Python + mathutils.
+    Applies Blender Z-up → Y-up conversion: (x, z, -y).
+    When precenter=True, subtracts the bounding-box centre before writing so
+    the guide arrives at the server origin-centred (more robust normalisation).
     Returns out_path (Path) on success, raises on failure.
     """
     import struct
     from pathlib import Path
-    from mathutils import Vector
 
     verts = [mesh_obj.matrix_world @ v.co for v in mesh_obj.data.vertices]
+
+    if precenter and verts:
+        xs = [v.x for v in verts]
+        ys = [v.y for v in verts]
+        zs = [v.z for v in verts]
+        cx = (min(xs) + max(xs)) / 2
+        cy = (min(ys) + max(ys)) / 2
+        cz = (min(zs) + max(zs)) / 2
+        from mathutils import Vector
+        offset = Vector((cx, cy, cz))
+        verts = [v - offset for v in verts]
+
     n = len(verts)
     header = (
         "ply\n"
@@ -2391,18 +2436,26 @@ def _write_ply_pointcloud(mesh_obj, out_path):
     with out.open('wb') as f:
         f.write(header)
         for v in verts:
-            # Convert Blender Z-up → Y-up (Omni's expected convention):
-            #   X stays,  Blender-Z → Y,  Blender-Y → -Z
+            # Blender Z-up → Y-up: X stays, Blender-Z → Y, Blender-Y → -Z
             f.write(struct.pack('<fff', v.x, v.z, -v.y))
     return out
 
 
-def _write_ply_mesh(mesh_obj, out_path):
+def _write_ply_mesh(mesh_obj, out_path, yup=False, precenter=False):
     """
     Write the world-space geometry of mesh_obj (vertices + triangulated faces) to
-    a binary-little-endian PLY file.  Coordinates are kept in Blender's native
-    Z-up space because omni_server.py's infer_voxel() applies its own -90° X-axis
-    rotation to convert Z-up → Y-up internally.
+    a binary-little-endian PLY file.
+
+    yup=False  (default for voxel): coordinates kept in Blender Z-up space.
+               omni_server.py's infer_voxel() applies a -90° X-axis rotation to
+               convert Z-up → Y-up internally.
+    yup=True   (for point-cloud-as-mesh): applies Blender Z-up → Y-up conversion
+               (x, z, -y) so trimesh loads the data in the correct orientation
+               without any extra server-side rotation.
+
+    precenter=True: subtracts the bounding-box centre before writing so the guide
+               arrives at the server already origin-centred.
+
     Returns out_path (Path) on success, raises on failure.
     """
     import struct
@@ -2411,10 +2464,19 @@ def _write_ply_mesh(mesh_obj, out_path):
     mesh = mesh_obj.data
     mw = mesh_obj.matrix_world
 
-    # Collect world-space vertices
     verts = [mw @ v.co for v in mesh.vertices]
 
-    # Collect triangulated faces (loop_triangles is always triangle-based)
+    if precenter and verts:
+        xs = [v.x for v in verts]
+        ys = [v.y for v in verts]
+        zs = [v.z for v in verts]
+        cx = (min(xs) + max(xs)) / 2
+        cy = (min(ys) + max(ys)) / 2
+        cz = (min(zs) + max(zs)) / 2
+        from mathutils import Vector
+        offset = Vector((cx, cy, cz))
+        verts = [v - offset for v in verts]
+
     mesh.calc_loop_triangles()
     tris = [(lt.vertices[0], lt.vertices[1], lt.vertices[2]) for lt in mesh.loop_triangles]
 
@@ -2437,17 +2499,24 @@ def _write_ply_mesh(mesh_obj, out_path):
     with out.open('wb') as f:
         f.write(header)
         for v in verts:
-            f.write(struct.pack('<fff', v.x, v.y, v.z))
+            if yup:
+                # Blender Z-up → Y-up: X stays, Blender-Z → Y, Blender-Y → -Z
+                f.write(struct.pack('<fff', v.x, v.z, -v.y))
+            else:
+                f.write(struct.pack('<fff', v.x, v.y, v.z))
         for tri in tris:
             f.write(struct.pack('<Biii', 3, tri[0], tri[1], tri[2]))
     return out
 
 
-def _export_mesh_as_voxel(obj, out_path):
+def _export_mesh_as_voxel(obj, out_path, remesh_depth=5, precenter=True):
     """
     Duplicate obj, apply a smooth remesh to make the geometry watertight and
     uniform, then export as a full mesh PLY (vertices + faces) for Omni's voxel
     conditioning path.  The original object is never modified.
+
+    remesh_depth: octree depth for the smooth remesh (1-9, lower = coarser/cleaner).
+    precenter:    if True, subtract the bounding-box centre before writing.
 
     Returns out_path (Path) on success, or None on failure.
     """
@@ -2470,17 +2539,17 @@ def _export_mesh_as_voxel(obj, out_path):
         if remesh_mod is None or remesh_mod.type != 'REMESH':
             raise RuntimeError("Failed to add REMESH modifier to duplicate")
         remesh_mod.mode = 'SMOOTH'
-        remesh_mod.octree_depth = 8
+        remesh_mod.octree_depth = remesh_depth
         remesh_mod.use_remove_disconnected = True
-        print(f"[Omni] Added Smooth Remesh (depth=8, watertight)")
+        print(f"[Omni] Added Smooth Remesh (depth={remesh_depth}, watertight)")
 
         # --- 3. Apply all modifiers ---
         bpy.ops.object.convert(target='MESH')
         print(f"[Omni] Applied modifiers — {len(temp_obj.data.vertices)} vertices, "
               f"{len(temp_obj.data.polygons)} faces")
 
-        # --- 4. Write mesh PLY (Z-up; server applies -90° X rotation itself) ---
-        ply_path = _write_ply_mesh(temp_obj, out_path)
+        # --- 4. Write mesh PLY (Z-up; server applies -90° X rotation to Y-up) ---
+        ply_path = _write_ply_mesh(temp_obj, out_path, yup=False, precenter=precenter)
         print(f"[Omni] Exported voxel mesh: {ply_path.name} ({ply_path.stat().st_size // 1024} KB)")
 
         return ply_path
@@ -2510,12 +2579,18 @@ def _export_mesh_as_voxel(obj, out_path):
             pass
 
 
-def _export_mesh_as_pointcloud(obj, out_path):
+def _export_mesh_as_pointcloud(obj, out_path, remesh_depth=5, as_mesh=True, precenter=True):
     """
-    Duplicate obj, apply a smooth remesh for uniform surface sampling, write
-    the resulting vertices as a binary PLY point cloud file (no addon needed),
-    then remove the duplicate.  The original object is never modified.
+    Duplicate obj, apply a smooth remesh for uniform surface sampling, then
+    export the resulting geometry as a PLY point cloud or mesh file.
 
+    remesh_depth: octree depth for the smooth remesh (1-9, lower = coarser/cleaner).
+    as_mesh:      if True, write vertices + faces (mesh PLY) with Y-up conversion so
+                  trimesh loads it as a Trimesh and normalize_mesh works correctly.
+                  if False, write point-only PLY (legacy behaviour).
+    precenter:    if True, subtract the bounding-box centre before writing.
+
+    The original object is never modified.
     Returns out_path (Path) on success, or None on failure.
     """
     from pathlib import Path
@@ -2539,17 +2614,23 @@ def _export_mesh_as_pointcloud(obj, out_path):
         if remesh_mod is None or remesh_mod.type != 'REMESH':
             raise RuntimeError("Failed to add REMESH modifier to duplicate")
         remesh_mod.mode = 'SMOOTH'
-        remesh_mod.octree_depth = 8
+        remesh_mod.octree_depth = remesh_depth
         remesh_mod.use_remove_disconnected = False
-        print(f"[Omni] Added Smooth Remesh (depth=8)")
+        print(f"[Omni] Added Smooth Remesh (depth={remesh_depth})")
 
-        # --- 3. Apply all modifiers so we have a plain mesh to sample ---
+        # --- 3. Apply all modifiers so we have a plain mesh ---
         bpy.ops.object.convert(target='MESH')
         print(f"[Omni] Applied modifiers — {len(temp_obj.data.vertices)} vertices")
 
-        # --- 4. Write vertices directly to PLY (no addon dependency) ---
-        ply_path = _write_ply_pointcloud(temp_obj, out_path)
-        print(f"[Omni] Exported point cloud: {ply_path.name} ({ply_path.stat().st_size // 1024} KB)")
+        # --- 4. Write PLY: mesh (with faces + Y-up) or point-only ---
+        if as_mesh:
+            ply_path = _write_ply_mesh(temp_obj, out_path, yup=True, precenter=precenter)
+            print(f"[Omni] Exported point cloud (mesh PLY, Y-up): "
+                  f"{ply_path.name} ({ply_path.stat().st_size // 1024} KB)")
+        else:
+            ply_path = _write_ply_pointcloud(temp_obj, out_path, precenter=precenter)
+            print(f"[Omni] Exported point cloud (point-only PLY): "
+                  f"{ply_path.name} ({ply_path.stat().st_size // 1024} KB)")
 
         return ply_path
 
@@ -2682,15 +2763,26 @@ class WM_OT_OmniGenerate(bpy.types.Operator):
         omni_guidance      = getattr(props, 'omni_guidance_scale',    4.5)
         omni_use_ema       = getattr(props, 'omni_use_ema',          False)
         omni_flashvdm      = getattr(props, 'omni_flashvdm',         False)
+        omni_remesh_depth  = getattr(props, 'omni_remesh_depth',      5)
+        omni_pc_as_mesh    = getattr(props, 'omni_pc_as_mesh',        True)
+        omni_precenter     = getattr(props, 'omni_precenter',         True)
 
         print(f"[Omni] Control mode: {omni_control} | Guidance: {omni_guidance:.1f} | "
               f"EMA: {omni_use_ema} | FlashVDM: {omni_flashvdm}")
+        if omni_control in ('POINT', 'VOXEL'):
+            print(f"[Omni] Export — remesh_depth: {omni_remesh_depth} | "
+                  f"pc_as_mesh: {omni_pc_as_mesh} | precenter: {omni_precenter}")
 
         # --- Guide file: point cloud or voxel mesh ---
         guide_ply_data = None
         if omni_control == 'POINT':
             ply_path = temp_dir / f"omni_pc_{uuid.uuid4().hex[:8]}.ply"
-            result_path = _export_mesh_as_pointcloud(obj, ply_path)
+            result_path = _export_mesh_as_pointcloud(
+                obj, ply_path,
+                remesh_depth=omni_remesh_depth,
+                as_mesh=omni_pc_as_mesh,
+                precenter=omni_precenter,
+            )
             if result_path is None:
                 self.report({'ERROR'}, "Point cloud export failed — check console for details")
                 return {'CANCELLED'}
@@ -2700,7 +2792,11 @@ class WM_OT_OmniGenerate(bpy.types.Operator):
 
         elif omni_control == 'VOXEL':
             ply_path = temp_dir / f"omni_vox_{uuid.uuid4().hex[:8]}.ply"
-            result_path = _export_mesh_as_voxel(obj, ply_path)
+            result_path = _export_mesh_as_voxel(
+                obj, ply_path,
+                remesh_depth=omni_remesh_depth,
+                precenter=omni_precenter,
+            )
             if result_path is None:
                 self.report({'ERROR'}, "Voxel mesh export failed — check console for details")
                 return {'CANCELLED'}
@@ -2844,6 +2940,9 @@ class WM_OT_OmniGenerate(bpy.types.Operator):
 
                         print(f"[Omni] Downloaded: {dl_path.name} ({len(glb_data) / 1024:.1f} KB)")
 
+                        _import_retries = [0]
+                        _MAX_RETRIES = 20  # 20 × 0.2s = 4s max wait
+
                         def _do_import():
                             try:
                                 from mathutils import Vector
@@ -2925,13 +3024,29 @@ class WM_OT_OmniGenerate(bpy.types.Operator):
                                 print(f"[Omni] ============================================")
                                 print(f"[Omni] OMNI 3D COMPLETE")
                                 print(f"[Omni] ============================================")
+
+                            except RuntimeError as e:
+                                # Blender is mid-redraw — retry after a short delay
+                                if "drawing/rendering" in str(e) or "can't modify blend data" in str(e):
+                                    _import_retries[0] += 1
+                                    if _import_retries[0] <= _MAX_RETRIES:
+                                        print(f"[Omni] Blend data busy (redraw), retrying... ({_import_retries[0]}/{_MAX_RETRIES})")
+                                        return 0.2  # reschedule timer
+                                    else:
+                                        print(f"[Omni] ❌ Import abandoned after {_MAX_RETRIES} retries — Blender stayed busy too long")
+                                else:
+                                    print(f"[Omni] Import error: {e}")
+                                    import traceback
+                                    traceback.print_exc()
+
                             except Exception as e:
                                 print(f"[Omni] Import error: {e}")
                                 import traceback
                                 traceback.print_exc()
-                            return None
 
-                        bpy.app.timers.register(_do_import, first_interval=0.1)
+                            return None  # unregister timer
+
+                        bpy.app.timers.register(_do_import, first_interval=0.5)
 
                     except Exception as e:
                         print(f"[Omni] Download error: {e}")
@@ -4688,6 +4803,228 @@ class WM_OT_PBRFromText(bpy.types.Operator):
 # REFERENCE IMAGE OPERATORS
 # ================================================================
 
+class WM_OT_UploadCurrentAI(bpy.types.Operator):
+    """Upload a local image to use as the current AI generation (current_ai.png).
+    The image is copied into temp_dir, registered in the generation history, and
+    immediately displayed as the camera background."""
+    bl_idname = "style_engine.upload_current_ai"
+    bl_label = "Upload Image"
+    bl_description = "Load a local image as current_ai.png — it will appear in the camera background and be saved to generation history"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    filepath: bpy.props.StringProperty(
+        subtype='FILE_PATH',
+        options={'HIDDEN', 'SKIP_SAVE'}
+    )
+    filter_image: bpy.props.BoolProperty(default=True, options={'HIDDEN', 'SKIP_SAVE'})
+    filter_folder: bpy.props.BoolProperty(default=True, options={'HIDDEN', 'SKIP_SAVE'})
+
+    # SDXL native resolutions, ordered from portrait-tallest to landscape-widest.
+    _SDXL_RESOLUTIONS = [
+        (640, 1536), (768, 1344), (832, 1216), (896, 1152), (1024, 1024),
+        (1152, 896), (1216, 832), (1344, 768), (1536, 640),
+    ]
+
+    @staticmethod
+    def _target_resolution(src_w, src_h, model):
+        """
+        Compute the target (w, h) for the uploaded image based on the active model.
+
+        SDXL: snap to the SDXL native resolution whose aspect ratio is closest to
+              the source image.  Minor stretching is acceptable.
+        Gemini: preserve the original aspect ratio; cap the longest side at 1920 px.
+        """
+        if model == 'GEMINI':
+            max_side = 1920
+            if src_w <= max_side and src_h <= max_side:
+                return src_w, src_h
+            scale = max_side / max(src_w, src_h)
+            return int(src_w * scale), int(src_h * scale)
+        else:
+            # SDXL: find the native resolution with the closest aspect ratio
+            src_aspect = src_w / src_h
+            best = min(
+                WM_OT_UploadCurrentAI._SDXL_RESOLUTIONS,
+                key=lambda r: abs(r[0] / r[1] - src_aspect)
+            )
+            return best
+
+    def execute(self, context):
+        import shutil
+        from pathlib import Path
+        from . import workspace_setup
+
+        src = Path(bpy.path.abspath(self.filepath))
+        if not src.exists():
+            self.report({'ERROR'}, f"File not found: {src}")
+            return {'CANCELLED'}
+
+        suffix = src.suffix.lower()
+        if suffix not in ('.png', '.jpg', '.jpeg', '.webp'):
+            self.report({'ERROR'}, "Only PNG, JPEG and WEBP files are supported")
+            return {'CANCELLED'}
+
+        temp_dir = workspace_setup.get_temp_directory(context)
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        current_ai_path = temp_dir / "current_ai.png"
+
+        try:
+            # Load image into Blender to read its size, convert format, and resize
+            tmp_img = bpy.data.images.load(str(src), check_existing=False)
+            src_w, src_h = tmp_img.size[0], tmp_img.size[1]
+
+            # Determine target resolution based on the active AI model
+            model = context.scene.style_engine_props.ai_model
+            target_w, target_h = self._target_resolution(src_w, src_h, model)
+            print(f"[Upload] Source: {src_w}x{src_h} → Target: {target_w}x{target_h} ({model})")
+
+            # Scale if needed (operates in-place on the pixel buffer)
+            if (src_w, src_h) != (target_w, target_h):
+                tmp_img.scale(target_w, target_h)
+
+            # Save as PNG to current_ai_path
+            tmp_img.file_format = 'PNG'
+            tmp_img.filepath_raw = str(current_ai_path)
+            tmp_img.save()
+            bpy.data.images.remove(tmp_img)
+
+            print(f"[Upload] Saved '{src.name}' → current_ai.png ({target_w}x{target_h})")
+
+            # Update render resolution to match the uploaded image
+            context.scene.render.resolution_x = target_w
+            context.scene.render.resolution_y = target_h
+            print(f"[Style Engine] ✓ Resolution set to: {target_w}x{target_h} (uploaded)")
+
+            # Also sync the ai_resolution enum when the target matches a SDXL entry
+            key = f"{target_w}x{target_h}"
+            sdxl_keys = {f"{w}x{h}" for w, h in self._SDXL_RESOLUTIONS}
+            if key in sdxl_keys:
+                # Direct dict write avoids triggering the update callback/resize
+                context.scene.style_engine_props['ai_resolution'] = key
+
+            # Save a timestamped copy to the Images/ library
+            # (render resolution is now set, so save_generation_to_library
+            # will embed the correct WxH in the filename)
+            saved = workspace_setup.save_generation_to_library(
+                context, current_ai_path, backend='uploaded'
+            )
+            if saved:
+                print(f"[Upload] Saved to library: {saved.name}")
+
+            # Refresh the camera background
+            workspace_setup.refresh_ai_image()
+
+            # Jump to the latest entry in history
+            context.scene.style_engine_props.current_generation_index = -1
+
+            self.report({'INFO'}, f"Uploaded: {src.name} ({target_w}x{target_h})")
+            return {'FINISHED'}
+
+        except Exception as e:
+            self.report({'ERROR'}, f"Upload failed: {e}")
+            print(f"[Upload] ❌ {e}")
+            import traceback
+            traceback.print_exc()
+            return {'CANCELLED'}
+
+    def invoke(self, context, event):
+        context.window_manager.fileselect_add(self)
+        return {'RUNNING_MODAL'}
+
+
+def _restore_generation_resolution(context, gen_path):
+    """
+    Parse the WxH embedded in gen_path's filename and apply it to the scene's
+    render resolution.  Also syncs ai_resolution enum for SDXL-standard sizes.
+    Falls back silently if no resolution token is present (older filenames).
+    """
+    import re
+    m = re.search(r'_(\d+)x(\d+)\.png$', gen_path.name, re.IGNORECASE)
+    if not m:
+        return
+    w, h = int(m.group(1)), int(m.group(2))
+    context.scene.render.resolution_x = w
+    context.scene.render.resolution_y = h
+    # Also sync the SDXL enum when the resolution is a native SDXL entry
+    sdxl_keys = {
+        '640x1536', '768x1344', '832x1216', '896x1152', '1024x1024',
+        '1152x896', '1216x832', '1344x768', '1536x640',
+    }
+    key = f"{w}x{h}"
+    if key in sdxl_keys:
+        context.scene.style_engine_props['ai_resolution'] = key
+    print(f"[Style Engine] ✓ Resolution restored: {w}x{h}")
+
+
+class WM_OT_PrevGeneration(bpy.types.Operator):
+    """Navigate to the previous (older) AI generation"""
+    bl_idname = "style_engine.prev_generation"
+    bl_label = "Previous Generation"
+    bl_description = "View the previous (older) AI generation"
+    bl_options = {'REGISTER'}
+
+    def execute(self, context):
+        from . import workspace_setup
+
+        props = context.scene.style_engine_props
+        generations = workspace_setup.get_generation_list(context)
+        if not generations:
+            self.report({'WARNING'}, "No generations found")
+            return {'CANCELLED'}
+
+        n = len(generations)
+        # -1 means "newest" (index n-1 in the list)
+        current_idx = (n - 1) if props.current_generation_index == -1 else props.current_generation_index
+        new_idx = current_idx - 1
+
+        if new_idx < 0:
+            self.report({'INFO'}, "Already at the oldest generation")
+            return {'CANCELLED'}
+
+        gen_path = generations[new_idx]
+        workspace_setup.load_generation_to_current(context, gen_path)
+        _restore_generation_resolution(context, gen_path)
+        props.current_generation_index = new_idx
+
+        for area in context.screen.areas:
+            area.tag_redraw()
+        return {'FINISHED'}
+
+
+class WM_OT_NextGeneration(bpy.types.Operator):
+    """Navigate to the next (newer) AI generation"""
+    bl_idname = "style_engine.next_generation"
+    bl_label = "Next Generation"
+    bl_description = "View the next (newer) AI generation"
+    bl_options = {'REGISTER'}
+
+    def execute(self, context):
+        from . import workspace_setup
+
+        props = context.scene.style_engine_props
+        generations = workspace_setup.get_generation_list(context)
+        if not generations:
+            self.report({'WARNING'}, "No generations found")
+            return {'CANCELLED'}
+
+        n = len(generations)
+        if props.current_generation_index == -1:
+            self.report({'INFO'}, "Already at the newest generation")
+            return {'CANCELLED'}
+
+        new_idx = props.current_generation_index + 1
+        gen_path = generations[new_idx]
+        workspace_setup.load_generation_to_current(context, gen_path)
+        _restore_generation_resolution(context, gen_path)
+
+        # -1 signals "newest" once we reach the last entry
+        props.current_generation_index = -1 if new_idx >= n - 1 else new_idx
+
+        for area in context.screen.areas:
+            area.tag_redraw()
+        return {'FINISHED'}
+
+
 class WM_OT_LoadReferenceImage(bpy.types.Operator):
     """Load a reference image into a slot"""
     bl_idname = "style_engine.load_reference"
@@ -5268,93 +5605,6 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                     col.label(text="No generations yet", icon='INFO')
 
         # ================================================================
-        # ================================================================
-        # VISUALIZATION CATEGORY (Collapsible)
-        # Display mode buttons hidden in Gemini (single output), history always visible
-        # ================================================================
-        layout.separator()
-        vis_box = layout.box()
-        vis_header = vis_box.row(align=True)
-        vis_icon = 'TRIA_DOWN' if style_props.show_visualization else 'TRIA_RIGHT'
-        vis_header.prop(style_props, "show_visualization", text="Visualization", icon=vis_icon, emboss=False, toggle=True)
-        vis_header.label(text="", icon='VIEW_CAMERA')
-
-        if style_props.show_visualization:
-            prefs = context.preferences.addons.get('styleengine')
-
-            # Display mode buttons — SDXL only (Gemini outputs a single image, no depth/canny)
-            if style_props.ai_model != 'GEMINI':
-                show_viz_controls = (prefs and
-                                     prefs.preferences.api_backend == 'GCS' and
-                                     prefs.preferences.gcs_download_preview_images)
-                if show_viz_controls:
-                    col = vis_box.column(align=True)
-                    col.label(text="Display Mode:")
-                    row = col.row(align=True)
-                    row.scale_y = 1.3
-
-                    op = row.operator("style_engine.set_visualization",
-                                     text="Combined",
-                                     icon='IMAGE_DATA',
-                                     depress=(style_props.visualization_type == 'COMBINED'))
-                    op.viz_type = 'COMBINED'
-
-                    op = row.operator("style_engine.set_visualization",
-                                     text="Silhouette",
-                                     icon='MESH_PLANE',
-                                     depress=(style_props.visualization_type == 'CANNY'))
-                    op.viz_type = 'CANNY'
-
-                    op = row.operator("style_engine.set_visualization",
-                                     text="Depth",
-                                     icon='EMPTY_SINGLE_ARROW',
-                                     depress=(style_props.visualization_type == 'DEPTH'))
-                    op.viz_type = 'DEPTH'
-
-                    vis_box.separator()
-                    col = vis_box.column(align=True)
-                    col.label(text=f"Current: {style_props.visualization_type.title()}", icon='INFO')
-                else:
-                    col = vis_box.column(align=True)
-                    col.label(text="Enable 'Download Preview", icon='INFO')
-                    col.label(text="Images' in GCS settings")
-                    col.label(text="to use this feature")
-
-            # Background opacity — always shown
-            vis_box.separator()
-            col = vis_box.column(align=True)
-            col.label(text="Background Opacity")
-            col.prop(style_props, "background_opacity", text="", slider=True)
-
-            # Generation Browser — always shown
-            vis_box.separator()
-            col = vis_box.column(align=True)
-            col.label(text="Generation Browser", icon='RENDERLAYERS')
-
-            from . import workspace_setup
-            generations = workspace_setup.get_generation_list(context)
-
-            if generations:
-                row = col.row(align=True)
-                row.scale_y = 1.2
-
-                current_gen = getattr(context.scene, 'styleengine_current_generation', len(generations) - 1)
-                at_oldest = current_gen <= 0
-                at_latest = current_gen >= len(generations) - 1
-
-                prev_row = row.row(align=True)
-                prev_row.enabled = not at_oldest
-                prev_row.operator("style_engine.prev_generation", text="", icon='TRIA_LEFT')
-
-                row.label(text=f"{current_gen + 1} / {len(generations)}")
-
-                next_row = row.row(align=True)
-                next_row.enabled = not at_latest
-                next_row.operator("style_engine.next_generation", text="", icon='TRIA_RIGHT')
-            else:
-                col.label(text="No generations yet", icon='INFO')
-
-        # ================================================================
         # TEXT GENERATION CATEGORY (Collapsible)
         # ================================================================
         layout.separator()
@@ -5661,13 +5911,23 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
         img_gen_header.label(text="", icon='IMAGE_DATA')
         
         if style_props.show_image_generation_main:
-            # Generate Image button (main action)
-            row = img_gen_box.row()
+            # Generate Image button (main action) + Upload Image companion
+            row = img_gen_box.row(align=True)
             row.scale_y = 2.0
             row.operator("style_engine.generate_ai_quick",
                          text="Generate Image",
                          icon='IMAGE_DATA')
-            
+            row.operator("style_engine.upload_current_ai",
+                         text="",
+                         icon='IMPORT')
+
+            # Refine current image (skips render, feeds current_ai.png back in)
+            refine_row = img_gen_box.row(align=True)
+            refine_row.scale_y = 1.3
+            refine_row.operator("style_engine.refine_current_image",
+                                text="Refine Current Image",
+                                icon='IMAGE_REFERENCE')
+
             img_gen_box.separator()
             
             if style_props.ai_model == 'GEMINI':
@@ -6037,11 +6297,10 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                 omni_col.prop(style_props, "omni_control_type", text="")
                 omni_col.prop(style_props, "omni_guidance_scale", text="Guidance", slider=True)
 
-                # Warning when Point Cloud selected but exporter is absent
-                if style_props.omni_control_type == 'POINT' and not _has_pointcloud_exporter():
-                    warn = single_box.row()
-                    warn.alert = True
-                    warn.label(text="PointCloud Exporter not detected", icon='ERROR')
+                # Extra export controls for Point Cloud / Voxel
+                if style_props.omni_control_type in ('POINT', 'VOXEL'):
+                    omni_col.prop(style_props, "omni_remesh_depth", text="Remesh Depth", slider=True)
+                    omni_col.prop(style_props, "omni_precenter", text="Pre-center", toggle=True)
 
                 omni_col.operator("style_engine.omni_generate", text="Omni Mesh", icon='MESH_CUBE')
 
@@ -6997,6 +7256,9 @@ classes = (
     WM_OT_MultiviewFromProjected,
     WM_OT_PBRFromProjectedTexture,
     WM_OT_PBRFromText,
+    WM_OT_UploadCurrentAI,
+    WM_OT_PrevGeneration,
+    WM_OT_NextGeneration,
     WM_OT_LoadReferenceImage,
     WM_OT_ClearReferenceImage,
     WM_OT_ReloadReferenceImage,
