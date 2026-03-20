@@ -353,16 +353,16 @@ def check_blender_addon_structure(files, zf, report, verbose=False):
     
     print(f"  ✅ Addon folder: {addon_root}/")
     
-    # 2. Check for __init__.py
-    init_path = f'{addon_root}/__init__.py'
+    # 2. Check for art_director.py
+    init_path = f'{addon_root}/art_director.py'
     if init_path not in files:
         report.add_error(f"Missing {init_path}", "blender")
-        print(f"  ❌ Missing __init__.py")
+        print(f"  ❌ Missing art_director.py")
         return
     
-    print(f"  ✅ Found __init__.py")
+    print(f"  ✅ Found art_director.py")
     
-    # 3. Deep analysis of __init__.py
+    # 3. Deep analysis of art_director.py
     try:
         init_content = zf.read(init_path).decode('utf-8')
         
@@ -374,7 +374,7 @@ def check_blender_addon_structure(files, zf, report, verbose=False):
         )
         
         if not bl_info_match:
-            report.add_error("Missing or malformed bl_info in __init__.py", "blender")
+            report.add_error("Missing or malformed bl_info in art_director.py", "blender")
             print("  ❌ Missing bl_info")
                 else:
             print("  ✅ Found bl_info")
@@ -410,14 +410,14 @@ def check_blender_addon_structure(files, zf, report, verbose=False):
         if 'def register(' in init_content:
             print("  ✅ Found register() function")
         else:
-            report.add_error("Missing register() function in __init__.py", "blender")
+            report.add_error("Missing register() function in art_director.py", "blender")
             print("  ❌ Missing register() function")
         
         # Check for unregister() function
         if 'def unregister(' in init_content:
             print("  ✅ Found unregister() function")
         else:
-            report.add_error("Missing unregister() function in __init__.py", "blender")
+            report.add_error("Missing unregister() function in art_director.py", "blender")
             print("  ❌ Missing unregister() function")
         
         # Check for macOS import fallback system
@@ -437,14 +437,14 @@ def check_blender_addon_structure(files, zf, report, verbose=False):
         
         # Check for proper imports
         if 'import bpy' not in init_content:
-            report.add_warning("__init__.py doesn't import bpy", "blender")
+            report.add_warning("art_director.py doesn't import bpy", "blender")
         
         # Check for __name__ == "__main__" guard
         if 'if __name__ == "__main__":' in init_content:
             report.add_info("Has __main__ guard (good for testing)")
         
     except Exception as e:
-        report.add_error(f"Error analyzing __init__.py: {e}", "blender")
+        report.add_error(f"Error analyzing art_director.py: {e}", "blender")
     
     # 4. Check for required modules
     required_modules = ['ui_panel.py', 'prefs.py', 'utils.py', 'workspace_setup.py',

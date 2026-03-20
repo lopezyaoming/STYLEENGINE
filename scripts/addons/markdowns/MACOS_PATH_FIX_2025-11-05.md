@@ -25,13 +25,13 @@ During addon **installation/enabling** on macOS Blender 4.5, `__file__` temporar
 
 **Expected behavior**:
 ```python
-__file__ = ".../addons/styleengine/__init__.py"
+__file__ = ".../addons/styleengine/art_director.py"
 addon_dir = ".../addons/styleengine/"  ✅
 ```
 
 **Actual behavior on macOS 4.5 during install**:
 ```python
-__file__ = ".../addons/__init__.py"  ❌ (resolves to parent!)
+__file__ = ".../addons/art_director.py"  ❌ (resolves to parent!)
 addon_dir = ".../addons/"  ❌ (missing utils.py, etc.)
 ```
 

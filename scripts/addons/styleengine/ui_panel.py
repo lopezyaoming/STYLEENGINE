@@ -535,6 +535,108 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         default=True,
     )
 
+    # ----------------------------------------------------------------
+    # TRELLIS2 generation properties
+    # ----------------------------------------------------------------
+    trellis_quality: bpy.props.EnumProperty(
+        name="Quality",
+        description="TRELLIS2 pipeline resolution. Quick=512³, Balanced=1024³ cascade, Detailed=1536³ cascade",
+        items=[
+            ('512',          "Quick",    "512³ — ~3 s on A100, fast iteration"),
+            ('1024_cascade', "Balanced", "1024³ cascade — ~17 s, default quality"),
+            ('1536_cascade', "Detailed", "1536³ cascade — ~60 s, maximum quality"),
+        ],
+        default='1024_cascade',
+    )
+
+    trellis_steps: bpy.props.IntProperty(
+        name="Steps",
+        description="Diffusion steps per stage (sparse, shape, texture). Range 4–50. Higher = more detail, slower",
+        default=12,
+        min=4,
+        max=50,
+    )
+
+    trellis_guidance: bpy.props.FloatProperty(
+        name="Guidance",
+        description="CFG guidance strength. Higher = closer to input image, less creative. Range 1–20",
+        default=7.5,
+        min=1.0,
+        max=20.0,
+        step=10,
+        precision=1,
+    )
+
+    trellis_texture_size: bpy.props.EnumProperty(
+        name="Texture Size",
+        description="Output texture atlas resolution",
+        items=[
+            ('1024', "1 K", "1024 px — fast, lower detail"),
+            ('2048', "2 K", "2048 px — balanced"),
+            ('4096', "4 K", "4096 px — maximum detail"),
+        ],
+        default='4096',
+    )
+
+    trellis_remove_bg: bpy.props.BoolProperty(
+        name="Remove BG",
+        description=(
+            "Remove background from current_ai.png before sending to TRELLIS2. "
+            "TRELLIS2 requires a transparent-background RGBA PNG — enable this unless "
+            "the image already has a clean transparent background."
+        ),
+        default=True,
+    )
+
+    # Retexture-specific overrides
+    trellis_tex_steps: bpy.props.IntProperty(
+        name="Tex Steps",
+        description="Diffusion steps for retexture pass. Range 1–50",
+        default=12,
+        min=1,
+        max=50,
+    )
+
+    trellis_tex_guidance: bpy.props.FloatProperty(
+        name="Tex Guidance",
+        description="CFG guidance for retexture. Lower = more creative, higher = closer to reference",
+        default=1.0,
+        min=0.1,
+        max=10.0,
+        step=10,
+        precision=1,
+    )
+
+    trellis_tex_resolution: bpy.props.EnumProperty(
+        name="Tex Resolution",
+        description="Voxel resolution for the texturing pass",
+        items=[
+            ('512',  "512",  "Fast texturing pass"),
+            ('1024', "1024", "Standard quality"),
+            ('1536', "1536", "High quality, slower"),
+        ],
+        default='1024',
+    )
+
+    # ----------------------------------------------------------------
+    # Hunyuan3D-Part segmentation properties
+    # ----------------------------------------------------------------
+    part_point_num: bpy.props.IntProperty(
+        name="Point Samples",
+        description="P3-SAM surface sample count. Reduce below 50000 if CUDA OOM",
+        default=50000,
+        min=1000,
+        max=50000,
+    )
+
+    part_prompt_num: bpy.props.IntProperty(
+        name="Query Points",
+        description="P3-SAM query points. Max safe value on 40GB VRAM is 128",
+        default=128,
+        min=32,
+        max=128,
+    )
+
     show_groups: bpy.props.BoolProperty(
         name="Groups",
         description="Expand or collapse the groups section",
@@ -3065,6 +3167,1076 @@ class WM_OT_OmniGenerate(bpy.types.Operator):
         bpy.app.timers.register(_poll_omni, first_interval=4.0)
         print(f"[Omni] Polling started (every 4s, timeout 10min)")
 
+        return {'FINISHED'}
+
+
+# ================================================================
+# TRELLIS2 — Image → 3D  (generate)  and  Mesh → Retexture
+# ================================================================
+
+TRELLIS_POLL_INTERVAL  = 2.0   # seconds between /status polls
+TRELLIS_TIMEOUT        = 900.0 # 15 minutes hard timeout
+
+PART_PORT              = 7860  # Hunyuan3D-Part Gradio service
+
+
+def _get_part_url():
+    """Derive the Hunyuan3D-Part URL from addon preferences (same host, port 7860)."""
+    from urllib.parse import urlparse
+    try:
+        prefs = bpy.context.preferences.addons['styleengine'].preferences
+        base_url = prefs.gcs_server_url
+        if not base_url:
+            return None
+        parsed = urlparse(base_url)
+        host = parsed.hostname or parsed.path.split('/')[0].split(':')[0]
+        scheme = parsed.scheme if parsed.scheme else 'http'
+        return f"{scheme}://{host}:{PART_PORT}"
+    except Exception:
+        return None
+
+
+def _get_trellis_url():
+    """Derive the TRELLIS2 base URL from addon preferences (same host, port 8195)."""
+    from urllib.parse import urlparse
+    try:
+        prefs = bpy.context.preferences.addons['styleengine'].preferences
+        base_url = prefs.gcs_server_url
+        if not base_url:
+            return None
+        parsed = urlparse(base_url)
+        host = parsed.hostname or parsed.path.split('/')[0].split(':')[0]
+        scheme = parsed.scheme if parsed.scheme else 'http'
+        return f"{scheme}://{host}:8195"
+    except Exception:
+        return None
+
+
+def _image_has_alpha(image_path):
+    """Return True if the PNG at image_path has a non-opaque alpha channel.
+    Uses Blender's own Image API to avoid PIL dependency."""
+    try:
+        import struct, zlib
+        # Fastest check: read PNG IHDR to get colour type
+        with open(str(image_path), 'rb') as f:
+            sig = f.read(8)
+            if sig != b'\x89PNG\r\n\x1a\n':
+                return False
+            f.read(4)   # IHDR length
+            f.read(4)   # 'IHDR'
+            f.read(4)   # width
+            f.read(4)   # height
+            f.read(1)   # bit depth
+            color_type = struct.unpack('B', f.read(1))[0]
+        # colour type 4 = greyscale+alpha, 6 = RGBA
+        return color_type in (4, 6)
+    except Exception:
+        return False
+
+
+def _run_rembg_on_comfyui(context, input_path, output_path):
+    """Submit current_ai.png to ComfyUI's UtilsImageRB.json (InspyrenetRembg),
+    poll until done, download the RGBA result to output_path.
+    Returns True on success, False on failure.
+    This call BLOCKS the calling thread (must be called from a background thread)."""
+    import json as _json
+    import time as _time
+    import urllib.request as _url
+    from pathlib import Path
+    from . import runcomfy_deployment, runcomfy_server_client
+
+    addon_dir = Path(__file__).parent
+    wf_path   = addon_dir / "workflows" / "Image" / "UtilsImageRB.json"
+    if not wf_path.exists():
+        print(f"[TRELLIS] UtilsImageRB.json not found at {wf_path}")
+        return False
+
+    with open(str(wf_path), 'r') as f:
+        workflow = _json.load(f)
+
+    try:
+        server_client = runcomfy_deployment.get_server_client()
+
+        # Upload input image
+        upload_resp   = server_client.upload_image(str(input_path), overwrite=True)
+        uploaded_name = upload_resp['name']
+
+        # Patch workflow node 1 (LoadImage)
+        workflow["1"]["inputs"]["image"] = uploaded_name
+
+        # Queue
+        q_resp    = server_client.queue_prompt(workflow)
+        prompt_id = q_resp.get('prompt_id')
+        if not prompt_id:
+            print("[TRELLIS] UtilsImageRB: no prompt_id returned")
+            return False
+
+        # Poll history
+        comfy_url = f"{runcomfy_deployment.get_server_client().server_url}"
+        deadline  = _time.time() + 120
+        while _time.time() < deadline:
+            _time.sleep(1.5)
+            hist_resp = _url.urlopen(f"{comfy_url}/history/{prompt_id}", timeout=5)
+            hist      = _json.loads(hist_resp.read())
+            if prompt_id in hist:
+                entry = hist[prompt_id]
+                outputs = entry.get('outputs', {})
+                # Node "3" is SaveImage → outputs
+                for node_id, node_out in outputs.items():
+                    imgs = node_out.get('images', [])
+                    if imgs:
+                        img_info  = imgs[0]
+                        img_fname = img_info['filename']
+                        subfolder = img_info.get('subfolder', '')
+                        folder    = img_info.get('type', 'output')
+                        dl_url    = (f"{comfy_url}/view?filename={img_fname}"
+                                     f"&subfolder={subfolder}&type={folder}")
+                        dl_req    = _url.Request(dl_url)
+                        with _url.urlopen(dl_req, timeout=30) as dl_resp:
+                            rgba_data = dl_resp.read()
+                        with open(str(output_path), 'wb') as out_f:
+                            out_f.write(rgba_data)
+                        print(f"[TRELLIS] RembG done: {output_path.name} "
+                              f"({len(rgba_data)//1024} KB)")
+                        return True
+        print("[TRELLIS] UtilsImageRB timed out after 120s")
+        return False
+    except Exception as e:
+        print(f"[TRELLIS] UtilsImageRB error: {e}")
+        import traceback; traceback.print_exc()
+        return False
+
+
+class WM_OT_TrellisGenerate(bpy.types.Operator):
+    """Generate a textured 3D mesh with TRELLIS2 from current_ai.png"""
+    bl_idname  = "style_engine.trellis_generate"
+    bl_label   = "Generate 3D (TRELLIS2)"
+    bl_description = (
+        "Send current_ai.png to the TRELLIS2 server to generate a fully textured 3D mesh. "
+        "An active mesh object is used as the size reference. "
+        "If Remove BG is on, background is stripped via ComfyUI first."
+    )
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        # Only requires current_ai.png — mesh is optional (used for scale matching only)
+        try:
+            from . import workspace_setup
+            td = workspace_setup.get_temp_directory(context)
+            return (td / "current_ai.png").exists()
+        except Exception:
+            return True  # fail-open: let execute() surface the real error
+
+    def execute(self, context):
+        import time
+        import threading
+        from pathlib import Path
+        from . import workspace_setup, trellis_client
+
+        trellis_url = _get_trellis_url()
+        if not trellis_url:
+            self.report({'ERROR'}, "Server URL not configured in preferences")
+            return {'CANCELLED'}
+
+        props    = context.scene.style_engine_props
+        temp_dir = workspace_setup.get_temp_directory(context)
+        src_img  = temp_dir / "current_ai.png"
+
+        if not src_img.exists():
+            self.report({'ERROR'}, "No AI image found — generate an image first")
+            return {'CANCELLED'}
+
+        # ── Optionally capture proxy bbox for post-import scale matching ─
+        # If no active mesh is selected the result is imported at native scale,
+        # centred at the world origin — still fully useful.
+        from mathutils import Vector
+        obj = context.active_object if (context.active_object
+                                        and context.active_object.type == 'MESH') else None
+        if obj:
+            corners  = [obj.matrix_world @ Vector(c) for c in obj.bound_box]
+            xs = [c.x for c in corners]; ys = [c.y for c in corners]; zs = [c.z for c in corners]
+            proxy_min     = Vector((min(xs), min(ys), min(zs)))
+            proxy_max_v   = Vector((max(xs), max(ys), max(zs)))
+            proxy_center  = (proxy_min + proxy_max_v) / 2
+            proxy_max_dim = max(proxy_max_v.x - proxy_min.x,
+                                proxy_max_v.y - proxy_min.y,
+                                proxy_max_v.z - proxy_min.z, 0.001)
+            proxy_name    = obj.name
+        else:
+            proxy_center  = Vector((0, 0, 0))
+            proxy_max_dim = None  # signals "no scaling" in _do_import
+            proxy_name    = None
+
+        # ── Read TRELLIS params ──────────────────────────────────────────
+        quality      = getattr(props, 'trellis_quality',      '1024_cascade')
+        steps        = getattr(props, 'trellis_steps',        12)
+        guidance     = getattr(props, 'trellis_guidance',     7.5)
+        tex_size     = int(getattr(props, 'trellis_texture_size', '4096'))
+        remove_bg    = getattr(props, 'trellis_remove_bg',    True)
+        seed         = getattr(props, 'seed_value',           42)
+
+        print(f"[TRELLIS] ============================================")
+        print(f"[TRELLIS] STARTING TRELLIS2 3D GENERATION")
+        print(f"[TRELLIS] Server: {trellis_url}")
+        print(f"[TRELLIS] Quality: {quality} | Steps: {steps} | Guidance: {guidance}")
+        print(f"[TRELLIS] Remove BG: {remove_bg} | Texture: {tex_size}px")
+        if proxy_name:
+            print(f"[TRELLIS] Proxy: {proxy_name} (max_dim {proxy_max_dim:.3f} m)")
+        else:
+            print(f"[TRELLIS] No proxy mesh — importing at native scale")
+        print(f"[TRELLIS] ============================================")
+
+        self.report({'INFO'}, "TRELLIS2 3D generation started…")
+
+        captured = {
+            'trellis_url':    trellis_url,
+            'proxy_name':     proxy_name,
+            'proxy_center':   proxy_center,
+            'proxy_max_dim':  proxy_max_dim,
+            'temp_dir':       temp_dir,
+            'start_time':     time.time(),
+            'job_id':         None,
+            'error':          None,
+        }
+
+        def _submit_thread():
+            try:
+                input_img = src_img
+
+                # Step 1 (optional): remove background via ComfyUI
+                if remove_bg and not _image_has_alpha(src_img):
+                    rgba_path = temp_dir / "trellis_rgba.png"
+                    print("[TRELLIS] Removing background via UtilsImageRB…")
+                    ok = _run_rembg_on_comfyui(bpy.context, src_img, rgba_path)
+                    if ok:
+                        input_img = rgba_path
+                        print("[TRELLIS] Background removed ✓")
+                    else:
+                        print("[TRELLIS] ⚠️  RembG failed, submitting without BG removal")
+                else:
+                    if _image_has_alpha(src_img):
+                        print("[TRELLIS] Image already has alpha channel, skipping rembg")
+                    else:
+                        print("[TRELLIS] Remove BG disabled, submitting as-is")
+
+                # Step 2: submit to TRELLIS2
+                job_id = trellis_client.submit_generate(
+                    trellis_url,
+                    str(input_img),
+                    pipeline_type  = quality,
+                    seed           = seed,
+                    steps          = steps,
+                    guidance       = guidance,
+                    texture_size   = tex_size,
+                )
+                print(f"[TRELLIS] Job submitted: {job_id[:8]}…")
+                captured['job_id'] = job_id
+
+            except Exception as e:
+                print(f"[TRELLIS] Submit error: {e}")
+                import traceback; traceback.print_exc()
+                captured['error'] = str(e)
+
+        threading.Thread(target=_submit_thread, daemon=True).start()
+
+        # ── Poll with bpy.app.timers ─────────────────────────────────────
+        def _poll():
+            from . import trellis_client as tc
+
+            if captured['error']:
+                print(f"[TRELLIS] Generation failed: {captured['error']}")
+                return None
+
+            if captured['job_id'] is None:
+                return TRELLIS_POLL_INTERVAL  # still submitting
+
+            elapsed = time.time() - captured['start_time']
+            if elapsed > TRELLIS_TIMEOUT:
+                print(f"[TRELLIS] Timed out after {elapsed:.0f}s")
+                return None
+
+            try:
+                status_data = tc.poll_status(captured['trellis_url'], captured['job_id'])
+            except Exception as e:
+                print(f"[TRELLIS] Poll error: {e}")
+                return TRELLIS_POLL_INTERVAL
+
+            status   = status_data.get('status',   'unknown')
+            progress = status_data.get('progress', 0.0)
+            message  = status_data.get('message',  '')
+            print(f"[TRELLIS] [{int(progress*100):3d}%] {message}")
+
+            if status == 'done':
+                print(f"[TRELLIS] Done in {status_data.get('gen_time', '?'):.1f}s "
+                      f"— downloading GLB…")
+
+                def _download_and_import():
+                    try:
+                        job_id   = captured['job_id']
+                        dl_path  = captured['temp_dir'] / f"trellis_{job_id[:8]}.glb"
+                        nbytes   = tc.download_glb(captured['trellis_url'], job_id,
+                                                    str(dl_path), index=0)
+                        print(f"[TRELLIS] Downloaded: {dl_path.name} ({nbytes//1024} KB)")
+                        _import_retries = [0]
+                        _MAX_RETRIES    = 60  # 60 × 2s = 120s window for large meshes
+
+                        def _do_import():
+                            try:
+                                if bpy.context.mode != 'OBJECT':
+                                    bpy.ops.object.mode_set(mode='OBJECT')
+
+                                original_set = set(bpy.data.objects)
+                                bpy.ops.import_scene.gltf(filepath=str(dl_path))
+                                newly = [o for o in bpy.data.objects if o not in original_set]
+
+                                if not newly:
+                                    print("[TRELLIS] Import succeeded but no new objects")
+                                    return None
+
+                                mesh_objs = [o for o in newly if o.type == 'MESH']
+                                non_mesh  = [o for o in newly if o.type != 'MESH']
+
+                                # Unparent meshes, keeping world transform
+                                for mo in mesh_objs:
+                                    if mo.parent:
+                                        wm = mo.matrix_world.copy()
+                                        mo.parent = None
+                                        mo.matrix_world = wm
+
+                                # Remove GLTF scene-root empties
+                                for nm in non_mesh:
+                                    bpy.data.objects.remove(nm, do_unlink=True)
+
+                                if not mesh_objs:
+                                    print("[TRELLIS] No mesh objects after import")
+                                    return None
+
+                                # Apply transforms so bound_box reflects real geo
+                                bpy.ops.object.select_all(action='DESELECT')
+                                for mo in mesh_objs:
+                                    mo.select_set(True)
+                                bpy.context.view_layer.objects.active = mesh_objs[0]
+                                bpy.ops.object.transform_apply(
+                                    location=False, rotation=True, scale=True)
+
+                                # Measure imported bbox
+                                all_corners = []
+                                for mo in mesh_objs:
+                                    all_corners += [mo.matrix_world @ Vector(c)
+                                                    for c in mo.bound_box]
+                                ix = [c.x for c in all_corners]
+                                iy = [c.y for c in all_corners]
+                                iz = [c.z for c in all_corners]
+                                imp_max_dim = max(max(ix)-min(ix),
+                                                  max(iy)-min(iy),
+                                                  max(iz)-min(iz), 0.001)
+                                imp_center  = Vector((
+                                    (min(ix)+max(ix))/2,
+                                    (min(iy)+max(iy))/2,
+                                    (min(iz)+max(iz))/2,
+                                ))
+
+                                # Scale + translate to match proxy (optional)
+                                mesh_name = f"Trellis_{job_id[:8]}"
+                                if captured['proxy_max_dim'] is not None:
+                                    scale_factor = captured['proxy_max_dim'] / imp_max_dim
+                                    proxy_center = captured['proxy_center']
+                                    for i, mo in enumerate(mesh_objs):
+                                        mo.name     = mesh_name if i == 0 else f"{mesh_name}_{i}"
+                                        mo.scale    = mo.scale * scale_factor
+                                        mo.location = (mo.location
+                                                       + (proxy_center - imp_center * scale_factor))
+                                    print(f"[TRELLIS] Scale: {scale_factor:.4f} "
+                                          f"(proxy {captured['proxy_max_dim']:.3f}m / "
+                                          f"imported {imp_max_dim:.3f}m)")
+                                    # Hide proxy
+                                    proxy = bpy.data.objects.get(captured['proxy_name'])
+                                    if proxy:
+                                        proxy.hide_set(True)
+                                else:
+                                    for i, mo in enumerate(mesh_objs):
+                                        mo.name = mesh_name if i == 0 else f"{mesh_name}_{i}"
+                                    print(f"[TRELLIS] No proxy — imported at native scale")
+
+                                from . import workspace_setup as ws
+                                ws.save_mesh_to_library(bpy.context, dl_path,
+                                                        mesh_type='textured')
+                                print(f"[TRELLIS] ============================================")
+                                print(f"[TRELLIS] TRELLIS2 3D COMPLETE: {mesh_name}")
+                                print(f"[TRELLIS] ============================================")
+
+                            except RuntimeError as e:
+                                if ("drawing/rendering" in str(e)
+                                        or "can't modify blend data" in str(e)):
+                                    _import_retries[0] += 1
+                                    if _import_retries[0] <= _MAX_RETRIES:
+                                        print(f"[TRELLIS] Blend data busy, retry "
+                                              f"{_import_retries[0]}/{_MAX_RETRIES}")
+                                        return 2.0
+                                    else:
+                                        print("[TRELLIS] ❌ Import abandoned after retries")
+                                else:
+                                    print(f"[TRELLIS] Import error: {e}")
+                                    import traceback; traceback.print_exc()
+                            except Exception as e:
+                                print(f"[TRELLIS] Import error: {e}")
+                                import traceback; traceback.print_exc()
+                            return None
+
+                        bpy.app.timers.register(_do_import, first_interval=2.0)
+
+                    except Exception as e:
+                        print(f"[TRELLIS] Download error: {e}")
+                        import traceback; traceback.print_exc()
+
+                threading.Thread(target=_download_and_import, daemon=True).start()
+                return None
+
+            elif status == 'failed':
+                err = status_data.get('error', 'unknown error')
+                print(f"[TRELLIS] Server reported failure: {err}")
+                return None
+
+            return TRELLIS_POLL_INTERVAL
+
+        bpy.app.timers.register(_poll, first_interval=TRELLIS_POLL_INTERVAL)
+        return {'FINISHED'}
+
+
+class WM_OT_TrellisRetexture(bpy.types.Operator):
+    """Retexture the active mesh using TRELLIS2 and current_ai.png as reference"""
+    bl_idname  = "style_engine.trellis_retexture"
+    bl_label   = "Retexture Mesh (TRELLIS2)"
+    bl_description = (
+        "Export the active mesh as a temp GLB and submit it with current_ai.png "
+        "to TRELLIS2 /retexture. The result is a new separately imported mesh "
+        "with freshly generated PBR textures."
+    )
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return bool(context.active_object and context.active_object.type == 'MESH')
+
+    def execute(self, context):
+        import time
+        import threading
+        from pathlib import Path
+        from . import workspace_setup, trellis_client
+
+        trellis_url = _get_trellis_url()
+        if not trellis_url:
+            self.report({'ERROR'}, "Server URL not configured in preferences")
+            return {'CANCELLED'}
+
+        obj      = context.active_object
+        props    = context.scene.style_engine_props
+        temp_dir = workspace_setup.get_temp_directory(context)
+        src_img  = temp_dir / "current_ai.png"
+
+        if not src_img.exists():
+            self.report({'ERROR'}, "No AI image found — generate or upload an image first")
+            return {'CANCELLED'}
+
+        # ── Capture proxy info for post-import positioning ───────────────
+        from mathutils import Vector
+        corners      = [obj.matrix_world @ Vector(c) for c in obj.bound_box]
+        xs = [c.x for c in corners]; ys = [c.y for c in corners]; zs = [c.z for c in corners]
+        proxy_min    = Vector((min(xs), min(ys), min(zs)))
+        proxy_max    = Vector((max(xs), max(ys), max(zs)))
+        proxy_center = (proxy_min + proxy_max) / 2
+        proxy_max_dim = max(proxy_max.x - proxy_min.x,
+                            proxy_max.y - proxy_min.y,
+                            proxy_max.z - proxy_min.z, 0.001)
+        proxy_name   = obj.name
+
+        # ── Export active mesh to temp GLB ───────────────────────────────
+        import uuid
+        mesh_glb = temp_dir / f"trellis_input_{uuid.uuid4().hex[:8]}.glb"
+
+        # Deselect all, select only the target mesh
+        bpy.ops.object.select_all(action='DESELECT')
+        obj.select_set(True)
+        context.view_layer.objects.active = obj
+
+        try:
+            bpy.ops.export_scene.gltf(
+                filepath        = str(mesh_glb),
+                export_format   = 'GLB',
+                use_selection   = True,
+                export_apply    = True,
+            )
+        except Exception as e:
+            self.report({'ERROR'}, f"Mesh export failed: {e}")
+            return {'CANCELLED'}
+
+        if not mesh_glb.exists():
+            self.report({'ERROR'}, "Mesh export produced no file")
+            return {'CANCELLED'}
+
+        print(f"[TRELLIS] Exported mesh: {mesh_glb.name} "
+              f"({mesh_glb.stat().st_size // 1024} KB)")
+
+        # ── Read retexture params ────────────────────────────────────────
+        tex_steps      = getattr(props, 'trellis_tex_steps',      12)
+        tex_guidance   = getattr(props, 'trellis_tex_guidance',    1.0)
+        tex_resolution = int(getattr(props, 'trellis_tex_resolution', '1024'))
+        tex_size       = int(getattr(props, 'trellis_texture_size',   '2048'))
+        seed           = getattr(props, 'seed_value',              0)
+
+        print(f"[TRELLIS] ============================================")
+        print(f"[TRELLIS] STARTING TRELLIS2 RETEXTURE")
+        print(f"[TRELLIS] Server: {trellis_url}")
+        print(f"[TRELLIS] Tex res: {tex_resolution} | Atlas: {tex_size}px | "
+              f"Steps: {tex_steps} | Guidance: {tex_guidance}")
+        print(f"[TRELLIS] Proxy: {proxy_name}")
+        print(f"[TRELLIS] ============================================")
+
+        self.report({'INFO'}, "TRELLIS2 retexture started…")
+
+        captured = {
+            'trellis_url':   trellis_url,
+            'proxy_name':    proxy_name,
+            'proxy_center':  proxy_center,
+            'proxy_max_dim': proxy_max_dim,
+            'temp_dir':      temp_dir,
+            'start_time':    time.time(),
+            'job_id':        None,
+            'error':         None,
+        }
+
+        def _submit_thread():
+            try:
+                job_id = trellis_client.submit_retexture(
+                    trellis_url,
+                    str(src_img),
+                    str(mesh_glb),
+                    seed                 = seed,
+                    tex_resolution       = tex_resolution,
+                    texture_size         = tex_size,
+                    tex_steps            = tex_steps,
+                    tex_guidance         = tex_guidance,
+                )
+                print(f"[TRELLIS] Retexture job: {job_id[:8]}…")
+                captured['job_id'] = job_id
+            except Exception as e:
+                print(f"[TRELLIS] Retexture submit error: {e}")
+                import traceback; traceback.print_exc()
+                captured['error'] = str(e)
+
+        threading.Thread(target=_submit_thread, daemon=True).start()
+
+        # ── Poll ─────────────────────────────────────────────────────────
+        def _poll():
+            from . import trellis_client as tc
+
+            if captured['error']:
+                print(f"[TRELLIS] Retexture failed: {captured['error']}")
+                return None
+
+            if captured['job_id'] is None:
+                return TRELLIS_POLL_INTERVAL
+
+            elapsed = time.time() - captured['start_time']
+            if elapsed > TRELLIS_TIMEOUT:
+                print(f"[TRELLIS] Retexture timed out after {elapsed:.0f}s")
+                return None
+
+            try:
+                status_data = tc.poll_status(captured['trellis_url'], captured['job_id'])
+            except Exception as e:
+                print(f"[TRELLIS] Retexture poll error: {e}")
+                return TRELLIS_POLL_INTERVAL
+
+            status   = status_data.get('status',   'unknown')
+            progress = status_data.get('progress', 0.0)
+            message  = status_data.get('message',  '')
+            print(f"[TRELLIS-RT] [{int(progress*100):3d}%] {message}")
+
+            if status == 'done':
+                print(f"[TRELLIS] Retexture done in "
+                      f"{status_data.get('gen_time','?'):.1f}s — downloading…")
+
+                def _download_and_import():
+                    try:
+                        job_id  = captured['job_id']
+                        dl_path = captured['temp_dir'] / f"trellis_rt_{job_id[:8]}.glb"
+                        nbytes  = tc.download_glb(captured['trellis_url'], job_id,
+                                                   str(dl_path), index=0)
+                        print(f"[TRELLIS] Downloaded: {dl_path.name} ({nbytes//1024} KB)")
+
+                        _import_retries = [0]
+                        _MAX_RETRIES    = 60  # 60 × 2s = 120s window for large meshes
+
+                        def _do_import():
+                            try:
+                                if bpy.context.mode != 'OBJECT':
+                                    bpy.ops.object.mode_set(mode='OBJECT')
+
+                                original_set = set(bpy.data.objects)
+                                bpy.ops.import_scene.gltf(filepath=str(dl_path))
+                                newly = [o for o in bpy.data.objects
+                                         if o not in original_set]
+                                if not newly:
+                                    print("[TRELLIS] Retexture: no new objects after import")
+                                    return None
+
+                                mesh_objs = [o for o in newly if o.type == 'MESH']
+                                non_mesh  = [o for o in newly if o.type != 'MESH']
+
+                                for mo in mesh_objs:
+                                    if mo.parent:
+                                        wm = mo.matrix_world.copy()
+                                        mo.parent = None
+                                        mo.matrix_world = wm
+                                for nm in non_mesh:
+                                    bpy.data.objects.remove(nm, do_unlink=True)
+
+                                if not mesh_objs:
+                                    print("[TRELLIS] Retexture: no mesh after filtering")
+                                    return None
+
+                                bpy.ops.object.select_all(action='DESELECT')
+                                for mo in mesh_objs:
+                                    mo.select_set(True)
+                                bpy.context.view_layer.objects.active = mesh_objs[0]
+                                bpy.ops.object.transform_apply(
+                                    location=False, rotation=True, scale=True)
+
+                                # Scale + position same as generate
+                                all_corners = []
+                                for mo in mesh_objs:
+                                    all_corners += [mo.matrix_world @ Vector(c)
+                                                    for c in mo.bound_box]
+                                ix = [c.x for c in all_corners]
+                                iy = [c.y for c in all_corners]
+                                iz = [c.z for c in all_corners]
+                                imp_max_dim = max(max(ix)-min(ix),
+                                                  max(iy)-min(iy),
+                                                  max(iz)-min(iz), 0.001)
+                                imp_center  = Vector((
+                                    (min(ix)+max(ix))/2,
+                                    (min(iy)+max(iy))/2,
+                                    (min(iz)+max(iz))/2,
+                                ))
+                                scale_factor = captured['proxy_max_dim'] / imp_max_dim
+                                proxy_center = captured['proxy_center']
+                                mesh_name    = f"Trellis_RT_{job_id[:8]}"
+                                for i, mo in enumerate(mesh_objs):
+                                    mo.name    = mesh_name if i == 0 else f"{mesh_name}_{i}"
+                                    mo.scale   = mo.scale * scale_factor
+                                    mo.location = (mo.location
+                                                   + (proxy_center - imp_center * scale_factor))
+
+                                # Hide proxy
+                                proxy = bpy.data.objects.get(captured['proxy_name'])
+                                if proxy:
+                                    proxy.hide_set(True)
+
+                                from . import workspace_setup as ws
+                                ws.save_mesh_to_library(bpy.context, dl_path,
+                                                        mesh_type='uv_textured')
+                                print(f"[TRELLIS] Retexture complete: {mesh_name}")
+
+                            except RuntimeError as e:
+                                if ("drawing/rendering" in str(e)
+                                        or "can't modify blend data" in str(e)):
+                                    _import_retries[0] += 1
+                                    if _import_retries[0] <= _MAX_RETRIES:
+                                        print(f"[TRELLIS] Busy, retry "
+                                              f"{_import_retries[0]}/{_MAX_RETRIES}")
+                                        return 2.0
+                                    else:
+                                        print("[TRELLIS] ❌ Retexture import abandoned")
+                                else:
+                                    print(f"[TRELLIS] Retexture import error: {e}")
+                                    import traceback; traceback.print_exc()
+                            except Exception as e:
+                                print(f"[TRELLIS] Retexture import error: {e}")
+                                import traceback; traceback.print_exc()
+                            return None
+
+                        bpy.app.timers.register(_do_import, first_interval=2.0)
+
+                    except Exception as e:
+                        print(f"[TRELLIS] Retexture download error: {e}")
+                        import traceback; traceback.print_exc()
+
+                threading.Thread(target=_download_and_import, daemon=True).start()
+                return None
+
+            elif status == 'failed':
+                err = status_data.get('error', 'unknown error')
+                print(f"[TRELLIS] Retexture server failure: {err}")
+                return None
+
+            return TRELLIS_POLL_INTERVAL
+
+        bpy.app.timers.register(_poll, first_interval=TRELLIS_POLL_INTERVAL)
+        return {'FINISHED'}
+
+
+# ================================================================
+# Hunyuan3D-Part — Segment Mesh
+# ================================================================
+
+class WM_OT_SegmentMesh(bpy.types.Operator):
+    """Segment the active mesh into parts using Hunyuan3D-Part (P3-SAM + XPart)"""
+    bl_idname  = "style_engine.segment_mesh"
+    bl_label   = "Segment Mesh"
+    bl_description = (
+        "Export the active mesh and send it to the Hunyuan3D-Part service. "
+        "Returns a reassembled GLB with individual parts reconstructed by XPart. "
+        "Requires an active mesh object. Pipeline takes 2–5 minutes."
+    )
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return bool(context.active_object and context.active_object.type == 'MESH')
+
+    def execute(self, context):
+        import time
+        import threading
+        import json
+        import uuid
+        import urllib.request
+        import urllib.error
+        from pathlib import Path
+        from . import workspace_setup
+
+        part_url = _get_part_url()
+        if not part_url:
+            self.report({'ERROR'}, "Server URL not configured in preferences")
+            return {'CANCELLED'}
+
+        obj      = context.active_object
+        props    = context.scene.style_engine_props
+        temp_dir = workspace_setup.get_temp_directory(context)
+
+        # ── Capture proxy bbox for post-import scaling ───────────────────
+        from mathutils import Vector
+        corners   = [obj.matrix_world @ Vector(c) for c in obj.bound_box]
+        xs = [c.x for c in corners]; ys = [c.y for c in corners]; zs = [c.z for c in corners]
+        proxy_min     = Vector((min(xs), min(ys), min(zs)))
+        proxy_max_v   = Vector((max(xs), max(ys), max(zs)))
+        proxy_center  = (proxy_min + proxy_max_v) / 2
+        proxy_max_dim = max(proxy_max_v.x - proxy_min.x,
+                            proxy_max_v.y - proxy_min.y,
+                            proxy_max_v.z - proxy_min.z, 0.001)
+        proxy_name    = obj.name
+
+        # ── Export mesh as .obj (geometry only — fastest upload) ─────────
+        token    = uuid.uuid4().hex[:8]
+        obj_path = temp_dir / f"part_input_{token}.obj"
+
+        bpy.ops.object.select_all(action='DESELECT')
+        obj.select_set(True)
+        context.view_layer.objects.active = obj
+
+        try:
+            bpy.ops.wm.obj_export(
+                filepath      = str(obj_path),
+                export_selected_objects = True,
+                export_materials = False,
+                export_normals   = True,
+                export_uv        = False,
+                export_colors    = False,
+            )
+        except Exception as e:
+            self.report({'ERROR'}, f"Mesh export failed: {e}")
+            return {'CANCELLED'}
+
+        if not obj_path.exists():
+            self.report({'ERROR'}, "Mesh export produced no file")
+            return {'CANCELLED'}
+
+        print(f"[Part] Exported: {obj_path.name} ({obj_path.stat().st_size // 1024} KB)")
+
+        # ── Read params ──────────────────────────────────────────────────
+        point_num  = getattr(props, 'part_point_num',  50000)
+        prompt_num = getattr(props, 'part_prompt_num', 128)
+        seed       = getattr(props, 'seed_value',      42)
+
+        print(f"[Part] ============================================")
+        print(f"[Part] STARTING Hunyuan3D-Part SEGMENTATION")
+        print(f"[Part] Server:  {part_url}")
+        print(f"[Part] Proxy:   {proxy_name} (max_dim {proxy_max_dim:.3f} m)")
+        print(f"[Part] Params:  point_num={point_num}, prompt_num={prompt_num}, seed={seed}")
+        print(f"[Part] ============================================")
+
+        self.report({'INFO'}, "Hunyuan3D-Part segmentation started (2–5 min)…")
+
+        captured = {
+            'part_url':      part_url,
+            'proxy_name':    proxy_name,
+            'proxy_center':  proxy_center,
+            'proxy_max_dim': proxy_max_dim,
+            'temp_dir':      temp_dir,
+            'token':         token,
+            'start_time':    time.time(),
+            'done':          False,
+            'error':         None,
+            'dl_path':       None,
+        }
+
+        # ----------------------------------------------------------------
+        # Background thread: upload → predict → download
+        # ----------------------------------------------------------------
+        def _segment_thread():
+            try:
+                orig_name = obj_path.name
+                boundary  = f"----PartUpload{token}"
+
+                # ── Step 1: upload mesh ──────────────────────────────────
+                with open(str(obj_path), 'rb') as f:
+                    file_data = f.read()
+
+                upload_body = (
+                    f"--{boundary}\r\n"
+                    f'Content-Disposition: form-data; name="files"; filename="{orig_name}"\r\n'
+                    f"Content-Type: application/octet-stream\r\n\r\n"
+                ).encode() + file_data + f"\r\n--{boundary}--\r\n".encode()
+
+                upload_headers = {
+                    "Content-Type": f"multipart/form-data; boundary={boundary}",
+                    "User-Agent":   "StyleEngine-Blender/1.0",
+                }
+
+                # Try both Gradio 3.x/4.x (/upload) and 5.x (/api/upload)
+                file_input = None
+                for upload_url in [f"{part_url}/upload", f"{part_url}/api/upload"]:
+                    try:
+                        upload_req = urllib.request.Request(
+                            upload_url, data=upload_body,
+                            headers=upload_headers, method="POST",
+                        )
+                        with urllib.request.urlopen(upload_req, timeout=60) as resp:
+                            remote_paths = json.loads(resp.read().decode())
+                        # Normalise: Gradio 3.x returns ["/path/..."],
+                        # Gradio 4.x+ returns [{"path": "...", ...}]
+                        first = remote_paths[0]
+                        if isinstance(first, dict):
+                            remote_path = first.get("path", "")
+                            file_input  = {"path": remote_path, "orig_name": orig_name}
+                        else:
+                            remote_path = first
+                            file_input  = {"path": remote_path, "orig_name": orig_name}
+                        print(f"[Part] Uploaded via {upload_url} → {remote_path}")
+                        break
+                    except urllib.error.HTTPError as e:
+                        if e.code == 404:
+                            print(f"[Part] {upload_url} not found, trying next…")
+                            continue
+                        raise
+
+                if file_input is None:
+                    # Last-resort: base64 embed (compatible with Gradio 3.x predict)
+                    import base64 as _b64
+                    b64 = _b64.b64encode(file_data).decode()
+                    file_input = {
+                        "name": orig_name,
+                        "data": f"data:application/octet-stream;base64,{b64}",
+                    }
+                    print(f"[Part] No upload endpoint found — embedding as base64 "
+                          f"({len(b64) // 1024} KB)")
+
+                # ── Step 2: predict (synchronous, blocks until done) ─────
+                predict_payload = json.dumps({
+                    "data": [
+                        file_input,
+                        point_num,
+                        prompt_num,
+                        16,    # prompt_bs — fixed safe value
+                        seed,
+                    ]
+                }).encode()
+
+                predict_req = urllib.request.Request(
+                    f"{part_url}/api/predict",
+                    data=predict_payload,
+                    headers={
+                        "Content-Type": "application/json",
+                        "User-Agent":   "StyleEngine-Blender/1.0",
+                    },
+                    method="POST",
+                )
+                print(f"[Part] Running pipeline (may take 2–5 min)…")
+                with urllib.request.urlopen(predict_req, timeout=360) as resp:
+                    result = json.loads(resp.read().decode())
+
+                outputs = result.get("data", [])
+                print(f"[Part] Pipeline done. Duration: {result.get('duration', '?'):.1f}s")
+                if len(outputs) >= 4:
+                    print(f"[Part] Status: {outputs[3]}")
+
+                # ── Step 3: download assembled.glb (data[0]) ────────────
+                if not outputs or outputs[0] is None:
+                    raise RuntimeError("No assembled output returned from pipeline")
+
+                out0 = outputs[0]
+                print(f"[Part] Output[0] type: {type(out0).__name__} | value: {str(out0)[:120]}")
+
+                if isinstance(out0, dict):
+                    # Prefer a direct URL if provided (Gradio 4.x+)
+                    direct_url = out0.get("url") or out0.get("value")
+                    remote_path_out = out0.get("path", "")
+                    if direct_url and direct_url.startswith("http"):
+                        dl_url = direct_url
+                    elif remote_path_out:
+                        dl_url = f"{part_url}/file={remote_path_out}"
+                    else:
+                        raise RuntimeError(f"Cannot extract download URL from: {out0}")
+                elif isinstance(out0, str):
+                    # Gradio 3.x returns raw path string
+                    if out0.startswith("http"):
+                        dl_url = out0
+                    else:
+                        dl_url = f"{part_url}/file={out0}"
+                else:
+                    raise RuntimeError(f"Unexpected output format: {out0}")
+
+                print(f"[Part] Downloading from: {dl_url}")
+                dl_req = urllib.request.Request(
+                    dl_url, headers={"User-Agent": "StyleEngine-Blender/1.0"})
+                with urllib.request.urlopen(dl_req, timeout=60) as dl_resp:
+                    glb_data = dl_resp.read()
+
+                dl_path = captured['temp_dir'] / f"part_{token}.glb"
+                with open(str(dl_path), 'wb') as f:
+                    f.write(glb_data)
+                print(f"[Part] Downloaded: {dl_path.name} ({len(glb_data) // 1024} KB)")
+
+                captured['dl_path'] = dl_path
+                captured['done']    = True
+
+            except Exception as e:
+                print(f"[Part] Pipeline error: {e}")
+                import traceback; traceback.print_exc()
+                captured['error'] = str(e)
+
+        threading.Thread(target=_segment_thread, daemon=True).start()
+
+        # ----------------------------------------------------------------
+        # Timer: poll thread completion, then import
+        # ----------------------------------------------------------------
+        def _wait_and_import():
+            if captured['error']:
+                print(f"[Part] Segmentation failed: {captured['error']}")
+                return None
+
+            if not captured['done']:
+                elapsed = time.time() - captured['start_time']
+                if elapsed > 600:  # 10-minute hard timeout
+                    print(f"[Part] Timed out after {elapsed:.0f}s")
+                    return None
+                return 2.0  # still running — check again in 2s
+
+            # Thread done — import in main thread
+            dl_path = captured['dl_path']
+            _import_retries = [0]
+            _MAX_RETRIES    = 20
+
+            def _do_import():
+                try:
+                    if bpy.context.mode != 'OBJECT':
+                        bpy.ops.object.mode_set(mode='OBJECT')
+
+                    original_set = set(bpy.data.objects)
+                    bpy.ops.import_scene.gltf(filepath=str(dl_path))
+                    newly = [o for o in bpy.data.objects if o not in original_set]
+
+                    if not newly:
+                        print("[Part] Import succeeded but no new objects found")
+                        return None
+
+                    mesh_objs = [o for o in newly if o.type == 'MESH']
+                    non_mesh  = [o for o in newly if o.type != 'MESH']
+
+                    for mo in mesh_objs:
+                        if mo.parent:
+                            wm = mo.matrix_world.copy()
+                            mo.parent = None
+                            mo.matrix_world = wm
+                    for nm in non_mesh:
+                        bpy.data.objects.remove(nm, do_unlink=True)
+
+                    if not mesh_objs:
+                        print("[Part] No mesh objects after import")
+                        return None
+
+                    bpy.ops.object.select_all(action='DESELECT')
+                    for mo in mesh_objs:
+                        mo.select_set(True)
+                    bpy.context.view_layer.objects.active = mesh_objs[0]
+                    bpy.ops.object.transform_apply(
+                        location=False, rotation=True, scale=True)
+
+                    # Measure imported bbox
+                    all_corners = []
+                    for mo in mesh_objs:
+                        all_corners += [mo.matrix_world @ Vector(c)
+                                        for c in mo.bound_box]
+                    ix = [c.x for c in all_corners]
+                    iy = [c.y for c in all_corners]
+                    iz = [c.z for c in all_corners]
+                    imp_max_dim = max(max(ix)-min(ix),
+                                     max(iy)-min(iy),
+                                     max(iz)-min(iz), 0.001)
+                    imp_center  = Vector((
+                        (min(ix)+max(ix))/2,
+                        (min(iy)+max(iy))/2,
+                        (min(iz)+max(iz))/2,
+                    ))
+
+                    scale_factor = captured['proxy_max_dim'] / imp_max_dim
+                    proxy_center = captured['proxy_center']
+                    base_name    = f"Part_{captured['token']}"
+                    for i, mo in enumerate(mesh_objs):
+                        mo.name    = base_name if i == 0 else f"{base_name}_{i}"
+                        mo.scale   = mo.scale * scale_factor
+                        mo.location = (mo.location
+                                       + (proxy_center - imp_center * scale_factor))
+
+                    print(f"[Part] Scale: {scale_factor:.4f} "
+                          f"(proxy {captured['proxy_max_dim']:.3f}m / "
+                          f"imported {imp_max_dim:.3f}m)")
+
+                    # Hide proxy (the original mesh is preserved, just hidden)
+                    proxy = bpy.data.objects.get(captured['proxy_name'])
+                    if proxy:
+                        proxy.hide_set(True)
+
+                    from . import workspace_setup as ws
+                    ws.save_mesh_to_library(bpy.context, dl_path, mesh_type='mesh')
+
+                    print(f"[Part] ============================================")
+                    print(f"[Part] SEGMENTATION COMPLETE: {base_name}")
+                    print(f"[Part] ============================================")
+
+                except RuntimeError as e:
+                    if ("drawing/rendering" in str(e)
+                            or "can't modify blend data" in str(e)):
+                        _import_retries[0] += 1
+                        if _import_retries[0] <= _MAX_RETRIES:
+                            print(f"[Part] Blend data busy, retry "
+                                  f"{_import_retries[0]}/{_MAX_RETRIES}")
+                            return 0.2
+                        else:
+                            print("[Part] ❌ Import abandoned after retries")
+                    else:
+                        print(f"[Part] Import error: {e}")
+                        import traceback; traceback.print_exc()
+                except Exception as e:
+                    print(f"[Part] Import error: {e}")
+                    import traceback; traceback.print_exc()
+                return None
+
+            bpy.app.timers.register(_do_import, first_interval=0.5)
+            return None  # stop the outer wait timer
+
+        bpy.app.timers.register(_wait_and_import, first_interval=2.0)
         return {'FINISHED'}
 
 
@@ -6284,12 +7456,41 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
             single_header.label(text="", icon='IMAGE_DATA')
             
             if style_props.show_3d_single_image:
-                col = single_box.column(align=True)
-                col.scale_y = 1.2
-                col.operator("style_engine.create_object", text="Generate Mesh", icon='MESH_UVSPHERE')
-                col.operator("style_engine.create_textured_object", text="Generate Textured Mesh", icon='SHADING_TEXTURE')
-                col.operator("style_engine.uv_texture", text="UV Texture", icon='UV')
-                col.operator("style_engine.nano_3d_generate", text="Nano", icon='OUTLINER_OB_LIGHT')
+                # ── TRELLIS2 — main generation buttons ───────────────────
+                trellis_col = single_box.column(align=True)
+                trellis_col.scale_y = 1.4
+                trellis_col.operator("style_engine.trellis_generate",
+                                     text="Generate 3D",
+                                     icon='MESH_UVSPHERE')
+                trellis_col.operator("style_engine.trellis_retexture",
+                                     text="Retexture Mesh",
+                                     icon='MATSHADERBALL')
+
+                # ── TRELLIS2 — params ────────────────────────────────────
+                single_box.separator(factor=0.5)
+                t_col = single_box.column(align=True)
+                t_col.prop(style_props, "trellis_quality", text="")
+                t_col.prop(style_props, "trellis_texture_size", text="Texture")
+
+                t_row = single_box.row(align=True)
+                t_row.prop(style_props, "trellis_steps",    text="Steps")
+                t_row.prop(style_props, "trellis_guidance", text="Guidance")
+
+                rembg_row = single_box.row(align=True)
+                rembg_row.scale_y = 1.2
+                rembg_row.prop(style_props, "trellis_remove_bg",
+                               text="Remove BG", toggle=True, icon='IMAGE_ALPHA')
+
+                # ── Retexture advanced params (collapsible hint) ──────────
+                single_box.separator(factor=0.5)
+                rt_col = single_box.column(align=True)
+                rt_col.scale_y = 0.9
+                rt_col.label(text="Retexture params:", icon='MATSHADERBALL')
+                rt_col.prop(style_props, "trellis_tex_resolution", text="Res")
+                rt_col.prop(style_props, "trellis_tex_steps",    text="Steps")
+                rt_col.prop(style_props, "trellis_tex_guidance", text="Guidance")
+
+                single_box.separator()
 
                 # ── Omni sub-section ──────────────────────────────────────
                 omni_col = single_box.column(align=True)
@@ -6307,6 +7508,20 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                 # BBox debug is only meaningful in bbox mode
                 if style_props.omni_control_type == 'BBOX':
                     omni_col.operator("style_engine.omni_bbox_debug", text="Calculate BBox", icon='SNAP_VOLUME')
+
+                # ── Segment Mesh (Hunyuan3D-Part) ─────────────────────────
+                single_box.separator()
+                seg_col = single_box.column(align=True)
+                seg_col.label(text="Part Segmentation:", icon='OUTLINER_OB_SURFACE')
+                seg_btn = seg_col.row(align=True)
+                seg_btn.scale_y = 1.4
+                seg_btn.operator("style_engine.segment_mesh",
+                                 text="Segment Mesh",
+                                 icon='OUTLINER_OB_SURFACE')
+                param_col = single_box.column(align=True)
+                param_col.scale_y = 0.9
+                param_col.prop(style_props, "part_point_num",  text="Point Samples")
+                param_col.prop(style_props, "part_prompt_num", text="Query Points")
 
             # ────────────────────────────────────────────────────────────
             # 3D FROM MULTIVIEW SUB-CATEGORY (Collapsible, closed by default)
@@ -7249,6 +8464,9 @@ classes = (
     WM_OT_ProjectTexture,
     WM_OT_NanoGenerate,
     WM_OT_Nano3DGenerate,
+    WM_OT_TrellisGenerate,
+    WM_OT_TrellisRetexture,
+    WM_OT_SegmentMesh,
     WM_OT_OmniGenerate,
     WM_OT_OmniBBoxDebug,
     WM_OT_TogglePatchCamera,

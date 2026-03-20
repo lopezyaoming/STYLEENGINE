@@ -57,7 +57,7 @@ addon_dir = /Users/.../addons
 # On macOS with backslash in path:
 os.path.dirname("/Users/.../addons/styleengine\__init__.py")
 # Returns: "/Users/.../addons"
-# Because macOS sees "styleengine\__init__.py" as a SINGLE filename!
+# Because macOS sees "styleengine\art_director.py" as a SINGLE filename!
 ```
 
 ---

@@ -86,7 +86,7 @@ import sys
 import types
 
 def setup_module_fallback():
-    if "__init__.py" in __file__:
+    if "art_director.py" in __file__:
         # Create fake modules for relative imports
         # ... fallback code ...
 ```

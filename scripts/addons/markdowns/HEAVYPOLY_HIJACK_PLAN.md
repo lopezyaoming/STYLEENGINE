@@ -48,7 +48,7 @@ Style Engine is taking over HEAVYPOLY's hotkeys and pie menus to seamlessly inte
 
 **Implementation Strategy:**
 ```python
-# In __init__.py or new heavypoly_integration.py
+# In art_director.py or new heavypoly_integration.py
 
 def register_heavypoly_hijacks():
     if not is_heavypoly_compatible():

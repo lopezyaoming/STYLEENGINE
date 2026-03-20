@@ -75,7 +75,7 @@ EXCLUDE_PATTERNS = {
 
 # Required files (will warn if missing)
 REQUIRED_FILES = [
-    '__init__.py',  # Must have bl_info
+    'art_director.py',  # Must have bl_info
     'README.md',
 ]
 
@@ -302,8 +302,8 @@ def package_addon():
         print(f"[ERROR] Source directory not found: {source_dir}")
         return False
     
-    if not (source_dir / '__init__.py').exists():
-        print(f"[ERROR] __init__.py not found in {source_dir}")
+    if not (source_dir / 'art_director.py').exists():
+        print(f"[ERROR] art_director.py not found in {source_dir}")
         print("   Is this the correct addon directory?")
         return False
     

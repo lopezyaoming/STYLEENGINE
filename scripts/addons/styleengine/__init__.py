@@ -85,6 +85,7 @@ try:
     from . import progress_bar
     from . import heavypoly_integration
     from . import pie_menu
+    from . import trellis_client
 except (ImportError, ValueError) as e:
     # Fallback for strict import systems (macOS during installation)
     print(f"[Style Engine] Using fallback imports (macOS compatibility mode)")
@@ -94,8 +95,8 @@ except (ImportError, ValueError) as e:
     import importlib.util
     import types
     
-    # Verify addon_dir is correct (should contain __init__.py, utils.py, etc.)
-    expected_files = ['__init__.py', 'utils.py', 'ui_panel.py', 'prefs.py']
+    # Verify addon_dir is correct (should contain art_director.py, utils.py, etc.)
+    expected_files = ['art_director.py', 'utils.py', 'ui_panel.py', 'prefs.py']
     missing_files = [f for f in expected_files if not os.path.exists(os.path.join(addon_dir, f))]
     
     if missing_files:
@@ -113,7 +114,7 @@ except (ImportError, ValueError) as e:
             "   → Reinstall fresh styleengine.zip",
             "",
             "2. ZIP structure is incorrect",
-            "   → ZIP should contain: styleengine/__init__.py, styleengine/utils.py, etc.",
+            "   → ZIP should contain: styleengine/art_director.py, styleengine/utils.py, etc.",
             "   → Run: python validate_package.py styleengine.zip",
             "",
             "3. macOS/Blender installation quirk",
@@ -193,6 +194,7 @@ except (ImportError, ValueError) as e:
     runcomfy_polling = load_module("runcomfy_polling")
     heavypoly_integration = load_module("heavypoly_integration")
     pie_menu = load_module("pie_menu")
+    trellis_client = load_module("trellis_client")
     
     print(f"[Style Engine] All modules loaded successfully!")
 

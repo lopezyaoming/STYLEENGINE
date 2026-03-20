@@ -1302,25 +1302,24 @@ class STYLEENGINE_MT_pie_main(Menu):
         
         col.separator()
         col.separator()
-        
-        # 3D Generation buttons
-        col.operator("style_engine.uv_texture", 
-                     text="UV Texture", 
-                     icon='UV')
-        col.operator("style_engine.create_object", 
-                     text="Create Object", 
-                     icon='MESH_CUBE')
-        col.operator("style_engine.create_textured_object", 
-                     text="Create Textured Object", 
-                     icon='SHADING_TEXTURE')
-        
-        col.separator()
-        
-        # 3D Quality selector
-        quality_box = col.box()
-        quality_col = quality_box.column(align=True)
-        quality_col.label(text="3D Quality", icon='MODIFIER')
-        quality_col.prop(style_props, "object_quality", text="")
+
+        # ── TRELLIS2 3D generation ────────────────────────────────────
+        trellis_col = col.column(align=True)
+        trellis_col.scale_y = 1.4
+        trellis_col.operator("style_engine.trellis_generate",
+                             text="Generate 3D",
+                             icon='MESH_UVSPHERE')
+        trellis_col.operator("style_engine.trellis_retexture",
+                             text="Retexture Mesh",
+                             icon='MATSHADERBALL')
+
+        col.separator(factor=0.5)
+        tq_box = col.box()
+        tq_col = tq_box.column(align=True)
+        tq_col.label(text="TRELLIS2 Quality", icon='MODIFIER')
+        tq_col.prop(style_props, "trellis_quality", text="")
+        tq_col.prop(style_props, "trellis_remove_bg",
+                    text="Remove BG", toggle=True, icon='IMAGE_ALPHA')
         
         # ═══════════════════════════════════════════════════
         # Position 1: LEFT (WEST) - Workspace

@@ -287,7 +287,7 @@ def on_blend_file_saved(dummy):
 
 ### Registration
 ```python
-# In __init__.py
+# In art_director.py
 def register():
     # ... register modules ...
     

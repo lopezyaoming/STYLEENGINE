@@ -65,9 +65,9 @@ def validate_addon_zip(zip_path):
         if not any(f.startswith('styleengine/') for f in files):
             errors.append("❌ ZIP must contain 'styleengine/' folder at root")
         
-        # 2. Check for __init__.py
-        if 'styleengine/__init__.py' not in files:
-            errors.append("❌ Missing styleengine/__init__.py")
+        # 2. Check for art_director.py
+        if 'styleengine/art_director.py' not in files:
+            errors.append("❌ Missing styleengine/art_director.py")
         
         # 3. Check for required modules
         required = ['ui_panel.py', 'prefs.py', 'utils.py', 'workspace_setup.py']
@@ -80,10 +80,10 @@ def validate_addon_zip(zip_path):
             if '\\' in filename:
                 errors.append(f"❌ Windows path separator in: {filename}")
         
-        # 5. Check bl_info in __init__.py
-        init_content = zf.read('styleengine/__init__.py').decode('utf-8')
+        # 5. Check bl_info in art_director.py
+        init_content = zf.read('styleengine/art_director.py').decode('utf-8')
         if 'bl_info' not in init_content:
-            errors.append("❌ Missing bl_info in __init__.py")
+            errors.append("❌ Missing bl_info in art_director.py")
         
         # 6. Check for relative imports in modules
         for module in ['ui_panel.py', 'prefs.py', 'workspace_setup.py']:
@@ -93,7 +93,7 @@ def validate_addon_zip(zip_path):
                 if 'from . import' in content or 'from ..' in content:
                     # This is OK IF the fallback system is in place
                     if 'types.ModuleType' not in init_content:
-                        warnings.append(f"⚠️ {module} uses relative imports but no fallback in __init__.py")
+                        warnings.append(f"⚠️ {module} uses relative imports but no fallback in art_director.py")
         
         # 7. Check file sizes (detect accidental binary inclusions)
         for filename in files:
@@ -319,7 +319,7 @@ REM ... existing code ...
 Add diagnostic output to `__init__.py` that can be toggled:
 
 ```python
-# At top of __init__.py
+# At top of art_director.py
 DEBUG_IMPORTS = os.environ.get('STYLEENGINE_DEBUG', '0') == '1'
 
 def debug_print(msg):

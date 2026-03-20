@@ -1,0 +1,1999 @@
+================================================================================
+                       STYLE ENGINE — COMPLETE UX FLOW
+                    Comprehensive User Experience Documentation
+================================================================================
+
+Version: 0.5.1
+Date: January 2026
+Purpose: Complete walkthrough of every UI element, feature, and workflow
+Audience: Designers, Developers, QA, Documentation Writers
+
+================================================================================
+WHAT CHANGED SINCE v0.3.7 (EXECUTIVE SUMMARY)
+================================================================================
+
+v0.5.1 is a major expansion. The addon grew from a 2D image generation tool
+into a full AI art + 3D generation pipeline. Key additions:
+
+• DUAL AI MODEL SYSTEM — Gemini 3 Pro alongside the original SDXL/ControlNet
+  pipeline, each with its own UI, prompt system, and workflow routing.
+  Gemini is now the DEFAULT model.
+
+• FULL 3D GENERATION — Three independent 3D generation pipelines:
+    - TRELLIS2   (image → fully textured GLB,  port 8195)
+    - Hunyuan3D-Omni  (mesh-conditioned 3D,    port 8190)
+    - Hunyuan3D-Part  (mesh segmentation,      port 7860)
+
+• GENERATION HISTORY — Prev/Next navigation. Filenames embed resolution
+  so camera format is restored when navigating older generations.
+
+• UPLOAD LOCAL IMAGE — Any PNG/JPG can enter the pipeline as current_ai.png
+  with automatic rescaling (SDXL: snap to native res; Gemini: max 1920px).
+
+• REFINE CURRENT IMAGE — Use current_ai.png directly as generation input
+  instead of re-rendering the scene. Works for both models.
+
+• LIVE PROGRESS BAR — Unified server status and generation progress for
+  all five backend services (ComfyUI, TRELLIS2, Omni, Part, Bridge).
+
+• REMOVE BACKGROUND — Available for both SDXL and Gemini, routing to
+  dedicated RB-variant workflows or a standalone UtilsImageRB.json.
+
+BACKEND SERVICES (ALL PORTS):
+  8188  ComfyUI           — SDXL, UV texture, PBR, Gemini workflows
+  8189  Progress Bridge   — Realtime node-level status feed
+  8190  Hunyuan3D-Omni    — Mesh-conditioned 3D generation
+  8195  TRELLIS2          — Single-image to textured 3D
+  7860  Hunyuan3D-Part    — Mesh part segmentation (Gradio)
+
+
+================================================================================
+TABLE OF CONTENTS
+================================================================================
+
+PART 1:  OVERVIEW & INSTALLATION
+PART 2:  USER INTERFACE ANATOMY
+PART 3:  BASIC WORKFLOW (FIRST-TIME USER)
+PART 4:  PROMPT SYSTEM
+    4A — SDXL HTML-Tag Prompt System
+    4B — Gemini Plain-Text Prompt System
+    4C — Gemini Instructions (Style Presets)
+    4D — LLM Prompt Refinement (SDXL / Ollama)
+PART 5:  AI MODEL SELECTION & ROUTING
+PART 6:  IMAGE GENERATION — SDXL MODE
+PART 7:  IMAGE GENERATION — GEMINI 3 PRO MODE
+PART 8:  GENERATION CONTROLS (SHARED)
+    8A — Refine Current Image
+    8B — Upload Local Image
+    8C — Generation Browser (Prev/Next History)
+    8D — Remove Background
+PART 9:  REFERENCE IMAGES (IPADAPTER + GEMINI)
+PART 10: PROGRESS BAR & STATUS SYSTEM
+PART 11: TEXTURE & MATERIAL OPERATIONS
+    11A — Texture Projection
+    11B — UV Texture Generation
+    11C — PBR from Projected Texture
+    11D — PBR from Text
+    11E — Multiview from Projected
+PART 12: 3D GENERATION — TRELLIS2 (Single Image)
+PART 13: 3D GENERATION — HUNYUAN3D-OMNI (Mesh Conditioned)
+PART 14: 3D GENERATION — HUNYUAN3D-PART (Mesh Segmentation)
+PART 15: PIE MENU (Alt+W) DEEP DIVE
+PART 16: WORKFLOW FILE INVENTORY
+PART 17: FILE ORGANIZATION & SESSION MANAGEMENT
+PART 18: BACKEND MODES (GCS / RUNCOMFY)
+PART 19: ERROR STATES & FEEDBACK
+PART 20: TECHNICAL UX DETAILS
+PART 21: CRITICAL DESIGN DECISIONS
+PART 22: APPENDIX — QUICK REFERENCE
+
+
+================================================================================
+PART 1: OVERVIEW & INSTALLATION
+================================================================================
+
+1.1 WHAT IS STYLE ENGINE
+-------------------------
+
+Style Engine is a Blender addon that bridges 3D modeling, AI image generation,
+and AI 3D generation. It allows artists to:
+
+• Generate AI images from Blender renders in real-time (SDXL or Gemini 3 Pro)
+• Project AI textures onto 3D objects
+• Generate fully textured 3D meshes from a single image (TRELLIS2)
+• Condition 3D generation on existing geometry (Hunyuan3D-Omni)
+• Segment meshes into semantic parts (Hunyuan3D-Part)
+• Use reference images to guide AI generation (IPAdapter / Gemini refs)
+• Generate UV-mapped PBR materials directly from meshes
+• Navigate through generation history with camera format memory
+• Upload external images into the generation pipeline
+
+CORE VALUE PROPOSITION:
+Instead of switching between Blender and external AI tools, Style Engine
+integrates the entire art + 3D workflow inside Blender's viewport, enabling
+rapid iteration and creative exploration without leaving the application.
+
+
+1.2 CORE CONCEPT
+----------------
+
+THE PIPELINE (simplified):
+1. Model your scene in Blender
+2. Position camera view
+3. Write AI prompt in text editor
+4. Generate AI image (Gemini or SDXL)
+5. Image appears as camera background
+6. Generate 3D from the image (TRELLIS2 or Omni)
+7. Project texture onto objects, or
+8. Iterate and refine
+
+KEY INNOVATIONS:
+• Gemini 3 Pro integration — the most capable image model, driven by
+  plain conversational text. No prompt engineering required.
+• TRELLIS2 3D path — start from any generated or uploaded image and
+  get a textured GLB in under 2 minutes. No reference mesh needed.
+• Omni conditioning — use your existing 3D geometry as a structural
+  guide for the AI, producing 3D that matches your scene.
+
+
+1.3 INSTALLATION PROCESS
+------------------------
+
+STEP 1: Download / Clone Repository
+→ Obtain the styleengine addon folder
+
+STEP 2: Installation Methods
+
+METHOD A: Development Mode (Symlink — Windows)
+• Run scripts/addons/create_dev_link.ps1 as Administrator
+• Creates a symbolic link so source changes reflect instantly in Blender
+
+METHOD B: Manual Install
+• Copy scripts/addons/styleengine/ to Blender's addons directory:
+  Windows: C:\Users\<USER>\AppData\Roaming\Blender Foundation\Blender\<VER>\scripts\addons\
+  macOS:   ~/Library/Application Support/Blender/<VER>/scripts/addons/
+  Linux:   ~/.config/blender/<VER>/scripts/addons/
+
+METHOD C: ZIP Install
+• Package with scripts/addons/package_addon.bat (or validate_package.py)
+• Blender → Edit → Preferences → Add-ons → Install... → Select ZIP
+
+STEP 3: Enable Addon
+• Edit → Preferences → Add-ons → Search "Style Engine"
+• Check the checkbox
+• "Style Engine" tab appears in 3D Viewport N-panel
+
+
+1.4 INITIAL CONFIGURATION
+--------------------------
+
+REQUIRED (before first generation):
+
+1. Edit → Preferences → Add-ons → Style Engine → Expand
+
+2. Choose Backend:
+   GCS (Self-Hosted):  Enter ComfyUI server URL → Test Connection
+   RunComfy Cloud:     Browse credentials file → Import → Test Connection
+
+3. (For TRELLIS2) Verify TRELLIS2 port (default 8195) in Advanced Settings
+
+4. (For Omni/Part) Ensure VM services are running on ports 8190/7860
+
+5. Click "Test Connection" — green checkmark = ready
+
+
+================================================================================
+PART 2: USER INTERFACE ANATOMY
+================================================================================
+
+2.1 INTERFACE OVERVIEW
+----------------------
+
+Style Engine has FOUR main UI surfaces:
+
+A) N-PANEL (Primary Interface)
+   3D Viewport → Press 'N' → "Style Engine" tab
+   Contains: All generation controls, model selector, 3D buttons, references
+
+B) PIE MENU (Quick Access)
+   3D Viewport → Press 'Alt+W'
+   Contains: Generate, Setup, UV Texture, Visualize, Project, Render Passes,
+   TRELLIS2 buttons; adapts based on active model
+
+C) TEXT EDITOR (Prompt Input)
+   Created by Setup Workspace; shows STYLEENGINE_Prompt text block
+   SDXL: HTML tag format  |  Gemini: plain text
+
+D) PREFERENCES (Configuration)
+   Edit → Preferences → Add-ons → Style Engine
+   Contains: Backend settings, port overrides, API credentials
+
+
+2.2 N-PANEL LAYOUT (Top to Bottom)
+-----------------------------------
+
+┌─────────────────────────────────────────────┐
+│ STYLE ENGINE                                 │
+├─────────────────────────────────────────────┤
+│ 📁 OUTPUT PATH                              │
+│ [C:\...\MyProject_styleengine\Images]       │
+│ [Browse 📁]                                 │
+├─────────────────────────────────────────────┤
+│ ⬛ STATUS BAR (Progress Bridge)             │ ← See Part 10
+│ 🟢 Server: Ready  /  🟡 [ ████░ ] 47%      │
+│    Node: KSampler                           │
+├─────────────────────────────────────────────┤
+│ ▼ FILE                                     │ ← Collapsible
+│   AI Model: [Gemini 3 Pro ▼]               │ ← NEW in v0.5.1
+│   [Setup Workspace]                         │
+│   [Test Connection]                         │
+├─────────────────────────────────────────────┤
+│ ▼ VIEW                                     │ ← Collapsible
+│   Background Opacity: [slider]              │
+│   Visualization (SDXL only):               │
+│     [Combined] [Canny] [Depth]             │
+│   Generation Browser:                       │
+│     [◀] 12 / 18 [▶]                        │ ← NEW in v0.5.1
+├─────────────────────────────────────────────┤
+│ ▼ IMAGE GENERATION                         │ ← Collapsible
+│   [Generate AI Image] (large)               │
+│   [Refine Current Image]                    │ ← NEW in v0.5.1
+│                                             │
+│   IF GEMINI SELECTED:                       │
+│     Temperature: [0.0 ─────────── 1.0]     │
+│     Size: [1K ▼]                            │
+│     Instructions: [claymation ▼]            │
+│     [Alignment ◉]  [Remove BG □]           │
+│     Aspect: 1920x1080  (auto-detected)      │
+│     ▼ Reference Images (Gemini refs)        │
+│                                             │
+│   IF SDXL SELECTED:                         │
+│     (SDXL controls — see Part 6)            │
+│     [Remove BG □]                           │ ← NEW in v0.5.1
+│     [Project Texture]                       │
+│     [PBR from Projected Texture] (cond.)    │
+│     [Multiview from Projected]   (cond.)    │
+│     [PBR from Text]                         │
+│                                             │
+│   [Upload Image 📥]                         │ ← NEW in v0.5.1
+├─────────────────────────────────────────────┤
+│ ▼ 3D GENERATION                            │ ← NEW SECTION in v0.5.1
+│   ▶ 3D from Single Image                   │
+│     [Generate 3D (TRELLIS2)]                │
+│     [Retexture Mesh]                        │
+│     Quality: [Balanced ▼]  Texture: [4096] │
+│     Steps: [12]  Guidance: [7.5]           │
+│     [Remove BG □]                           │
+│     ── Segment Mesh ──                      │
+│     [Segment Mesh (Hunyuan3D-Part)]         │
+│     Point Samples: [50000]                  │
+│     ── Omni Mesh ──                         │
+│     [Omni Mesh]                             │
+│     Control: [BBOX ▼]                       │
+│     Guidance: [4.5]                         │
+│     [EMA □]  [FlashVDM □]                  │
+│     [Calculate BBox] (BBOX mode only)       │
+│   ▶ 3D from Multiview (Coming Soon)        │
+├─────────────────────────────────────────────┤
+│ 🖼️ REFERENCE IMAGES                        │ ← Same as v0.3.7
+│   ▼ Style (5 slots)                        │
+│   ▶ Composition (5 slots)                  │
+│   ▶ Transfer (5 slots)                     │
+└─────────────────────────────────────────────┘
+
+
+2.3 PIE MENU (Alt+W)
+--------------------
+
+Layout adapts to active model.
+
+ALWAYS PRESENT:
+      TOP
+  [UV Texture / TRELLIS2 3D]
+         |
+LEFT ────+──── RIGHT
+[Setup]  |  [Visualize]
+         |
+     [Generate AI]
+       BOTTOM
+
+  BOTTOM-LEFT       BOTTOM-RIGHT
+[Project Texture]  [Render Passes]
+
+TOP slot contains TRELLIS2 controls (Generate 3D + Retexture Mesh) plus
+the UV Texture button in a stacked layout.
+
+In GEMINI mode, the Generate AI quick-access section shows only the
+Alignment toggle. Visualization buttons are hidden entirely.
+
+In SDXL mode, full controls visible.
+
+
+2.4 TEXT EDITOR
+---------------
+
+SDXL prompt template (default when SDXL selected):
+  # Keywords
+  <k></k>
+  # Prompt
+  <p></p>
+  # Negative Prompt
+  <n></n>
+
+GEMINI prompt (blank when Gemini selected):
+  (empty — plain text, no tags)
+
+The text block "STYLEENGINE_Prompt" is always the active prompt source.
+When Gemini instructions are selected, a second text block
+"STYLEENGINE_Instructions" appears and is editable. Editing it does NOT
+modify the source template file in templates/.
+
+
+2.5 WORKSPACE LAYOUT
+--------------------
+
+After "Setup Workspace":
+  ┌──────────────────────────────────────────────────┐
+  │  [AI] workspace tab                               │
+  ├──────────────────┬───────────────────────────────┤
+  │                  │  3D VIEWPORT (Camera)          │
+  │  3D VIEWPORT     │  Background: current_ai.png    │
+  │  (Modeling)      │  Geometry overlay ON           │
+  │                  ├───────────────────────────────┤
+  │                  │  TEXT EDITOR                   │
+  │                  │  STYLEENGINE_Prompt            │
+  ├──────────────────┴───────────────────────────────┤
+  │  PROPERTIES       │  OUTLINER                     │
+  └───────────────────┴──────────────────────────────┘
+
+
+2.6 ADDON PREFERENCES
+---------------------
+
+BASIC:
+  Backend: [GCS / RunComfy ▼]
+  Server URL (GCS): http://styleengine2:8188
+  [Test Connection]
+
+ADVANCED (collapsible):
+  Request Timeout: [30]s
+  TRELLIS2 Port:   [8195]       ← NEW in v0.5.1
+  Debug Mode:      □
+  Download Preview Images: ☑
+  ComfyUI Path: [Browse...]
+
+
+================================================================================
+PART 3: BASIC WORKFLOW (FIRST-TIME USER)
+================================================================================
+
+3.1 SETUP (One-Time)
+--------------------
+
+1. Edit → Preferences → Add-ons → Style Engine
+2. Backend = GCS → enter server URL → Test Connection
+3. Close Preferences
+
+3.2 CREATE WORKSPACE
+--------------------
+
+1. Open any .blend file
+2. Position 3D view to desired camera angle
+3. Press Alt+W → LEFT (Setup Workspace)
+4. Wait ~2 seconds
+
+WHAT HAPPENS:
+• "AI" workspace tab created
+• ai_camera aligned to your view
+• STYLEENGINE_Prompt text block created
+• Black placeholder current_ai.png displayed in camera background
+• If Gemini is selected AND a scene camera exists: ai_camera adopts
+  that camera's lens, position, and resolution
+
+3.3 WRITE A PROMPT
+------------------
+
+IF GEMINI (default):
+  Click in the text editor. Type naturally.
+  Example: "a baroque corinthian column, studio lighting, white marble"
+  No tags, no markup. Just write.
+
+IF SDXL:
+  Type inside the <p></p> tags.
+  Example: <p>a baroque corinthian column, studio lighting</p>
+  Keywords and negative prompts in <k></k> and <n></n> tags.
+
+3.4 GENERATE
+------------
+
+Press Alt+W → BOTTOM (Generate AI Quick)
+
+• For Gemini: submits plain text + optional alignment render → Gemini
+• For SDXL:   renders scene → submits render + prompt → SDXL + ControlNet
+
+Wait 10–40 seconds. Image appears in camera background.
+
+3.5 ITERATE
+-----------
+
+Option A: Edit prompt → generate again
+Option B: Use "Refine Current Image" → generate a variation of the current output
+Option C: Navigate Prev/Next to revisit older generations
+Option D: Upload a new image → use as base for next generation
+
+3.6 CREATE 3D
+-------------
+
+Once you have a generated image (current_ai.png):
+
+FAST PATH (TRELLIS2):
+  In N-panel → 3D Generation → 3D from Single Image
+  Click "Generate 3D (TRELLIS2)"
+  Wait 1–3 minutes → textured GLB appears in scene
+
+GEOMETRY-CONDITIONED PATH (Omni):
+  Select a mesh in the scene
+  In N-panel → 3D from Single Image → Omni Mesh
+  Choose Control Mode (BBOX / POINT / VOXEL)
+  Click "Omni Mesh"
+  Wait 2–5 minutes → new mesh appears, scaled to original
+
+SEGMENTATION PATH (Hunyuan3D-Part):
+  Select a mesh in the scene
+  In N-panel → 3D from Single Image → Segment Mesh
+  Click "Segment Mesh"
+  Wait 2–5 minutes → assembled.glb imported
+
+3.7 PROJECT TEXTURE
+-------------------
+
+After any 2D generation:
+  Select objects → Alt+W → BOTTOM-LEFT (Project Texture)
+  AI image projected from camera onto selected objects
+  New material with UV projection created on each object
+
+
+================================================================================
+PART 4: PROMPT SYSTEM
+================================================================================
+
+4A SDXL HTML-TAG PROMPT SYSTEM
+--------------------------------
+
+FORMAT:
+  # Keywords
+  <k>quality, medium, technical modifiers</k>
+  # Prompt
+  <p>main image description</p>
+  # Negative Prompt
+  <n>things to avoid</n>
+
+PARSING RULES:
+• Lines starting with # are ignored
+• Content inside tags is extracted and trimmed
+• Keywords prepended to prompt with ", "
+• If no tags found, entire text used as raw prompt
+• <n> tag sent to negative prompt node; empty = default negative
+
+EXAMPLE:
+  <k>photorealistic, 8k, sharp focus</k>
+  <p>a medieval stone castle at sunset, dramatic clouds, golden hour</p>
+  <n>blurry, low quality, watermark, cartoon</n>
+
+DEFAULT NEGATIVE (when <n> empty):
+  "text, watermark, blurry, deformed, ugly, bad anatomy, worst quality"
+
+
+4B GEMINI PLAIN-TEXT PROMPT SYSTEM
+------------------------------------
+
+FORMAT:
+  Raw text, no markup.
+
+RULES:
+• The entire content of STYLEENGINE_Prompt is sent verbatim to node #63
+• HTML tag parser is completely bypassed when Gemini is active
+• Any existing <tags> in the text ARE passed literally to Gemini
+  (they are treated as descriptive text by the language model)
+• Empty prompt = generation with no text guidance (Gemini still runs)
+
+EXAMPLE:
+  a baroque corinthian column in white marble, studio lighting,
+  neutral background, professional product photography, detailed
+
+BEST PRACTICES:
+• Write naturally, as you would describe the image to a colleague
+• Include material, lighting, composition, mood details
+• More detail generally = better results
+• Long descriptions (paragraphs) are fully valid — Gemini handles them
+
+TEMPLATE:
+  Switching to Gemini clears STYLEENGINE_Prompt to empty.
+  Switching back to SDXL restores the HTML tag template.
+
+
+4C GEMINI INSTRUCTIONS (STYLE PRESETS)
+---------------------------------------
+
+The Instructions dropdown loads named style presets from
+  scripts/addons/styleengine/templates/instructions_*.txt
+
+CURRENT PRESETS:
+  • None      — no style instructions
+  • claymation — claylike, soft diffuse lighting, toy aesthetic
+  • salt       — salt/mineral crystal material style
+
+HOW IT WORKS:
+  1. User selects a preset from the dropdown
+  2. The file instructions_<name>.txt is read from templates/
+  3. Its content is written to a "STYLEENGINE_Instructions" text block
+     (visible and editable in the text editor area)
+  4. At generation time, node #65 in the Gemini workflow receives this text
+  5. If no instructions selected, node #65 receives empty string (safe)
+
+EDITING:
+  The loaded instruction text can be freely edited in the text editor.
+  Edits do NOT modify the source .txt template file.
+  The edited version is used for the next generation.
+
+ADDING NEW PRESETS:
+  Drop instructions_<myname>.txt into the templates/ folder.
+  It appears in the dropdown immediately — no Blender restart needed.
+
+
+4D LLM PROMPT REFINEMENT (SDXL ONLY)
+--------------------------------------
+
+BUTTON: "Refine Prompt (LLM)" (N-panel, Image Generation section)
+
+REQUIREMENTS:
+  • GCS backend mode
+  • ComfyUI running with Griptape nodes
+  • Ollama installed with gemma3:4b model
+
+WHAT IT DOES:
+  Sends the current <p> tag content through TextRefine.json workflow.
+  The LLM applies 8 prompt engineering rules and replaces the <p> content
+  with a richer, more detailed description. <k> and <n> tags are unchanged.
+
+BEHAVIOR: Blocking operation (UI freezes 3–10 seconds).
+OUTPUT PARSING: Handles Griptape's character-array output format (joins
+individual characters into a single string before updating the text block).
+
+
+================================================================================
+PART 5: AI MODEL SELECTION & ROUTING
+================================================================================
+
+5.1 THE MODEL SELECTOR
+-----------------------
+
+LOCATION: N-panel → "File" section → AI Model dropdown
+PROPERTY: scene.style_engine_props.ai_model
+OPTIONS:
+  • GEMINI — "Gemini 3 Pro" (nano-banana model)   ← DEFAULT
+  • SDXL   — "Stable Diffusion" (SDXL + ControlNet)
+
+SWITCHING MODELS:
+When ai_model changes, _on_ai_model_changed() fires:
+  1. Resets STYLEENGINE_Prompt to the appropriate template:
+       Gemini → empty text
+       SDXL   → HTML tag template
+  2. If switching to Gemini AND a non-ai_camera exists in scene:
+       sync_ai_camera_from_scene() aligns ai_camera to the scene camera
+       (copies focal length, position, resolution)
+
+
+5.2 HOW ROUTING WORKS
+----------------------
+
+At generation time, the code checks props.ai_model and branches into
+completely separate submission paths:
+
+SDXL PATH:
+  1. Render scene (EEVEE Next, 64 samples) → combined.jpg
+  2. Parse HTML tags from STYLEENGINE_Prompt
+  3. Build positive/negative strings
+  4. Choose workflow: Image.json / ImageRef.json / ImageRB.json / ImageRefRB.json
+  5. Patch workflow JSON (prompt nodes, ControlNet, resolution, LoRa)
+  6. Upload combined.jpg + any references → ComfyUI
+  7. Poll ComfyUI → download current_ai.png + canny.png + depth.png
+
+GEMINI PATH:
+  1. Read raw text from STYLEENGINE_Prompt
+  2. Read instructions from STYLEENGINE_Instructions (if any)
+  3. Determine aspect ratio from render resolution
+  4. Choose workflow: ImageNanoText / ImageNanoAlignment /
+     ImageNanoTextRB / ImageNanoAlignmentRB / ImageNanoReference[RB]
+  5. If Alignment ON: render scene → upload combined.jpg
+  6. Patch nodes: #63 (prompt), #65 (instructions), #66 (alignment image),
+     #41 (temperature + size), aspect ratio field
+  7. Upload blank.png for any unused reference slots
+  8. Submit to ComfyUI → poll → download current_ai.png ONLY
+     (no canny/depth outputs in Gemini workflows)
+
+
+5.3 GEMINI CAMERA SYNC
+-----------------------
+
+When Gemini is active and a scene camera exists,
+sync_ai_camera_from_scene() runs on model switch and on workspace setup:
+
+  • ai_camera copies the scene camera's:
+    — World matrix (position + rotation)
+    — Lens focal length
+    — Sensor size
+    — Render resolution (X and Y set directly, not via enum)
+
+This ensures the Gemini output matches exactly what the scene camera sees,
+and the output resolution matches the scene camera's format.
+
+The ai_resolution SDXL enum is NOT used in Gemini mode. Resolution is
+set by render.resolution_x / render.resolution_y directly.
+
+
+================================================================================
+PART 6: IMAGE GENERATION — SDXL MODE
+================================================================================
+
+6.1 GENERATION CONTROLS (SDXL)
+--------------------------------
+
+VISIBLE IN N-PANEL:
+  • Steps slider (default: 15, range: 15–30)
+  • Influence slider (default: 0.25, range: 0.0–0.7)
+    Interpretation: 0.0 = full AI, 0.70 = maximum adherence to render
+  • LoRa dropdown (fetched from ComfyUI, filtered by ignore.txt)
+  • Resolution (dropdown, default: 1024×1024)
+  • Remove BG toggle (NEW — see Part 8D)
+
+6.2 WORKFLOW SELECTION (SDXL)
+------------------------------
+
+SDXL workflow is chosen based on two conditions:
+
+  Reference images loaded?  |  Remove BG?  |  Workflow
+  ──────────────────────────┼──────────────┼──────────────────────
+  No                        |  No          |  Image.json
+  Yes                       |  No          |  ImageRef.json
+  No                        |  Yes         |  ImageRB.json
+  Yes                       |  Yes         |  ImageRefRB.json
+
+The "RB" variants add an InspyrenetRembg node after the SDXL output,
+producing a transparent-background PNG.
+
+6.3 SDXL OUTPUT
+----------------
+
+Downloads 3 files on completion:
+  • current_ai.png  — final AI-generated image
+  • canny.png       — Canny edge map (ControlNet input)
+  • depth.png       — Depth map (ControlNet input)
+
+Camera background switches to current_ai.png.
+Visualization buttons in N-panel allow switching between the 3 views.
+
+6.4 VISUALIZATION MODES (SDXL ONLY)
+-------------------------------------
+
+Three camera background modes, accessible via N-panel View section
+and Pie Menu → RIGHT:
+
+  Combined (Final) — current_ai.png  ← default after generation
+  Silhouette (Canny) — canny.png     ← ControlNet edge input
+  Depth              — depth.png     ← ControlNet depth input
+
+These views are HIDDEN when Gemini is the active model (Gemini produces
+a single output — no intermediate passes exist to display).
+
+
+================================================================================
+PART 7: IMAGE GENERATION — GEMINI 3 PRO MODE
+================================================================================
+
+7.1 GEMINI CONTROLS
+--------------------
+
+UI SECTION: N-panel → Image Generation (when Gemini selected)
+
+┌────────────────────────────────────────────────┐
+│ [Generate AI Image]          (large button)     │
+│ [Refine Current Image]                          │
+│                                                 │
+│ Temperature: [█─────────────────] 0.0  ←slider │
+│ Size: [1K ▼]                                    │
+│ Instructions: [None ▼]                          │
+│ [Alignment ◉]  [Remove BG □]                   │
+│ Aspect: 1920x1080  (auto from render res)       │
+│                                                 │
+│ ▼ Reference Images (Gemini refs)               │
+└────────────────────────────────────────────────┘
+
+PARAMETER DETAILS:
+
+Temperature (0.0 → 1.0):
+  Controls how far Gemini diverges from the input (render + prompt).
+  0.0 = most faithful, highly deterministic
+  1.0 = most creative, may deviate significantly
+
+Size (1K / 2K / 4K):
+  Output resolution target sent to Gemini node #41.
+  Independent of aspect ratio.
+
+Instructions (dropdown):
+  Loads a style preset from templates/instructions_*.txt
+  See Part 4C for details.
+
+Alignment toggle:
+  ON  (default) — render + text sent → spatial alignment with 3D scene
+  OFF           — text only → pure text-to-image generation
+
+Remove BG toggle:
+  ON — adds rembg post-processing step after Gemini output
+  See Part 8D for routing logic.
+
+Aspect ratio:
+  Read-only label. Auto-detected from scene render.resolution_x/y.
+  Rounded to nearest valid Gemini ratio:
+    1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3
+
+  User adjusts by resizing the camera or changing render resolution.
+  NO manual aspect control — it simply follows the camera.
+
+
+7.2 GEMINI WORKFLOW ROUTING
+-----------------------------
+
+  Alignment | Remove BG | References | Workflow
+  ──────────┼───────────┼────────────┼─────────────────────────────
+  OFF       | OFF       | No         | ImageNanoText.json
+  ON        | OFF       | No         | ImageNanoAlignment.json
+  OFF       | ON        | No         | ImageNanoTextRB.json
+  ON        | ON        | No         | ImageNanoAlignmentRB.json
+  Any       | OFF       | Yes        | ImageNanoReference.json
+  Any       | ON        | Yes        | ImageNanoReferenceRB.json
+
+
+7.3 GEMINI REFERENCE IMAGES
+-----------------------------
+
+The same 15-slot reference image UI (Style / Composition / Transfer)
+is available in Gemini mode. Behavior differences vs SDXL:
+
+EMPTY SLOT HANDLING:
+  Empty slots are dynamically REMOVED from the workflow JSON before
+  submission. The corresponding LoadImage node (#67 and siblings) plus
+  all their connections are stripped from the workflow dictionary.
+  This prevents ComfyUI validation errors on partially filled slots.
+
+BLANK.PNG FALLBACK:
+  templates/blank.png (a 5×5 white pixel image) is uploaded and used
+  for placeholder slots in edge cases. Referenced by absolute path
+  relative to __file__ — works regardless of install location.
+
+IMAGE COMPRESSION:
+  All reference images are compressed before upload:
+  Longest side capped at 1920px, aspect ratio preserved.
+  Prevents excessively long upload times for large source images.
+
+
+7.4 GEMINI OUTPUT
+-----------------
+
+Downloads 1 file on completion:
+  • current_ai.png — final Gemini output
+
+Only current_ai.png is downloaded. No canny/depth files exist.
+Camera background updates. Visualization buttons hidden.
+
+
+================================================================================
+PART 8: GENERATION CONTROLS (SHARED)
+================================================================================
+
+8A REFINE CURRENT IMAGE
+------------------------
+
+BUTTON: "Refine Current Image" (N-panel, both models)
+OPERATOR: style_engine.refine_current_image
+
+PURPOSE:
+  Instead of rendering the Blender scene as the generation input,
+  uses the existing current_ai.png as the conditioning image.
+
+USE CASES:
+  • Iterate on an already-generated image without moving the camera
+  • Refine an uploaded image
+  • Chain multiple passes: generate → refine → refine again
+  • Apply new prompt/instructions to an existing image
+
+BEHAVIOR:
+  Workflow selection and all parameters are identical to a normal
+  generation. The ONLY difference is that combined.jpg is not rendered
+  from Blender — instead, current_ai.png is used as the input image.
+
+TECHNICAL:
+  Controlled by refine_mode=True parameter in
+  workspace_setup.generate_ai_image_cloud(). When True:
+    • combined.jpg is set to the path of current_ai.png
+    • Blender rendering step is skipped entirely
+    • All other patching, upload, and polling runs as normal
+
+
+8B UPLOAD LOCAL IMAGE
+----------------------
+
+BUTTON: "Upload Image 📥" (N-panel, Image Generation section)
+OPERATOR: style_engine.upload_current_ai
+
+PURPOSE:
+  Upload any local image file as the current AI generation.
+  The image enters the pipeline exactly as if it was generated by the AI.
+
+WHAT HAPPENS ON UPLOAD:
+  1. File browser opens (PNG, JPG, JPEG, etc.)
+  2. Image is rescaled according to active model (see below)
+  3. Rescaled image saved as current_ai.png in temp directory
+  4. Camera background updated to show the uploaded image
+  5. Timestamped copy saved to project Images/ folder
+     (filename ends with _uploaded.png)
+  6. Image added to generation history (Prev/Next navigation includes it)
+
+RESCALING RULES:
+
+  SDXL MODE:
+    Computes the uploaded image's aspect ratio.
+    Finds the closest SDXL-native resolution from the enum:
+      512×512, 768×768, 1024×1024, 1024×576, 576×1024,
+      1024×768, 768×1024, 1536×1536, 1024×1536, 1536×1024
+    Resizes the image to exactly that resolution.
+    Minor stretching is acceptable (intentional design trade-off).
+
+  GEMINI MODE:
+    Preserves the original aspect ratio.
+    If longest side > 1920px: scales down, longest side = 1920px.
+    If already within 1920px: kept as-is (no upscaling).
+
+  Implementation uses Blender's native image API (no PIL dependency).
+
+
+8C GENERATION BROWSER (PREV / NEXT HISTORY)
+--------------------------------------------
+
+LOCATION: N-panel → View section → "Generation Browser" label
+
+UI:
+  ┌──────────────────────────────┐
+  │ Generation Browser:          │
+  │ [◀]   12 / 18   [▶]         │
+  │       (filename)             │
+  └──────────────────────────────┘
+
+OPERATORS:
+  style_engine.prev_generation — go to older generation
+  style_engine.next_generation — go to newer generation
+
+BEHAVIOR:
+  • Reads sorted list of *.png files from project Images/ directory
+  • Tracks _history_index pointing to current position
+  • [◀] disabled when at oldest  [▶] disabled when at newest
+  • Counter shows current position / total count
+  • Selecting a generation updates current_ai.png and camera background
+
+FORMAT MEMORY:
+  Generation filenames embed the output resolution:
+    20260313_081017_195_gcs_1024x1024.png
+                                ─────────
+  When navigating to a previous generation, _restore_resolution_from_path()
+  parses the _WxH.png suffix:
+    • For SDXL-standard resolutions: also updates ai_resolution enum
+    • For non-standard (Gemini free-form): sets render.resolution_x/y directly
+
+  This ensures the camera format matches what was used during that generation.
+  Going back to a 16:9 Gemini generation restores 16:9. Going back to a
+  1:1 SDXL generation restores 1024×1024.
+
+INCLUDES:
+  All *.png files in Images/ are included:
+    • _gcs.png          (SDXL generation)
+    • _runcomfy.png     (RunComfy generation)
+    • _uploaded.png     (uploaded local images)
+    • _textured.glb     (3D library items, separate)
+
+
+8D REMOVE BACKGROUND
+---------------------
+
+AVAILABLE FOR: Both SDXL and Gemini
+
+SDXL — sdxl_remove_bg property:
+  Toggle button in N-panel Image Generation section (SDXL mode only)
+  Routes to ImageRB.json or ImageRefRB.json
+  InspyrenetRembg node runs on the SDXL output inside ComfyUI
+
+GEMINI — gemini_remove_bg property:
+  Toggle button alongside Alignment in the Gemini controls
+  Routes to one of the *RB.json Gemini workflow variants
+  Same InspyrenetRembg processing after Gemini output
+
+STANDALONE UTILITY (UtilsImageRB.json):
+  Used internally by TRELLIS2 when "Remove BG" is ON:
+  A blocking pre-pass that strips the background from current_ai.png
+  before submitting to TRELLIS2 (which requires RGBA PNG).
+
+OUTPUT:
+  All RB variants produce a transparent-background RGBA PNG.
+  current_ai.png will have alpha channel.
+  Useful before any 3D generation step (TRELLIS2 requires RGBA).
+
+
+================================================================================
+PART 9: REFERENCE IMAGES (IPADAPTER + GEMINI)
+================================================================================
+
+9.1 OVERVIEW
+------------
+
+15 reference image slots across 3 categories.
+Available for both SDXL (IPAdapter nodes) and Gemini (reference workflow).
+
+CATEGORIES:
+  Style Transfer (ST1–ST5)       — Artistic style, palette, texture
+  Composition (COMP1–COMP5)      — Layout, subject placement, framing
+  Transfer/Force (SST1–SST5)     — Strong influence on both style + comp
+
+Each slot has:
+  • Thumbnail preview
+  • Filename label
+  • Individual weight slider (0.0–2.0, default 1.0)
+  • Load (📁), Clear (✕), Reload (↻) buttons
+
+Each category has a Global Strength slider (0.0–2.0, default 0.5).
+Final influence = global_strength × individual_weight
+
+9.2 SLOT CARD UI
+----------------
+
+┌──────────────────┐
+│ ST1               │
+│ ┌──────────────┐ │
+│ │   [THUMBNAIL] │ │
+│ └──────────────┘ │
+│ sunset.jpg        │
+│ Weight: [0.8]    │
+│ [📁] [✕] [↻]   │
+└──────────────────┘
+
+9.3 EMPTY SLOT HANDLING (GEMINI)
+---------------------------------
+
+For SDXL: empty slots are filled with blank.png uploaded to ComfyUI,
+and the IPAdapter node contribution becomes zero.
+
+For Gemini: empty slots are dynamically REMOVED from the workflow JSON
+before submission. The LoadImage node and all downstream connections for
+empty slots are stripped. This prevents the node #67 validation error
+that occurred with blank slots in the Gemini reference workflow.
+
+
+================================================================================
+PART 10: PROGRESS BAR & STATUS SYSTEM
+================================================================================
+
+10.1 THE STATUS BOX
+--------------------
+
+LOCATION: N-panel, directly below Output Path, always visible.
+
+VISUAL STATES:
+
+  🔴 Server: Offline
+     (server not reachable or bridge not running)
+
+  🟢 Server: Ready
+     (online, no active generation, progress = 0 or 100%)
+
+  🟡 [████████░░░░░░] 65%   KSampler
+     (active generation, progress between 0–100%)
+     Node name shown below bar
+
+  Queue: 2  (shown when server queue depth > 0)
+
+10.2 PROGRESS BRIDGE
+---------------------
+
+MODULE: progress_bar.py
+
+A background timer polls http://<server>:8189/status every 2 seconds.
+This bridge translates ComfyUI's queue/execution events into normalized
+progress values (0.0 → 1.0) and node names.
+
+progress_bar module exposes:
+  get_connection_status()   — 'online' / 'offline'
+  get_display_progress()    — 0.0 to 1.0
+  get_display_status()      — 'idle' / 'processing' / 'finishing' / 'ready'
+  get_display_node()        — current node name (e.g., "KSampler")
+  get_last_status()         — full last status dict
+
+10.3 TRELLIS2 / OMNI PROGRESS
+-------------------------------
+
+TRELLIS2 and Omni write directly to BridgePollerState during their
+polling loops. At each poll tick they update:
+  display_progress   ← normalized 0.0–1.0 from server response
+  display_status     ← 'processing' while running
+  display_node       ← status message (e.g., "Exporting mesh 1/1")
+
+This feeds the same progress bar that ComfyUI operations use, giving
+a unified status for all five backend services.
+
+10.4 WORKFLOW NODE NAMES
+-------------------------
+
+When a workflow JSON is submitted, progress_bar.set_current_workflow(wf)
+stores the node title map. As ComfyUI executes nodes, their IDs are
+translated to friendly names (e.g., "25" → "KSampler", "14" → "LoadImage").
+These names appear in Row 3 of the status box during generation.
+
+
+================================================================================
+PART 11: TEXTURE & MATERIAL OPERATIONS
+================================================================================
+
+11A TEXTURE PROJECTION
+-----------------------
+
+LOCATION: Pie Menu → BOTTOM-LEFT  |  N-panel → Image Generation
+
+REQUIREMENTS: current_ai.png exists, objects selected, ai_camera set up
+
+FLOW:
+1. Generate AI image (any method)
+2. Select objects to receive texture
+3. Alt+W → BOTTOM-LEFT (Project Texture)
+
+WHAT HAPPENS:
+• current_ai.png copied → Iteration_NNN.png (timestamped archive)
+• For each selected object:
+  — New material created (if needed)
+  — Image texture node added
+  — UV Projection from camera perspective set up
+  — Locked to generation-time camera angle
+• Material named: iteration_<timestamp>_<objectname>
+
+RESULT: Objects have camera-projected texture. Moving the camera after
+projection does NOT affect the applied texture.
+
+
+11B UV TEXTURE GENERATION
+--------------------------
+
+LOCATION: Pie Menu → TOP (UV Texture)
+WORKFLOW: objectUVTexture.json
+TECHNOLOGY: Hunyuan 3D 2.1 (PBR texture baking)
+
+REQUIREMENTS:
+• .blend file saved
+• Single MESH object selected
+• current_ai.png exists (used as style reference)
+• GCS backend mode
+
+FLOW:
+1. Exports selected mesh as .glb (PLY export with Y-up correction)
+2. Uploads .glb + current_ai.png to ComfyUI
+3. Submits objectUVTexture.json workflow
+4. Hunyuan 3D 2.1 generates PBR texture maps
+5. Outputs textured .glb (base color + normal + roughness + metallic)
+6. Downloads and imports into Blender
+7. Original object hidden, textured version placed at same location
+
+TIMING: 1–4 minutes depending on mesh complexity and server load.
+
+
+11C PBR FROM PROJECTED TEXTURE
+--------------------------------
+
+LOCATION: N-panel → Image Generation → appears when active object has
+          an iteration_NNN material (i.e., a projection was applied)
+
+OPERATOR: style_engine.pbr_from_projected
+WORKFLOW: objectPBRproject.json
+
+PURPOSE: Upgrades an existing flat projected texture into full PBR maps
+(basecolor, normal, roughness, metalness) using AI material estimation.
+
+CONDITIONAL VISIBILITY: Only shown when the active object has at least
+one material whose name starts with "iteration_".
+
+
+11D PBR FROM TEXT
+------------------
+
+LOCATION: N-panel → Image Generation → "PBR from Text" (always visible)
+OPERATOR: style_engine.pbr_from_text
+
+ROUTING:
+  SDXL active → objectPBRtext.json
+  Gemini active → objectNanoPBRtext.json
+    (inherits gemini_temperature and gemini_image_size from the
+     Gemini image settings; prompt goes to node #44 "Text Prompt")
+
+Generates a full PBR material set from the text prompt alone —
+no reference image needed.
+
+
+11E MULTIVIEW FROM PROJECTED
+------------------------------
+
+LOCATION: N-panel → Image Generation → appears when iteration material
+          exists but no multiview materials (left_iteration_ / right_iteration_)
+
+OPERATOR: style_engine.multiview_from_projected
+WORKFLOW: Uses main generation workflow for left + right camera angles
+
+PURPOSE: Generates back-left and back-right texture views and projects
+them onto corresponding object faces, filling in areas not covered by
+the front projection.
+
+FLOW:
+1. Positions ai_camera at back-left angle (Track To constraint)
+2. Generates AI image from that angle
+3. Positions ai_camera at back-right angle
+4. Generates AI image from that angle
+5. Both generations complete → projection applied to corresponding faces
+6. Materials named left_iteration_* and right_iteration_*
+
+CONDITIONAL VISIBILITY: Only shown when iteration material exists AND
+no multiview materials are already present (prevents double-application).
+
+
+================================================================================
+PART 12: 3D GENERATION — TRELLIS2 (Single Image)
+================================================================================
+
+12.1 OVERVIEW
+-------------
+
+SERVICE: Microsoft TRELLIS2, port 8195
+CLIENT: trellis_client.py (pure stdlib, no requests library)
+SECTION: N-panel → 3D Generation → 3D from Single Image
+
+TRELLIS2 accepts an RGBA PNG and produces a fully textured GLB.
+It is the fastest 3D generation path: no reference mesh required,
+and the output always has PBR texture baked in.
+
+REQUIREMENT: current_ai.png must exist. No active mesh needed.
+
+
+12.2 GENERATE 3D
+-----------------
+
+OPERATOR: style_engine.trellis_generate
+BUTTON: "Generate 3D (TRELLIS2)" in the 3D from Single Image box
+
+PARAMETERS:
+
+  Quality (trellis_quality):
+    Quick    → pipeline_type = "512"            (~30–60s)
+    Balanced → pipeline_type = "1024_cascade"   (~60–90s) ← default
+    Detailed → pipeline_type = "1536_cascade"   (~2–3 min)
+
+  Texture Size (trellis_texture_size):
+    512, 1024, 2048, 4096  ← default 4096
+
+  Steps (trellis_steps): default 12
+    Diffusion sampling steps. Higher = better quality, slower.
+
+  Guidance (trellis_guidance): default 7.5
+    CFG guidance scale. Controls adherence to the input image.
+
+  Remove BG (trellis_remove_bg): default OFF
+    If ON: runs UtilsImageRB.json blocking pre-pass to strip background
+    from current_ai.png before submission.
+    TRELLIS2 requires RGBA PNG with transparent background.
+    If the image already has alpha channel, this step is skipped.
+
+  (Seed = global seed from scene properties)
+
+FULL WORKFLOW:
+
+  1. (Optional) Capture proxy mesh bounding box if active mesh selected
+     (for scale matching after import)
+  2. Check current_ai.png for alpha channel (PNG IHDR parsing)
+  3. If Remove BG ON and no alpha: run UtilsImageRB → rembg result PNG
+  4. POST /generate to TRELLIS2 (multipart form-data)
+     timeout: 30s for submission
+  5. Poll GET /status/{job_id} every 2s (timeout: 15 min)
+     Write progress to BridgePollerState for progress bar
+  6. On 'done': thread → download GLB via GET /download/{job_id}/0
+     timeout: 600s (10 min for large files)
+  7. bpy.app.timers.register(_do_import, first_interval=2.0)
+  8. Import: bpy.ops.import_scene.gltf()
+     On "blend data busy" error: retry up to 60 times × 2s = 120s window
+  9. Unparent all mesh objects, remove non-mesh objects
+  10. If proxy was captured: scale and position imported mesh to match
+      proxy bounding box, hide proxy
+      If no proxy: import at native TRELLIS2 scale
+  11. Save GLB to project library (mesh_type='textured')
+
+CONSOLE OUTPUT:
+  [TRELLIS] STARTING TRELLIS2 3D GENERATION
+  [TRELLIS] Server: http://styleengine2:8195
+  [TRELLIS] Quality: 1024_cascade | Steps: 12 | Guidance: 7.5
+  [TRELLIS] Remove BG: False | Texture: 4096px
+  [TRELLIS] Proxy: Cube (max_dim 2.000 m)
+  [TRELLIS] Image already has alpha channel, skipping rembg
+  [TRELLIS] Job submitted: 40e33bd2…
+  [TRELLIS] [ 10%] Running generation...
+  [TRELLIS] [ 75%] Exporting mesh 1/1...
+  [TRELLIS] [100%] Done!
+  [TRELLIS] Done in 55.4s — downloading GLB…
+  [TRELLIS] Downloaded: trellis_40e33bd2.glb (67663 KB)
+  [TRELLIS] Scale: 1.9960 (proxy 2.000m / imported 1.002m)
+  [TRELLIS] TRELLIS2 3D COMPLETE: Trellis_40e33bd2
+
+
+12.3 RETEXTURE MESH
+--------------------
+
+OPERATOR: style_engine.trellis_retexture
+BUTTON: "Retexture Mesh" in the 3D from Single Image box
+
+REQUIREMENT: Active mesh object in scene.
+
+PURPOSE: Apply new PBR textures to an existing mesh using current_ai.png
+as the reference style image. The mesh geometry is preserved; only the
+texture changes.
+
+FLOW:
+  1. Capture proxy bounding box from active mesh
+  2. Export active mesh as GLB → upload to TRELLIS2
+  3. POST /retexture (mesh + reference image)
+  4. Poll + download + import with same retry mechanism as Generate 3D
+  5. Scale result to match original mesh, save to library
+
+ADDITIONAL PARAMETERS:
+  trellis_tex_steps, trellis_tex_guidance, trellis_tex_resolution
+
+
+================================================================================
+PART 13: 3D GENERATION — HUNYUAN3D-OMNI (Mesh Conditioned)
+================================================================================
+
+13.1 OVERVIEW
+-------------
+
+SERVICE: Hunyuan3D-Omni VM, port 8190 (FastAPI)
+SERVER SCRIPT: omni_server.py (running on VM)
+OPERATOR: style_engine.omni_generate ("Omni Mesh" button)
+SECTION: Within "3D from Single Image", below TRELLIS2
+
+REQUIREMENTS: Active mesh selected + current_ai.png exists.
+
+Unlike TRELLIS2, Omni uses the existing mesh as a structural condition.
+The 3D output respects the proportions and rough topology of the input.
+
+COORDINATE SYSTEM:
+  Blender is Z-up. Hunyuan3D-Omni expects Y-up.
+  All exports (PLY, bounding boxes) apply Z↔Y axis swap.
+
+
+13.2 CONTROL MODES
+------------------
+
+BBOX (Bounding Box):
+  • Computes world-space bounding box of selected mesh
+  • Normalizes to [-0.5, +0.5] range
+  • Sends 6 numbers: [xmin, ymin, zmin, xmax, ymax, zmax]
+  • Fastest, loosest conditioning
+  • Y-up swap applied: Blender Y → Omni Z, Blender Z → Omni Y
+
+POINT (Point Cloud):
+  • Duplicates the original mesh (preserves user's work)
+  • Adds Smooth Remesh modifier at configurable octree depth
+  • Applies modifiers
+  • Converts mesh to Blender PointCloud object
+  • If "PointCloud & Splat Exporter" addon is installed:
+      Exports as .ply point cloud (Y-up, pre-centered if enabled)
+  • If addon not installed:
+      Warning displayed: "⚠ PointCloud and Splat Exporter not detected"
+  • Tighter conditioning — preserves surface topology
+
+VOXEL (Watertight Mesh):
+  • Same remesh step as POINT mode
+  • Exports as mesh .ply (NOT converted to point cloud)
+  • Y-up axis conversion applied at export
+  • Tightest geometric conditioning
+  • Mesh must be watertight (remesh ensures this)
+
+
+13.3 PARAMETERS
+---------------
+
+  Control Mode (omni_control_type):
+    BBOX / POINT / VOXEL  ← default BBOX
+
+  Guidance Scale (omni_guidance_scale): default 4.5
+    Controls how strongly Omni adheres to the input condition.
+
+  Use EMA (omni_use_ema): default OFF
+    Exponential Moving Average model weights. More stable,
+    slightly slower. Passed as --use_ema flag to inference.py.
+
+  FlashVDM (omni_flashvdm): default OFF
+    Speed optimization. Passed as --flashvdm flag to inference.py.
+    (Benchmarked: ~1m51s with or without; benefit depends on hardware)
+
+  Remesh Depth (omni_remesh_depth): int 1–9, default 8
+    Octree depth for the Smooth Remesh step (POINT / VOXEL modes only).
+    Higher = more detail in the point cloud / mesh export.
+
+  Pre-center (omni_precenter): default ON
+    If ON, vertices are centered at origin before PLY export.
+    Helps Omni interpret the shape correctly when it expects 0,0,0 center.
+
+  (Quality slider removed — was not doing anything; octree resolution is
+   now controlled entirely server-side by the Omni server configuration)
+
+
+13.4 BOUNDING BOX DEBUG TOOL
+-----------------------------
+
+BUTTON: "Calculate BBox" (visible only when Control Mode = BBOX)
+OPERATOR: style_engine.omni_bbox_debug
+
+ACTION:
+  1. Calculates the normalized bounding box that would be sent to Omni
+  2. Prints all 6 values to the Blender console in detail
+  3. Creates a wireframe cube object in the scene at the same
+     location and dimensions as the selected mesh's bounding box
+     (named "BBox_<ObjectName>")
+
+PURPOSE:
+  Visual verification before running a real Omni generation.
+  Confirms the bounding box is correctly positioned and sized,
+  and that Y↔Z axis swap is correct.
+
+EXAMPLE CONSOLE:
+  [BBox Debug] Wireframe cube created: 'BBox_Suzanne' at <Vector (0.0,...)>
+  Info: BBox: [-0.500, -0.302, -0.360, 0.500, 0.302, 0.360] — see console
+
+
+13.5 IMPORT & SCALE MATCHING
+-----------------------------
+
+Same GLTF import with retry mechanism as TRELLIS2:
+  • 60 retries × 2 seconds = 120-second window
+  • Handles "blend data busy" states during large mesh imports
+
+Scale matching:
+  After import, the Omni result is scaled and positioned to match
+  the original proxy mesh's world-space bounding box center and max_dim.
+  Original proxy is NOT deleted (hidden instead, preserving user's work).
+
+
+================================================================================
+PART 14: 3D GENERATION — HUNYUAN3D-PART (Mesh Segmentation)
+================================================================================
+
+14.1 OVERVIEW
+-------------
+
+SERVICE: Hunyuan3D-Part (P3-SAM + XPart), port 7860 (Gradio)
+OPERATOR: style_engine.segment_mesh ("Segment Mesh" button)
+SECTION: Within "3D from Single Image", below TRELLIS2
+
+REQUIREMENTS: Active mesh object selected.
+
+PURPOSE: Semantically segments an existing 3D mesh into meaningful parts.
+Example: a sword → blade, cross-guard, grip, pommel.
+Output: assembled.glb with multi-part structure.
+
+
+14.2 WORKFLOW
+-------------
+
+Runs in a background thread to avoid blocking Blender.
+
+STEP 1 — EXPORT:
+  Active mesh exported as .obj (geometry-only, no materials).
+  Stores proxy bounding box for scale matching.
+
+STEP 2 — UPLOAD (with Gradio version compatibility fallback):
+  Tries POST /upload (Gradio 3.x / 4.x standard endpoint)
+  If 404: tries POST /api/upload (Gradio 5.x endpoint)
+  If both 404: encodes file as base64 and embeds directly in predict payload
+               (last resort, Gradio 3.x compat)
+
+  Response normalization:
+    Gradio 3.x returns: ["/tmp/gradio/xxx/file.obj"]      (string list)
+    Gradio 4.x returns: [{"path": "...", "orig_name": ...}] (dict list)
+    Both handled automatically.
+
+STEP 3 — PREDICT (synchronous, blocks in thread):
+  POST /api/predict with JSON payload:
+    {
+      "data": [
+        <file_input>,    ← path or base64
+        <point_num>,     ← point samples
+        <prompt_num>,    ← query points
+        16,              ← prompt_bs (fixed)
+        <seed>           ← global seed
+      ]
+    }
+  Timeout: 360 seconds (6 minutes)
+
+STEP 4 — DOWNLOAD:
+  Parses output[0] for download URL:
+    Gradio 4.x: checks "url" field first (direct URL)
+    Fallback: constructs {part_url}/file={remote_path}
+  Downloads assembled.glb (timeout: 60s)
+
+STEP 5 — IMPORT:
+  bpy.app.timers monitors thread completion, then imports GLB.
+  Same 60×2s retry mechanism for blend data busy state.
+  Scales to match proxy bounding box, saves to library.
+
+
+14.3 PARAMETERS
+---------------
+
+  Point Samples (part_point_num): default 50000
+    Number of points sampled from the mesh for segmentation.
+
+  Query Points (part_prompt_num): default 128
+    Number of segmentation query points (spatial queries across mesh).
+
+TIMING: 2–5 minutes typical (single-threaded, CPU-intensive on server).
+
+
+================================================================================
+PART 15: PIE MENU (Alt+W) DEEP DIVE
+================================================================================
+
+15.1 ACTIVATION
+---------------
+
+Hotkey: Alt+W
+Works in: Object, Edit, Sculpt, Pose modes
+Cross-platform: Windows (Alt+W) / macOS (Option+W) / Linux (Alt+W)
+
+
+15.2 LAYOUT (FULL)
+------------------
+
+                    TOP
+         ┌─────────────────────┐
+         │ UV Texture           │
+         │ [Generate 3D]        │  ← TRELLIS2 buttons
+         │ [Retexture Mesh]     │
+         │ Quality: [Balanced]  │
+         │ [Remove BG □]        │
+         └─────────────────────┘
+                    ↑
+LEFT  ──────────────┼──────────────  RIGHT
+[Setup]             ↓            [Visualize]
+              [Generate AI]
+                  BOTTOM
+
+BOTTOM-LEFT                  BOTTOM-RIGHT
+[Project Texture]           [Render Passes]
+
+
+15.3 SLOT DETAILS
+-----------------
+
+LEFT — Setup Workspace:
+  Creates the dual-viewport AI workspace layout.
+  One-time operation per .blend session.
+  If Gemini active + scene camera exists: syncs ai_camera.
+
+BOTTOM — Generate AI Quick:
+  Runs the full generation pipeline (SDXL or Gemini).
+  Non-blocking (returns immediately, polling in background).
+  SDXL: renders + submits  |  Gemini: (optionally renders +) submits
+
+TOP — UV Texture + TRELLIS2:
+  UV Texture button: generates UV-mapped PBR texture for selected mesh.
+  TRELLIS2 Generate 3D + Retexture Mesh buttons with inline controls.
+
+RIGHT — Visualization Switch (SDXL only):
+  Cycles camera background: Combined → Canny → Depth → Combined.
+  Hidden / disabled when Gemini is active (no intermediate passes).
+
+BOTTOM-LEFT — Project Texture:
+  Projects current_ai.png onto selected objects from camera perspective.
+
+BOTTOM-RIGHT — Render AI Passes Quick:
+  Re-renders Workbench passes (combined.jpg, canny, depth).
+  Useful after camera or geometry changes without full generation.
+
+
+15.4 GEMINI-ADAPTED PIE MENU
+-----------------------------
+
+When Gemini is active, the image generation section of the pie shows
+ONLY the Alignment toggle button. All SDXL controls are hidden.
+Visualization buttons (Canny/Depth/Combined) are removed.
+
+The 3D section (TOP) remains unchanged — TRELLIS2 works with either model.
+
+
+================================================================================
+PART 16: WORKFLOW FILE INVENTORY
+================================================================================
+
+All workflows: scripts/addons/styleengine/workflows/
+
+IMAGE WORKFLOWS:
+  Image/Image.json               SDXL base (no references, no rembg)
+  Image/ImageRef.json            SDXL with IPAdapter references
+  Image/ImageRB.json             SDXL + Remove Background (no refs)
+  Image/ImageRefRB.json          SDXL + Remove Background + refs
+  Image/ImageNanoText.json       Gemini: text-only (no alignment)
+  Image/ImageNanoAlignment.json  Gemini: text + render alignment
+  Image/ImageNanoReference.json  Gemini: text + references
+  Image/ImageNanoTextRB.json     Gemini: text-only + Remove BG
+  Image/ImageNanoAlignmentRB.json  Gemini: alignment + Remove BG
+  Image/ImageNanoReferenceRB.json  Gemini: references + Remove BG
+  Image/UtilsImageRB.json        Standalone rembg utility (blocking pre-pass)
+  Image/TestImageNano.json       Development/test workflow (PoC)
+
+OBJECT / 3D WORKFLOWS:
+  Object/objectCreateObject.json         Basic mesh from image
+  Object/objectCreateTexturedObject.json Textured mesh from image
+  Object/objectUVTexture.json            UV PBR texture generation (Hunyuan 3D)
+  Object/objectPBRproject.json           PBR from projected texture
+  Object/objectPBRtext.json              SDXL PBR from text
+  Object/objectNanoPBRtext.json          Gemini PBR from text
+  Object/objectPatch.json                Patch texture generation
+
+TEXT / UTILITY WORKFLOWS:
+  Text/TextRefine.json           LLM prompt refinement (Ollama + Griptape)
+  Text/TextViewport.json         Viewport description text generation
+  Text/TextImage.json            Image-to-text description
+
+
+INSTRUCTION TEMPLATES (templates/instructions_*.txt):
+  templates/instructions_claymation.txt  Claymation style
+  templates/instructions_salt.txt        Salt/mineral crystal style
+  (add more by dropping instructions_<name>.txt in templates/)
+
+SPECIAL FILES:
+  templates/blank.png            5×5 white image; placeholder for empty
+                                 reference slots in Gemini workflows
+
+
+================================================================================
+PART 17: FILE ORGANIZATION & SESSION MANAGEMENT
+================================================================================
+
+17.1 TEMP DIRECTORY
+--------------------
+
+Per-Blender-session volatile storage:
+  C:\Users\<USER>\AppData\Local\Temp\blender_styleengine\temp\
+  (Linux/macOS: /tmp/blender_styleengine/temp/)
+
+  current_ai.png    — canonical latest AI image (always updated)
+  combined.jpg      — last Blender render sent to AI
+  canny.png         — Canny edge map (SDXL only)
+  depth.png         — depth map (SDXL only)
+  part_<token>.glb  — downloaded Hunyuan3D-Part result
+  trellis_<id>.glb  — downloaded TRELLIS2 result
+  omni_<id>.glb     — downloaded Omni result
+  <mesh>_*.ply      — Omni export (point cloud or voxel mesh)
+  <mesh>_*.obj      — Hunyuan3D-Part export
+
+current_ai.png is the SINGLE CANONICAL PATH for the current generation.
+All generation paths (SDXL, Gemini, upload, refine) update this file.
+All downstream operations (3D generation, refinement, projection) read it.
+
+
+17.2 PROJECT LIBRARY
+---------------------
+
+Per-.blend-file persistent storage (created on first .blend save):
+  <BlendName>_styleengine/
+  ├── Images/          ← all timestamped generation PNG files
+  │   ├── 20260313_081017_195_gcs_1024x1024.png
+  │   ├── 20260313_085525_837_gcs_1024x1024.png
+  │   ├── 20260306_103448_783_uploaded.png
+  │   └── ...
+  ├── Meshes/          ← all generated 3D assets
+  │   ├── 20260313_081017_195_textured.glb      (TRELLIS2)
+  │   ├── 20260313_075400_123_uv_textured.glb   (UV Texture)
+  │   └── ...
+  ├── Iterations/      ← projected texture archives
+  │   ├── Iteration_000.png
+  │   ├── Iteration_001.png
+  │   └── ...
+  └── temp/            ← session temp (locked during session)
+
+FILENAME CONVENTIONS:
+  Images: YYYYMMDD_HHMMSS_mmm_<backend>_<WxH>.png
+    • backend: gcs, runcomfy, uploaded
+    • WxH: resolution embedded for history format-memory (e.g., 1024x1024)
+  Meshes: YYYYMMDD_HHMMSS_mmm_<mesh_type>.glb
+    • mesh_type: textured, uv_textured
+
+
+17.3 SESSION MANAGEMENT
+------------------------
+
+SESSION ID FORMAT: YYYYMMDD_HHMMSS_<random6>
+Example: 20260313_075203_qf2b36
+
+• Generated on workspace setup (or .blend load if no session exists)
+• Temp directory "locked" to session (prevents multiple sessions colliding)
+• Console logs session ID at startup
+
+MIGRATION:
+  On .blend save: timestamped copies moved from temp to project library
+  On .blend load: current_ai.png restored from project library
+
+
+================================================================================
+PART 18: BACKEND MODES
+================================================================================
+
+18.1 GCS (SELF-HOSTED COMFYUI)
+--------------------------------
+
+PRIMARY WORKFLOW MODE.
+
+Config:
+  Server URL: http://<hostname>:<port>   (e.g., http://styleengine2:8188)
+  Port in URL = ComfyUI port
+
+FEATURES AVAILABLE:
+  All features. GCS is required for all 3D generation paths
+  (TRELLIS2, Omni, Part all run on the same host as ComfyUI).
+
+DIRECT CONNECTION:
+  Blender connects directly to ComfyUI REST API.
+  No intermediate service.
+
+POLLING INTERVAL: 2 seconds
+
+
+18.2 RUNCOMFY CLOUD
+--------------------
+
+Serverless cloud ComfyUI execution.
+
+Config:
+  Import credentials from CREDENTIALS.txt file.
+  Credentials contain API token + user ID.
+
+FEATURES AVAILABLE:
+  Image generation (SDXL only — Gemini workflows not tested on cloud).
+  Texture projection.
+  3D generation paths (TRELLIS2, Omni, Part) require local VMs —
+  NOT available via RunComfy.
+
+POLLING INTERVAL: 10 seconds
+
+
+================================================================================
+PART 19: ERROR STATES & FEEDBACK
+================================================================================
+
+19.1 CONSOLE PREFIXES
+----------------------
+
+All log lines are prefixed for easy filtering:
+  [Style Engine]   — core operations, rendering
+  [GCS]            — image generation submission/download
+  [TRELLIS]        — TRELLIS2 3D generation
+  [Omni]           — Hunyuan3D-Omni operations
+  [Part]           — Hunyuan3D-Part operations
+  [Progress Bridge] — status polling
+  [Gemini]         — Gemini-specific operations
+  [Upload]         — local image upload
+  [Server API]     — polling for ComfyUI requests
+  [Polling]        — polling cleanup
+
+19.2 COMMON ERROR MESSAGES
+---------------------------
+
+"Poll error: timed out"
+  TRELLIS2/Omni status check exceeded 30s.
+  Non-fatal — polling continues automatically.
+
+"Blend data busy, retry N/60"
+  GLB import fired while Blender is in a redraw/render state.
+  Auto-retries every 2s for up to 120s.
+  Not fatal unless all 60 retries exhausted.
+
+"❌ Import abandoned after retries"
+  GLB import failed after full retry window.
+  Blender was likely doing continuous rendering or heavy UI work.
+  Solution: avoid heavy operations while waiting for 3D generation.
+
+"No upload endpoint found — embedding as base64"
+  Hunyuan3D-Part Gradio server returned 404 on both /upload and /api/upload.
+  Falls back to embedding file data in the predict payload directly.
+
+"Generation failed: '68'" (ComfyUI node error)
+  Usually means a reference image slot was invalid.
+  With Gemini: empty slots should be auto-removed; if this appears,
+  check that blank.png exists in templates/.
+
+"HTTP 400 — prompt outputs failed validation"
+  ComfyUI rejected the workflow JSON.
+  In Gemini mode: typically a reference slot issue.
+  Solution: ensure empty slots are correctly removed.
+
+19.3 TIMEOUT VALUES (CURRENT)
+------------------------------
+
+  Operation                 | Timeout  | Notes
+  ──────────────────────────┼──────────┼────────────────────────
+  ComfyUI image generation  | 15 min   | Global TRELLIS_TIMEOUT
+  TRELLIS2 poll_status      | 30s      | Per HTTP request
+  TRELLIS2 download_glb     | 600s     | 10 min for large files
+  TRELLIS2 import retries   | 120s     | 60 × 2s retry window
+  Omni import retries       | 120s     | 60 × 2s retry window
+  Hunyuan3D-Part predict    | 360s     | Synchronous in thread
+  Hunyuan3D-Part upload     | 60s      | Per HTTP request
+  UtilsImageRB (rembg)      | 120s     | Blocking pre-pass
+
+
+================================================================================
+PART 20: TECHNICAL UX DETAILS
+================================================================================
+
+20.1 PROPERTY SYSTEM
+---------------------
+
+SCENE PROPERTIES (scene.style_engine_props):
+  ai_model               — 'SDXL' or 'GEMINI' (default 'GEMINI')
+  gemini_temperature     — float 0.0–1.0
+  gemini_image_size      — enum '1K'/'2K'/'4K'
+  gemini_alignment       — bool (default True)
+  gemini_remove_bg       — bool
+  gemini_instructions    — enum (dynamic, from templates/)
+  sdxl_remove_bg         — bool
+  trellis_quality        — enum 'Quick'/'Balanced'/'Detailed'
+  trellis_texture_size   — enum 512/1024/2048/4096
+  trellis_steps          — int (default 12)
+  trellis_guidance       — float (default 7.5)
+  trellis_remove_bg      — bool
+  trellis_tex_steps/guidance/resolution  — retexture params
+  omni_control_type      — enum 'BBOX'/'POINT'/'VOXEL'
+  omni_guidance_scale    — float (default 4.5)
+  omni_use_ema           — bool
+  omni_flashvdm          — bool
+  omni_remesh_depth      — int 1–9 (default 8)
+  omni_precenter         — bool (default True)
+  part_point_num         — int (default 50000)
+  part_prompt_num        — int (default 128)
+  ai_resolution          — enum (SDXL native resolutions)
+  show_3d_single_image   — bool (section expand/collapse)
+  show_3d_multiview      — bool (section expand/collapse)
+  show_view_settings     — bool (section expand/collapse)
+  ... (all v0.3.7 properties unchanged)
+
+GLOBAL PREFERENCES (addons['styleengine'].preferences):
+  gcs_server_url    — ComfyUI server URL
+  trellis_port      — int (default 8195)
+  ... (all v0.3.7 preferences unchanged)
+
+
+20.2 ASYNC ARCHITECTURE
+------------------------
+
+All long-running operations use threading.Thread + bpy.app.timers:
+
+  Thread: network I/O (upload, download, API calls)
+  Timer:  Blender side (poll thread state, trigger import, update UI)
+
+This pattern ensures Blender's UI remains responsive during 1–5 minute
+3D generation operations. The thread writes to a shared "captured" dict;
+the timer reads it and performs Blender operations on the main thread.
+
+Import operations use a retry timer (not a thread) because bpy operations
+must run on the main thread but need to wait for a non-busy state.
+
+
+20.3 MODULES
+------------
+
+  ui_panel.py          — All operators, properties, UI draw functions
+  workspace_setup.py   — Core generation, workspace, session management
+  trellis_client.py    — TRELLIS2 HTTP client (pure stdlib)
+  progress_bar.py      — Progress bridge singleton + UI helpers
+  runcomfy_client.py   — RunComfy API client
+  runcomfy_polling.py  — Async polling for ComfyUI requests
+  pie_menu.py          — Alt+W pie menu definition
+  prefs.py             — Addon preferences definition
+  utils.py             — Prompt parsing, file operations, helpers
+  heavypoly_integration.py — Integration with HeavyPoly pie menus
+
+
+20.4 REGISTERED OPERATORS (v0.5.1 ADDITIONS)
+---------------------------------------------
+
+  style_engine.trellis_generate      TRELLIS2 image-to-3D
+  style_engine.trellis_retexture     TRELLIS2 mesh retexture
+  style_engine.segment_mesh          Hunyuan3D-Part segmentation
+  style_engine.omni_generate         Hunyuan3D-Omni mesh generation
+  style_engine.omni_bbox_debug       BBox debug + wireframe cube
+  style_engine.upload_current_ai     Upload local image as current_ai
+  style_engine.prev_generation       Navigate to older generation
+  style_engine.next_generation       Navigate to newer generation
+  style_engine.refine_current_image  Refine current_ai.png (skip render)
+  style_engine.pbr_from_projected    PBR from projected iteration texture
+  style_engine.pbr_from_text         PBR from text prompt
+
+
+================================================================================
+PART 21: CRITICAL DESIGN DECISIONS
+================================================================================
+
+21.1 GEMINI AS DEFAULT MODEL
+-----------------------------
+
+DECISION: Gemini 3 Pro is the default model (not SDXL).
+RATIONALE:
+  Gemini produces higher quality outputs with simpler prompts.
+  No ControlNet tuning needed. Alignment toggle gives sufficient control.
+  Reduces onboarding friction — users write naturally, get great results.
+TRADE-OFF:
+  Less predictable than SDXL for exact structural adherence.
+  Requires ComfyUI's Gemini API key properly configured.
+
+21.2 TRELLIS2 REQUIRES NO ACTIVE MESH
+---------------------------------------
+
+DECISION: "Generate 3D" poll() only checks current_ai.png, not active mesh.
+RATIONALE:
+  TRELLIS2 fundamentally only needs an image. Requiring a proxy mesh
+  is an optional UX convenience (scale matching), not a requirement.
+  Greying out the button when no mesh is selected was incorrect behavior.
+TRADE-OFF:
+  Without proxy, import is at TRELLIS2's native scale (need manual resize).
+
+21.3 RETRY WINDOW FOR GLB IMPORT
+----------------------------------
+
+DECISION: 60 retries × 2s = 120s window for blend data busy state.
+RATIONALE:
+  An 80MB GLB takes Blender 10–20s to import and parse. The original
+  20 × 0.2s = 4s window was exhausted before the import even began.
+  Large 3D assets are a core use case; the retry window must accommodate them.
+
+21.4 EMPTY GEMINI SLOT REMOVAL
+--------------------------------
+
+DECISION: Dynamically remove LoadImage nodes for empty reference slots.
+RATIONALE:
+  Gemini's ComfyUI node (#67) fails validation if any upstream LoadImage
+  receives an empty path. We cannot simply skip sending a value — the
+  node must be entirely removed from the graph.
+  blank.png exists as a fallback but is not the primary solution.
+
+21.5 HUNYUAN3D-PART UPLOAD FALLBACK CHAIN
+------------------------------------------
+
+DECISION: Try /upload → /api/upload → base64 embed in predict.
+RATIONALE:
+  Gradio changed its upload endpoint between 3.x, 4.x, and 5.x.
+  The service returns 404 for the wrong endpoint (not a graceful error).
+  A three-tier fallback ensures compatibility regardless of Gradio version.
+
+21.6 FORMAT MEMORY IN FILENAMES
+---------------------------------
+
+DECISION: Embed resolution in generation filename (Option A, no sidecar).
+RATIONALE:
+  Zero new infrastructure required. Works even if project is moved.
+  Existing filenames without the suffix silently fall back to current res.
+  Sidecar JSON (Option B) adds complexity and two-file management burden.
+
+
+================================================================================
+PART 22: APPENDIX — QUICK REFERENCE
+================================================================================
+
+22.1 PRIMARY WORKFLOW (DAILY USE)
+-----------------------------------
+
+  Alt+W → LEFT         Setup workspace (first time per .blend)
+  Write prompt         Type in text editor (plain text for Gemini)
+  Alt+W → BOTTOM       Generate image
+  N-panel → Generate 3D → Generate 3D (TRELLIS2)  (when image ready)
+  Alt+W → BOTTOM-LEFT  Project texture (optional)
+
+22.2 KEYBOARD SHORTCUTS
+------------------------
+
+  Alt+W         Open pie menu
+  N             Open/close N-panel (standard Blender)
+  (no additional shortcuts in v0.5.1)
+
+22.3 GENERATION TIME ESTIMATES
+--------------------------------
+
+  Operation               | Time      | Notes
+  ────────────────────────┼───────────┼───────────────────────────
+  SDXL image              | 10–30s    | Depends on steps + server
+  Gemini image            | 15–60s    | Depends on size + API load
+  TRELLIS2 Quick          | 30–60s    | 512 quality
+  TRELLIS2 Balanced       | 60–90s    | 1024_cascade
+  TRELLIS2 Detailed       | 2–3 min   | 1536_cascade
+  UV Texture (Hunyuan)    | 1–4 min   | Full PBR bake
+  Hunyuan3D-Omni          | 2–5 min   | Depends on control mode
+  Hunyuan3D-Part          | 2–5 min   | CPU-intensive on server
+  Remove BG pre-pass      | 5–10s     | UtilsImageRB.json
+
+22.4 FILE TYPE REFERENCE
+-------------------------
+
+  .png  — current_ai.png, all generation images, preview images
+  .jpg  — combined.jpg (Blender render sent to AI)
+  .glb  — 3D outputs (TRELLIS2, UV Texture, Part, Omni)
+  .ply  — Omni export (point cloud or watertight mesh)
+  .obj  — Hunyuan3D-Part mesh export
+  .json — ComfyUI workflow definitions
+  .txt  — Gemini instruction presets (templates/instructions_*.txt)
+  .png  — templates/blank.png (5×5 placeholder for empty ref slots)
+
+22.5 FOR END USERS (ARTISTS)
+------------------------------
+
+Style Engine lets you generate AI images and 3D assets directly in Blender.
+
+QUICK START:
+  1. Install addon, enable it, configure backend (ComfyUI server URL)
+  2. Alt+W → LEFT → Setup workspace
+  3. Write description in text editor
+  4. Alt+W → BOTTOM → Generate image
+  5. Generate 3D from the image (N-panel → 3D Generation)
+  6. Project textures or export
+
+KEY FEATURES:
+  • Gemini 3 Pro — conversational prompts, no prompt engineering needed
+  • TRELLIS2 — textured 3D from any generated image in 1–3 minutes
+  • Generation history — navigate back/forward, format memory preserved
+  • Upload images — bring in any reference or external image
+  • Refine mode — iterate on the current image without re-rendering
+  • Remove Background — transparent-background output for both models
+
+22.6 FOR DEVELOPERS (TECHNICAL)
+---------------------------------
+
+Architecture:
+  Blender Python addon (4.2+), Python 3.10+
+  Pure stdlib HTTP clients (no requests, no PIL)
+  Async: threading.Thread + bpy.app.timers pattern throughout
+
+Key modules:
+  ui_panel.py         — all operators, properties, UI
+  workspace_setup.py  — generation logic, workspace, session
+  trellis_client.py   — TRELLIS2 API client
+  progress_bar.py     — unified progress state
+  pie_menu.py         — Alt+W pie menu
+
+Key design patterns:
+  • "captured" dict for thread→timer state passing
+  • Retry timer pattern for blend-data-busy GLB imports
+  • Dynamic JSON node removal for empty Gemini reference slots
+  • Resolution embedded in filenames for zero-overhead format memory
+  • Gradio upload fallback chain for version compatibility
+
+Data flow (Gemini):
+  Text Editor → raw text → patch workflow JSON →
+  ComfyUI API → poll → download → current_ai.png → camera background
+
+Data flow (TRELLIS2):
+  current_ai.png → (optional rembg) → POST /generate →
+  poll /status → download GLB → retry-import → scale to proxy
+
+================================================================================
+END OF DOCUMENT
+================================================================================
+
+Style Engine v0.5.1 — January 2026
+This document supersedes COMPLETE_UX_FLOW.txt (v0.3.7).

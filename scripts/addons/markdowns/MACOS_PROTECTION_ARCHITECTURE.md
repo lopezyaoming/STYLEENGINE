@@ -202,7 +202,7 @@
 
 ### **1. Import Protection**
 ```python
-# __init__.py automatically handles:
+# art_director.py automatically handles:
 Windows: ✅ Standard imports work
 macOS:   ✅ Fallback system activates
 Linux:   ✅ Either method works

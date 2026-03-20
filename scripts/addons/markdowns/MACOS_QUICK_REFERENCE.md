@@ -43,7 +43,7 @@ styleengine.zip
 
 **The fix:**
 ```python
-# In __init__.py - Pre-register the package before loading modules
+# In art_director.py - Pre-register the package before loading modules
 import types
 import sys
 

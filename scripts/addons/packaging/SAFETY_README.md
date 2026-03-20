@@ -65,7 +65,7 @@ These scripts looked for `packaging/styleengine/` instead of `scripts/addons/sty
 git restore scripts/addons/styleengine/
 
 # Verify it's back
-ls scripts/addons/styleengine/__init__.py
+ls scripts/addons/styleengine/art_director.py
 ```
 
 **Investigation:**
@@ -105,7 +105,7 @@ pwd
 # Should be: .../scripts/addons/packaging
 
 # Check if styleengine exists
-ls ../styleengine/__init__.py
+ls ../styleengine/art_director.py
 
 # If missing, restore from git
 git restore ../styleengine/

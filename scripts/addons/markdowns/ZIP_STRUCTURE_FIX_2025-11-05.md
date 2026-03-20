@@ -174,12 +174,12 @@ ls -la ~/Library/Application\ Support/Blender/*/scripts/addons/
 
 # Should see:
 # styleengine/        ← Directory
-#   __init__.py
+#   art_director.py
 #   utils.py
 #   ...
 
 # NOT:
-# styleengine\__init__.py  ← File with backslash in name!
+# styleengine\art_director.py  ← File with backslash in name!
 ```
 
 ---

@@ -130,7 +130,7 @@ Before distributing, verify the ZIP structure:
 unzip -l styleengine.zip | head -20
 
 # Expected output:
-# styleengine/__init__.py
+# styleengine/art_director.py
 # styleengine/utils.py
 # styleengine/ui_panel.py
 # styleengine/prefs.py
