@@ -1249,27 +1249,124 @@ class STYLEENGINE_MT_pie_main(Menu):
         layout = self.layout
         pie = layout.menu_pie()
         style_props = context.scene.style_engine_props
+
+        # ── State detection ───────────────────────────────────────────────────
+        has_ai_camera = "ai_camera" in bpy.data.objects
+        has_prompt    = "STYLEENGINE_Prompt" in bpy.data.texts
+        is_ready      = has_ai_camera and has_prompt
+
+        # Slot 1 (WEST) — empty, pushes visible content to EAST (right side)
+        pie.separator()
+
+        # Slot 2 (EAST/RIGHT) — Workspace before setup, Generate Image after
+        box = pie.box()
+        col = box.column(align=True)
+
+        if not is_ready:
+            # ── Workspace ────────────────────────────────────────────────────
+            col.scale_y = 1.1
+            row = col.row()
+            row.label(text="Workspace", icon='WORKSPACE')
+            col.separator()
+
+            row = col.row()
+            row.scale_y = 2.5
+            row.operator("style_engine.setup_workspace",
+                         text="Setup Workspace",
+                         icon='PLAY')
+
+            col.separator()
+            row = col.row()
+            row.scale_y = 1.2
+            row.operator("style_engine.populate_assets",
+                         text="Populate Assets",
+                         icon='FILE_REFRESH')
+
+            # "Set AI Camera" only when ai_camera exists and a different camera
+            # is the active object (user wants to adopt it as the AI camera).
+            active = context.active_object
+            if (has_ai_camera and
+                    active and
+                    active.type == 'CAMERA' and
+                    active.name != 'ai_camera'):
+                row = col.row()
+                row.scale_y = 1.2
+                row.operator("style_engine.set_camera",
+                             text="Set AI Camera",
+                             icon='OUTLINER_OB_CAMERA')
+
+        else:
+            # ── Generate Image ────────────────────────────────────────────────
+            row = col.row()
+            row.scale_y = 2.5
+            row.operator("style_engine.generate_ai_quick",
+                         text="Generate Image",
+                         icon='IMAGE_DATA')
+
+            refine_row = col.row()
+            refine_row.scale_y = 1.4
+            refine_row.operator("style_engine.refine_current_image",
+                                text="Refine Current Image",
+                                icon='IMAGE_REFERENCE')
+
+            col.separator()
+
+            if style_props.ai_model == 'GEMINI':
+                row = col.row(align=True)
+                row.scale_y = 1.5
+                row.prop(style_props, "gemini_alignment",
+                         text="Alignment", toggle=True, icon='CON_LOCLIKE')
+                row.prop(style_props, "gemini_remove_bg",
+                         text="Remove BG", toggle=True, icon='IMAGE_ALPHA')
+            else:
+                rembg_row = col.row(align=True)
+                rembg_row.scale_y = 1.5
+                rembg_row.prop(style_props, "sdxl_remove_bg",
+                               text="Remove BG", toggle=True, icon='IMAGE_ALPHA')
+
+                influence_box = col.box()
+                influence_col = influence_box.column(align=True)
+                influence_col.label(text="Influences", icon='SMOOTHCURVE')
+                influence_col.prop(style_props, "silhouette_influence",
+                                   text="Silhouette", slider=True)
+                influence_col.prop(style_props, "depth_influence",
+                                   text="Depth", slider=True)
+                influence_col.prop(style_props, "texture_influence",
+                                   text="Viewport", slider=True)
         
-        # ═══════════════════════════════════════════════════
-        # Position 0: TOP (NORTH) - Object (3D Generation)
-        # ═══════════════════════════════════════════════════
+
+
+# ----------------------------------------------------------------
+# TEXTURE PIE  (Shift+T)
+# Project Texture · PBR from Projected · Multiview · Generate PBR Layers · Retexture Mesh
+# ----------------------------------------------------------------
+
+class STYLEENGINE_MT_pie_texture(Menu):
+    """Style Engine Texture Pie — Shift+T"""
+    bl_label = "Style Engine Texture"
+    bl_idname = "STYLEENGINE_MT_pie_texture"
+
+    def draw(self, context):
+        layout = self.layout
+        pie = layout.menu_pie()
+        style_props = context.scene.style_engine_props
+
+        pie.separator()  # WEST placeholder
+
         box = pie.box()
         col = box.column(align=True)
         col.scale_y = 1.1
-        
-        # Header
+
         row = col.row()
-        row.label(text="Object", icon='OBJECT_DATA')
+        row.label(text="Texture", icon='TEXTURE')
         col.separator()
-        
-        # Big Project Texture button (same format as Generate Image)
+
         row = col.row()
         row.scale_y = 2.5
-        row.operator("style_engine.project_texture_scene", 
-                     text="Project Texture", 
+        row.operator("style_engine.project_texture_scene",
+                     text="Project Texture",
                      icon='TEXTURE')
-        
-        # PBR from Projected Texture (conditional: only when active mesh has iteration_XXX material)
+
         obj = context.active_object
         has_iteration_mat = (
             obj and obj.type == 'MESH' and obj.data.materials and
@@ -1279,307 +1376,238 @@ class STYLEENGINE_MT_pie_main(Menu):
             col.separator(factor=0.5)
             row = col.row()
             row.scale_y = 1.5
-            row.operator("style_engine.pbr_from_projected", 
-                         text="PBR from Projected", 
+            row.operator("style_engine.pbr_from_projected",
+                         text="PBR from Projected",
                          icon='MATSHADERBALL')
-        
-        # Multiview from Projected (conditional: only if not already multiview)
-        already_multiview = (
-            obj and obj.type == 'MESH' and obj.data.materials and
-            any(m and (m.name.startswith('left_iteration_') or m.name.startswith('right_iteration_')) for m in obj.data.materials)
-        )
-        if has_iteration_mat and not already_multiview:
-            row = col.row()
-            row.scale_y = 1.2
-            row.operator("style_engine.multiview_from_projected", 
-                         text="Multiview", 
-                         icon='VIEW_CAMERA')
-        
-        col.separator(factor=0.5)
-        col.operator("style_engine.pbr_from_text", 
-                     text="Generate PBR", 
+
+            already_multiview = (
+                obj and obj.type == 'MESH' and obj.data.materials and
+                any(m and (m.name.startswith('left_iteration_') or
+                           m.name.startswith('right_iteration_'))
+                    for m in obj.data.materials)
+            )
+            if not already_multiview:
+                row = col.row()
+                row.scale_y = 1.2
+                row.operator("style_engine.multiview_from_projected",
+                             text="Multiview",
+                             icon='VIEW_CAMERA')
+
+        col.separator()
+
+        col.operator("style_engine.pbr_from_text",
+                     text="Generate PBR Layers",
                      icon='MATSHADERBALL')
-        
-        col.separator()
-        col.separator()
-
-        # ── TRELLIS2 3D generation ────────────────────────────────────
-        trellis_col = col.column(align=True)
-        trellis_col.scale_y = 1.4
-        trellis_col.operator("style_engine.trellis_generate",
-                             text="Generate 3D",
-                             icon='MESH_UVSPHERE')
-        trellis_col.operator("style_engine.trellis_retexture",
-                             text="Retexture Mesh",
-                             icon='MATSHADERBALL')
 
         col.separator(factor=0.5)
-        tq_box = col.box()
-        tq_col = tq_box.column(align=True)
-        tq_col.label(text="TRELLIS2 Quality", icon='MODIFIER')
-        tq_col.prop(style_props, "trellis_quality", text="")
-        tq_col.prop(style_props, "trellis_remove_bg",
-                    text="Remove BG", toggle=True, icon='IMAGE_ALPHA')
-        
-        # ═══════════════════════════════════════════════════
-        # Position 1: LEFT (WEST) - Workspace
-        # ═══════════════════════════════════════════════════
+
+        row = col.row()
+        row.scale_y = 1.3
+        row.operator("style_engine.trellis_retexture",
+                     text="Retexture Mesh",
+                     icon='MATSHADERBALL')
+
+
+# ----------------------------------------------------------------
+# 3D GENERATION PIE  (Shift+E)
+# Generate 3D (TRELLIS2) · quality · params
+# ----------------------------------------------------------------
+
+class STYLEENGINE_MT_pie_3d(Menu):
+    """Style Engine 3D Generation Pie — Shift+E"""
+    bl_label = "Style Engine 3D"
+    bl_idname = "STYLEENGINE_MT_pie_3d"
+
+    def draw(self, context):
+        layout = self.layout
+        pie = layout.menu_pie()
+        style_props = context.scene.style_engine_props
+
+        pie.separator()  # WEST placeholder
+
         box = pie.box()
         col = box.column(align=True)
         col.scale_y = 1.1
-        
-        # Header
+
         row = col.row()
-        row.label(text="Workspace", icon='WORKSPACE')
+        row.label(text="3D Generation", icon='MESH_UVSPHERE')
         col.separator()
-        
-        # Setup Workspace button (full setup with AI workspace)
+
         row = col.row()
         row.scale_y = 2.5
-        row.operator("style_engine.setup_workspace", 
-                     text="Setup Workspace", 
-                     icon='PLAY')
-        
-        # Populate Assets button (assets only, no workspace change)
-        col.separator()
-        row = col.row()
-        row.scale_y = 1.2
-        row.operator("style_engine.populate_assets", 
-                     text="Populate Assets", 
-                     icon='FILE_REFRESH')
-        
-        # Set Camera button (copy from selected/active camera)
-        row = col.row()
-        row.scale_y = 1.2
-        row.operator("style_engine.set_camera", 
-                     text="Set Camera", 
-                     icon='OUTLINER_OB_CAMERA')
-        
-        # # HIDDEN: Background opacity - moved to Visualization category
-        # col.separator()
-        # col.label(text="Background Opacity")
-        # col.prop(style_props, "background_opacity", text="", slider=True)
-        
-        # # HIDDEN: Resolution - available in N panel (File category)
-        # col.separator()
-        # col.label(text="Resolution")
-        # col.prop(style_props, "ai_resolution", text="")
-        
-        # ═══════════════════════════════════════════════════
-        # Position 2: BOTTOM (SOUTH) - Generate Image
-        # ═══════════════════════════════════════════════════
-        box = pie.box()
-        col = box.column(align=True)
-        
-        # Big generate button
-        row = col.row()
-        row.scale_y = 2.5
-        row.operator("style_engine.generate_ai_quick", 
-                     text="Generate Image", 
-                     icon='IMAGE_DATA')
-        
-        # Refine: feed current_ai.png back without re-rendering
-        refine_row = col.row()
-        refine_row.scale_y = 1.4
-        refine_row.operator("style_engine.refine_current_image",
-                            text="Refine Current Image",
-                            icon='IMAGE_REFERENCE')
+        row.operator("style_engine.trellis_generate",
+                     text="Generate 3D",
+                     icon='MESH_UVSPHERE')
 
-        col.separator()
-        
-        if style_props.ai_model == 'GEMINI':
-            # Gemini: Alignment + Remove Background toggles
-            row = col.row(align=True)
-            row.scale_y = 1.5
-            row.prop(style_props, "gemini_alignment", text="Alignment", toggle=True, icon='CON_LOCLIKE')
-            row.prop(style_props, "gemini_remove_bg", text="Remove BG", toggle=True, icon='IMAGE_ALPHA')
-        else:
-            # SDXL: Remove BG toggle
-            rembg_row = col.row(align=True)
-            rembg_row.scale_y = 1.5
-            rembg_row.prop(style_props, "sdxl_remove_bg", text="Remove BG", toggle=True, icon='IMAGE_ALPHA')
+        col.separator(factor=0.5)
 
-            # SDXL: Influence sliders
-            influence_box = col.box()
-            influence_col = influence_box.column(align=True)
-            influence_col.label(text="Influences", icon='SMOOTHCURVE')
-            
-            influence_col.prop(style_props, "silhouette_influence", 
-                              text="Silhouette", slider=True)
-            influence_col.prop(style_props, "depth_influence", 
-                              text="Depth", slider=True)
-            influence_col.prop(style_props, "texture_influence", 
-                              text="Viewport", slider=True)
-        
-        # # HIDDEN: Steps - available in N panel (Image Generation > Influence)
-        # col.separator()
-        # col.label(text="Steps", icon='SORTTIME')
-        # col.prop(style_props, "steps", text="", slider=True)
-        
-        # # HIDDEN: Autogenerate - available in N panel (Image Generation)
-        # col.separator()
-        # row = col.row()
-        # row.scale_y = 1.5
-        # row.prop(style_props, "auto_generate", 
-        #          text="Autogenerate", 
-        #          toggle=True, 
-        #          icon='FILE_REFRESH')
-        
-        # # HIDDEN: Render Quality - available in N panel (File category)
-        # col.separator()
-        # quality_box = col.box()
-        # quality_col = quality_box.column(align=True)
-        # quality_col.label(text="Render Quality", icon='SHADING_RENDERED')
-        # 
-        # # Two buttons: Fast (Workbench) and Detailed (EEVEE)
-        # row = quality_col.row(align=True)
-        # row.scale_y = 1.3
-        # 
-        # # Fast button
-        # op = row.operator("style_engine.set_render_quality", 
-        #                  text="Fast", 
-        #                  icon='SHADING_WIRE',
-        #                  depress=(style_props.render_quality == 'FAST'))
-        # op.quality = 'FAST'
-        # 
-        # # Detailed button
-        # op = row.operator("style_engine.set_render_quality", 
-        #                  text="Detailed", 
-        #                  icon='SHADING_RENDERED',
-        #                  depress=(style_props.render_quality == 'DETAILED'))
-        # op.quality = 'DETAILED'
-        # 
-        # quality_col.separator(factor=0.5)
-        # 
-        # # Show description based on current selection
-        # if style_props.render_quality == 'FAST':
-        #     quality_col.label(text="Workbench - Quick iterations", icon='INFO')
-        # else:
-        #     quality_col.label(text="EEVEE - Better for img2img", icon='INFO')
-        
-        # # HIDDEN: LoRa Configuration - available in N panel (Image Generation > LoRas)
-        # col.separator()
-        # lora_box = col.box()
-        # lora_col = lora_box.column(align=True)
-        # lora_col.label(text="LoRa", icon='MODIFIER')
-        # 
-        # # Enable checkbox
-        # lora_col.prop(style_props, "lora_enabled", 
-        #               text="Use LoRa", 
-        #               toggle=True)
-        # 
-        # # Only show controls if enabled
-        # if style_props.lora_enabled:
-        #     lora_col.separator(factor=0.5)
-        #     
-        #     # LoRa dropdown with refresh button
-        #     lora_col.label(text="Model:", icon='FILE')
-        #     refresh_row = lora_col.row(align=True)
-        #     refresh_row.prop(style_props, "lora_name", text="")
-        #     refresh_row.operator("style_engine.refresh_lora_list", text="", icon='FILE_REFRESH')
-        #     
-        #     lora_col.separator(factor=0.5)
-        #     
-        #     # Strength slider
-        #     lora_col.label(text="Strength:", icon='FORCE_FORCE')
-        #     lora_col.prop(style_props, "lora_strength_model", 
-        #                   text="", 
-        #                   slider=True)
-        #     
-        #     lora_col.separator(factor=0.3)
-        #     
-        #     # Show active LoRa
-        #     if style_props.lora_name != 'NONE':
-        #         info_row = lora_col.row()
-        #         info_row.scale_y = 0.7
-        #         # Truncate long names
-        #         display_name = style_props.lora_name.replace('.safetensors', '')
-        #         if len(display_name) > 20:
-        #             display_name = display_name[:17] + "..."
-        #         info_row.label(text=f"Active: {display_name}", icon='CHECKMARK')
-        
-        # ═══════════════════════════════════════════════════
-        # Position 3: RIGHT (EAST) - Visualization Type
-        # ═══════════════════════════════════════════════════
-        # Visualization box — display mode buttons only shown for SDXL; history always shown
-        prefs = context.preferences.addons.get('styleengine')
+        params_box = col.box()
+        params_col = params_box.column(align=True)
+        params_col.label(text="TRELLIS2 Quality", icon='MODIFIER')
+        params_col.prop(style_props, "trellis_quality", text="")
+        params_col.prop(style_props, "trellis_texture_size", text="Texture")
+
+        params_col.separator(factor=0.5)
+        row = params_col.row(align=True)
+        row.prop(style_props, "trellis_steps",    text="Steps")
+        row.prop(style_props, "trellis_guidance", text="Guidance")
+
+        params_col.separator(factor=0.5)
+        params_col.prop(style_props, "trellis_remove_bg",
+                        text="Remove BG", toggle=True, icon='IMAGE_ALPHA')
+
+
+# ----------------------------------------------------------------
+# MESH REFINEMENT PIE  (Shift+R)
+# Segment Mesh (Hunyuan3D-Part) · Omni Mesh (Hunyuan3D-Omni)
+# ----------------------------------------------------------------
+
+class STYLEENGINE_MT_pie_refine(Menu):
+    """Style Engine Mesh Refinement Pie — Shift+R"""
+    bl_label = "Style Engine Mesh Refinement"
+    bl_idname = "STYLEENGINE_MT_pie_refine"
+
+    def draw(self, context):
+        layout = self.layout
+        pie = layout.menu_pie()
+        style_props = context.scene.style_engine_props
+
+        pie.separator()  # WEST placeholder
+
         box = pie.box()
-        box.ui_units_x = 10
         col = box.column(align=True)
         col.scale_y = 1.1
 
         row = col.row()
-        row.label(text="Visualization", icon='VIEW_CAMERA')
+        row.label(text="Mesh Refinement", icon='OUTLINER_OB_SURFACE')
         col.separator()
 
-        # Display mode buttons — SDXL only (Gemini outputs a single image, no depth/canny)
-        if style_props.ai_model != 'GEMINI':
-            show_viz_controls = (prefs and
-                                 prefs.preferences.api_backend == 'GCS' and
-                                 prefs.preferences.gcs_download_preview_images)
-            if show_viz_controls:
-                row = col.row(align=True)
-                row.scale_y = 1.5
+        # ── Segment Mesh ─────────────────────────────────────────────────────
+        seg_box = col.box()
+        seg_col = seg_box.column(align=True)
+        seg_col.label(text="Segmentation", icon='OUTLINER_OB_SURFACE')
 
-                op = row.operator("style_engine.set_visualization",
-                                 text="Combined",
-                                 icon='IMAGE_DATA',
-                                 depress=(style_props.visualization_type == 'COMBINED'))
-                op.viz_type = 'COMBINED'
+        row = seg_col.row()
+        row.scale_y = 1.8
+        row.operator("style_engine.segment_mesh",
+                     text="Segment Mesh",
+                     icon='OUTLINER_OB_SURFACE')
 
-                op = row.operator("style_engine.set_visualization",
-                                 text="",
-                                 icon='MESH_PLANE',
-                                 depress=(style_props.visualization_type == 'CANNY'))
-                op.viz_type = 'CANNY'
+        seg_col.separator(factor=0.3)
+        param_col = seg_col.column(align=True)
+        param_col.scale_y = 0.9
+        param_col.prop(style_props, "part_point_num",  text="Point Samples")
+        param_col.prop(style_props, "part_prompt_num", text="Query Points")
 
-                op = row.operator("style_engine.set_visualization",
-                                 text="",
-                                 icon='EMPTY_SINGLE_ARROW',
-                                 depress=(style_props.visualization_type == 'DEPTH'))
-                op.viz_type = 'DEPTH'
-
-                col.separator()
-                col.label(text=f"Current: {style_props.visualization_type.title()}", icon='INFO')
-            else:
-                col.label(text="Enable 'Download Preview", icon='INFO')
-                col.label(text="Images' in GCS settings")
-
-        # Background opacity — always shown
         col.separator()
-        col.label(text="Background Opacity")
-        col.prop(style_props, "background_opacity", text="", slider=True)
 
-        # Generation Browser — always shown
+        # ── Omni Mesh ────────────────────────────────────────────────────────
+        omni_box = col.box()
+        omni_col = omni_box.column(align=True)
+        omni_col.label(text="Omni Mesh", icon='MESH_CUBE')
+
+        row = omni_col.row()
+        row.scale_y = 1.8
+        row.operator("style_engine.omni_generate",
+                     text="Omni Mesh",
+                     icon='MESH_CUBE')
+
+        omni_col.separator(factor=0.3)
+        ctrl_col = omni_col.column(align=True)
+        ctrl_col.scale_y = 0.9
+        ctrl_col.prop(style_props, "omni_control_type",    text="")
+        ctrl_col.prop(style_props, "omni_guidance_scale",  text="Guidance", slider=True)
+
+        if style_props.omni_control_type in ('POINT', 'VOXEL'):
+            ctrl_col.prop(style_props, "omni_remesh_depth", text="Remesh Depth", slider=True)
+            ctrl_col.prop(style_props, "omni_precenter",    text="Pre-center", toggle=True)
+
+        if style_props.omni_control_type == 'BBOX':
+            omni_col.separator(factor=0.3)
+            omni_col.operator("style_engine.omni_bbox_debug",
+                              text="Calculate BBox",
+                              icon='SNAP_VOLUME')
+
+
+# ----------------------------------------------------------------
+# AGENT PIE  (Shift+W)
+# Prompt refinement · image description · prompt browser
+# ----------------------------------------------------------------
+
+class STYLEENGINE_MT_pie_agent(Menu):
+    """Style Engine Agent Pie — Shift+W"""
+    bl_label = "Style Engine Agent"
+    bl_idname = "STYLEENGINE_MT_pie_agent"
+
+    def draw(self, context):
+        layout = self.layout
+        pie = layout.menu_pie()
+        style_props = context.scene.style_engine_props
+
+        pie.separator()  # WEST placeholder
+
+        box = pie.box()
+        col = box.column(align=True)
+        col.scale_y = 1.1
+
+        row = col.row()
+        row.label(text="Agent", icon='OUTLINER_OB_SPEAKER')
         col.separator()
-        col.label(text="Generation Browser", icon='RENDERLAYERS')
+
+        # Primary action — Refine Prompt
+        row = col.row()
+        row.scale_y = 2.0
+        row.operator("style_engine.refine_prompt",
+                     text="Refine Prompt",
+                     icon='SORTALPHA')
+
+        col.separator()
+
+        # Image → text descriptions
+        desc_col = col.column(align=True)
+        desc_col.scale_y = 1.2
+        desc_col.operator("style_engine.generate_image_description",
+                          text="Describe Current Image",
+                          icon='FILE_TEXT')
+        desc_col.operator("style_engine.generate_image_description_from_file",
+                          text="Describe Image from File",
+                          icon='FILEBROWSER')
+        desc_col.operator("style_engine.generate_image_description_from_viewport",
+                          text="Describe Viewport",
+                          icon='VIEW_CAMERA')
+
+        col.separator()
+
+        # Prompt browser
+        col.label(text="Prompt Browser", icon='BOOKMARKS')
 
         from . import workspace_setup
-        generations = workspace_setup.get_generation_list(context)
+        prompts = workspace_setup.get_prompt_list(context)
 
-        if generations:
+        if prompts:
             row = col.row(align=True)
             row.scale_y = 1.3
 
-            at_oldest = (style_props.current_generation_index == 0)
-            at_latest = (style_props.current_generation_index == -1)
+            at_oldest = (style_props.current_prompt_index == 0)
+            at_latest = (style_props.current_prompt_index == -1)
 
             prev_row = row.row(align=True)
             prev_row.enabled = not at_oldest
-            prev_row.operator("style_engine.prev_generation", text="", icon='TRIA_LEFT')
+            prev_row.operator("style_engine.prev_prompt",
+                              text="", icon='TRIA_LEFT')
 
             if at_latest:
-                current_text = f"Latest ({len(generations)})"
+                current_text = f"Latest ({len(prompts)})"
             else:
-                current_text = f"{style_props.current_generation_index + 1}/{len(generations)}"
+                current_text = f"{style_props.current_prompt_index + 1}/{len(prompts)}"
             row.label(text=current_text)
 
             next_row = row.row(align=True)
             next_row.enabled = not at_latest
-            next_row.operator("style_engine.next_generation", text="", icon='TRIA_RIGHT')
+            next_row.operator("style_engine.next_prompt",
+                              text="", icon='TRIA_RIGHT')
         else:
-            col.label(text="No generations yet", icon='INFO')
-        
+            col.label(text="No prompt history yet", icon='INFO')
 
 
 # ----------------------------------------------------------------
@@ -1601,65 +1629,75 @@ classes = (
     WM_OT_NextModel,
     WM_OT_SpawnModel,
     STYLEENGINE_MT_pie_main,
+    STYLEENGINE_MT_pie_texture,
+    STYLEENGINE_MT_pie_3d,
+    STYLEENGINE_MT_pie_refine,
+    STYLEENGINE_MT_pie_agent,
 )
 
 addon_keymaps = []
 
 
+def _register_pie(kc, key, shift, menu_name, modes):
+    """Register one pie menu across a list of keymap mode names.
+    Modifier flags must be set on the item after creation — passing them
+    as constructor kwargs is unreliable in Blender's keymap API."""
+    for mode_name in modes:
+        km = kc.keymaps.new(name=mode_name, space_type='VIEW_3D')
+        kmi = km.keymap_items.new('wm.call_menu_pie', key, 'PRESS')
+        kmi.shift = shift
+        kmi.properties.name = menu_name
+        addon_keymaps.append((km, kmi))
+
+
 def register():
-    """Register pie menu and Alt+W hotkey"""
-    
-    # Register classes
+    """Register all Style Engine pie menus."""
+
     for cls in classes:
         try:
             bpy.utils.register_class(cls)
-        except:
-            pass  # Already registered
-    
-    # Register keymap
+        except Exception:
+            pass
+
     wm = bpy.context.window_manager
     kc = wm.keyconfigs.addon
-    if kc:
-        # Register for 3D View (works in Object Mode, Sculpt, etc.)
-        km = kc.keymaps.new(name='3D View', space_type='VIEW_3D')
-        kmi = km.keymap_items.new('wm.call_menu_pie', 'W', 'PRESS', alt=True)
-        kmi.properties.name = "STYLEENGINE_MT_pie_main"
-        addon_keymaps.append((km, kmi))
-        
-        # ALSO register for Mesh (Edit Mode) - conflict-free with Blender & HEAVYPOLY
-        # Blender uses W alone (Select menu), HEAVYPOLY doesn't use Alt+W
-        # Our Alt+W is completely free and ergonomic (W = Workflow!)
-        km_mesh = kc.keymaps.new(name='Mesh', space_type='VIEW_3D')
-        kmi_mesh = km_mesh.keymap_items.new('wm.call_menu_pie', 'W', 'PRESS', alt=True)
-        kmi_mesh.properties.name = "STYLEENGINE_MT_pie_main"
-        addon_keymaps.append((km_mesh, kmi_mesh))
-        
-        # Also register for other edit modes (Curve, Armature, etc.)
-        for mode_name in ['Curve', 'Armature', 'Pose', 'Sculpt']:
-            km_mode = kc.keymaps.new(name=mode_name, space_type='VIEW_3D')
-            kmi_mode = km_mode.keymap_items.new('wm.call_menu_pie', 'W', 'PRESS', alt=True)
-            kmi_mode.properties.name = "STYLEENGINE_MT_pie_main"
-            addon_keymaps.append((km_mode, kmi_mode))
-        
-        print("[Style Engine] ✅ Pie menu registered (Alt+W) for all modes - macOS/Windows/Linux compatible")
+    if not kc:
+        return
+
+    all_modes = ['3D View', 'Mesh', 'Curve', 'Armature', 'Pose', 'Sculpt']
+
+    # Shift+Q — Workspace (pre-setup) / Generate Image (post-setup)
+    _register_pie(kc, 'Q', True, "STYLEENGINE_MT_pie_main",    all_modes)
+
+    # Shift+E — 3D Generation (TRELLIS2)
+    _register_pie(kc, 'E', True, "STYLEENGINE_MT_pie_3d",      all_modes)
+
+    # Shift+R — Mesh Refinement (Segment Mesh + Omni Mesh)
+    _register_pie(kc, 'R', True, "STYLEENGINE_MT_pie_refine",  all_modes)
+
+    # Shift+T — Texture (Project · PBR · Retexture)
+    _register_pie(kc, 'T', True, "STYLEENGINE_MT_pie_texture", all_modes)
+
+    # Shift+W — Agent (Refine Prompt · Describe · Prompt Browser)
+    _register_pie(kc, 'W', True, "STYLEENGINE_MT_pie_agent",   all_modes)
+
+    print("[Style Engine] ✅ Pie menus — Shift+Q / Shift+W / Shift+E / Shift+R / Shift+T")
 
 
 def unregister():
-    """Unregister pie menu and hotkey"""
-    
-    # Unregister keymap
+    """Unregister all Style Engine pie menus and hotkeys."""
+
     for km, kmi in addon_keymaps:
         km.keymap_items.remove(kmi)
     addon_keymaps.clear()
-    
-    # Unregister classes
+
     for cls in reversed(classes):
         try:
             bpy.utils.unregister_class(cls)
-        except:
+        except Exception:
             pass
-    
-    print("[Style Engine] ✅ Pie menu unregistered")
+
+    print("[Style Engine] ✅ Pie menus unregistered")
 
 
 if __name__ == "__main__":

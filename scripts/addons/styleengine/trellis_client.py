@@ -89,7 +89,7 @@ def submit_generate(base_url, image_path,
                     num_samples=1,
                     max_num_tokens=49152,
                     texture_size=4096,
-                    decimation_target=1000000,
+                    decimation_target=300000,
                     remesh=True,
                     remesh_band=1.0,
                     remesh_project=0.0):

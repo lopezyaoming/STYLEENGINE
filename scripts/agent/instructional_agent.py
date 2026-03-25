@@ -1,84 +1,94 @@
 import os
-from google import genai
-from google.genai import types
+import vertexai
+from vertexai.generative_models import GenerativeModel, GenerationConfig
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
-# --- CONFIG ---
+# --- VERIFIED 2026 CONFIG ---
 PROJECT_ID = "ambient-sphere-469215-u9"
-LOCATION = "global"
-client = genai.Client(vertexai=True, project=PROJECT_ID, location=LOCATION)
+LOCATION = "global"  # Verified location for model availability
+MODEL_ID = "gemini-2.5-flash"
+
+# Initialize the Vertex AI environment
+vertexai.init(project=PROJECT_ID, location=LOCATION)
 
 
-def run_instructional_synthesis():
-    print("--- INITIALIZING INSTRUCTIONAL AGENT: AESTHETIC EXPANSION ---")
+def run_instructional_foreman():
+    print(f"--- [PRODUCTION] GENERATING FACTORY MANUAL: {MODEL_ID} ---")
 
-    if not os.path.exists("descriptive.md"):
-        print("Error: descriptive.md not found.")
+    # 1. INPUT VALIDATION
+    if not os.path.exists("descriptive.md") or not os.path.exists("agent_description.md"):
+        print("CRITICAL: descriptive.md or agent_description.md not found.")
         return
 
-    with open("descriptive.md", "r") as f:
-        dna_archive = f.read()
+    with open("descriptive.md", "r", encoding="utf-8") as f:
+        dna = f.read()
+    with open("agent_description.md", "r", encoding="utf-8") as f:
+        spec = f.read()
 
-    # THE EXPANDED SYSTEM PROMPT
-    # Forces the agent to use direct references and broader aesthetic adjacencies.
-    instructional_prompt = f"""
-    You are the Lead Art Director. Your job is to translate 'descriptive.md' into a 
-    broad, non-deterministic 'instructional.md' for the Synthetic Factory.
+    # 2. THE UNIVERSAL LOGIC PROMPT (Neutral & Structural)
+    foreman_prompt = f"""
+    TASK: Generate 'instructions_FACTORY.md' for a Synthetic Data Factory.
 
-    ### 1. THE REFERENCE ANCHORS:
-    - Periodically invoke the 'Foundational Spirits' to break the AI's robotic tone. 
-    - Use: "In the spirit of Ariel Costa's flat-planar collage..." or "With the chunky, nostalgic weight of a 1980s vinyl toy..."
-    - Reference: Studio Ghibli (for lighting/mood), John Howe (for gritty silhouette), and DIY Claymation (for texture).
+    GROUND TRUTH (DNA):
+    {dna}
 
-    ### 2. AESTHETIC ADJACENCIES (The Material Cloud):
-    - Don't just say 'plastic'. Broaden the surface vocabulary: 
-      * Vinyl, PVC, Ceramic, High-Gloss Enamel, Gummy Resin, Polished Acrylic, Thick Latex.
-    - Don't just say 'round'. Broaden the geometry: 
-      * Bulbous, inflated, squashed, bean-like, heavy-bottomed, pill-shaped.
+    TOOL SPECIFICATION:
+    {spec}
 
-    ### 3. THE "COLLISION" RULE:
-    - Every prompt must collide two 'Opposing Values' to find the studio's "Aggressive but Funny" sweet spot.
-    - Example: A "cute, blobby character" in a "harsh, industrial noir refinery."
+    ### INSTRUCTIONS FOR THE FACTORY MANUAL:
+    As the Lead Systems Architect, synthesize the inputs above into a technical 'Factory Manual'. 
+    The Manual must provide the following sections for a synthetic data generation model:
 
-    ### 4. MULTIMODAL DATASET STRUCTURE:
-    - INPUT: Image + Hint.
-    - THOUGHT: 1-2 sentences explaining the 'Aesthetic Collision' and the 'Reference Anchor' used.
-    - OUTPUT: A punchy, 3-sentence Master Prompt that feels like a human Art Director's note.
+    1. STRATEGIC MAPPING: 
+       Define how the functional requirements of the Tool Specification must be executed 
+       using the specific technical vocabulary and visual rules established in the DNA.
 
-    ### POSITIVE DISPLACEMENT:
-    - Describe the presence of 'automated desolation' instead of 'no people'.
-    - Describe 'soft, plump junctions' instead of 'no sharp edges'.
+    2. REASONING PROTOCOL: 
+       Define the mandatory 'THOUGHT' block logic. Every synthetic sample must justify 
+       its output based on the DNA pillars (Subject, Mood, Medium, Elements).
 
-    INPUT DNA ARCHIVE:
-    {dna_archive}
+    3. SEMANTIC DICTIONARY: 
+       Map generic user concepts to the specific technical terminology found in the DNA.
 
-    ### OUTPUT SECTIONS:
-    1. THE MATERIAL & FORM CLOUD (Varied synonyms and adjacencies).
-    2. THE REFERENCE LIBRARY (How and when to name-drop Ariel Costa, Howe, Ghibli, etc.).
-    3. THE COLLISION PROTOCOL (Rules for mixing 'Cute' and 'Gritty').
-    4. 3 DIVERSE SAMPLES (Varying in tone from 'Hyper-Clean Toy' to 'Industrial Noir').
+    4. ELASTICITY RULES: 
+       Provide logic for handling variable input densities (sparse vs. dense inputs) 
+       as defined in the Tool Specification.
+
+    5. QUALITY BENCHMARKS: 
+       Provide 3 'Gold Standard' synthetic [INPUT -> THOUGHT -> OUTPUT] samples 
+       that demonstrate the required technical precision.
+
+    TONE: Clinical, technical, directive. No conversational filler or use-case examples.
     """
 
-    try:
-        print("Step 1: Compiling 'instructional.md' with Aesthetic Expansion...")
+    model = GenerativeModel(MODEL_ID)
 
-        response = client.models.generate_content(
-            model="gemini-3.1-pro-preview",
-            contents=[instructional_prompt],
-            config=types.GenerateContentConfig(thinking_config=types.ThinkingConfig(thinking_level="HIGH"))
+    try:
+        print("Opening Stream...")
+        # Streaming ensures the socket stays active during pre-fill
+        responses = model.generate_content(
+            foreman_prompt,
+            stream=True,
+            generation_config=GenerationConfig(
+                temperature=0.1,
+                max_output_tokens=8192
+            )
         )
 
-        with open("instructional.md", "w") as f:
-            f.write(response.text)
+        output_filename = "instructions_FACTORY.md"
+        with open(output_filename, "w", encoding="utf-8") as f:
+            for response in responses:
+                if response.text:
+                    print("█", end="", flush=True)
+                    f.write(response.text)
 
-        print("\nSUCCESS: 'instructional.md' is ready.")
-        print("The Generative Agent now has a broader, reference-rich vocabulary.")
+        print(f"\n\nSUCCESS: {output_filename} is ready.")
 
     except Exception as e:
-        print(f"Instructional Synthesis Error: {e}")
+        print(f"\n\nSynthesis Error: {e}")
 
 
 if __name__ == "__main__":
-    run_instructional_synthesis()
+    run_instructional_foreman()

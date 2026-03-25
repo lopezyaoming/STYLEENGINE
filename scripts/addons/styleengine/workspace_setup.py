@@ -767,6 +767,7 @@ def write_session_json(context):
                 "camera_name": "ai_camera"
             },
             "agent_id": "agent.comfy.local.v1",  # Placeholder for now
+            "prompt_llm_profile": props.prompt_llm_profile if hasattr(props, "prompt_llm_profile") else "DEFAULT",
             "resolution": {
                 "preset": f"native_{width}" if width == height else res_str,
                 "width": width,

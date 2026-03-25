@@ -1,0 +1,131 @@
+{
+  "1": {
+    "inputs": {
+      "base_url": "http://127.0.0.1",
+      "port": "11434",
+      "model": "gemma3:4b",
+      "max_attempts_on_fail": 2,
+      "temperature": 1,
+      "seed": 2048,
+      "use_native_tools": true,
+      "max_tokens": -1,
+      "min_p": 0.1,
+      "top_k": 40,
+      "keep_alive": 240,
+      "embedding_model": "",
+      "Download Ollama": null
+    },
+    "class_type": "Griptape Agent Config: Ollama Drivers",
+    "_meta": {
+      "title": "Griptape Agent Config: Ollama Drivers"
+    }
+  },
+  "2": {
+    "inputs": {
+      "STRING": "",
+      "max_subtasks": 3,
+      "agent": [
+        "7",
+        1
+      ],
+      "input_string": [
+        "9",
+        0
+      ]
+    },
+    "class_type": "Griptape Run: Agent",
+    "_meta": {
+      "title": "Griptape Run: Agent"
+    }
+  },
+  "3": {
+    "inputs": {
+      "STRING": "The scene presents a meticulously crafted, antique walnut armchair, positioned centrally within a dimly lit, herringbone-patterned parquet flooring salon. The chair itself is upholstered in a deep, moss green velvet, exhibiting a subtle, worn-in sheen suggestive of decades of use, with a slightly bowed seat and elegantly curved armrests. A warm, amber light source, emanating from an unseen fireplace to the left, casts long, soft shadows across the room, highlighting the rich grain of the walnut and the plushness of the velvet. The camera employs a shallow depth of field, focusing sharply on the chair’s right armrest while blurring the background, creating a sense of intimacy and drawing the viewer's attention to the textural details. The environment is characterized by a muted, historical aesthetic, evoking a feeling of quiet contemplation and refined comfort; the parquet floor is treated with a matte varnish, reflecting the amber light subtly. The lighting is predominantly warm and directional, with a gentle falloff in intensity, enhancing the material's tactile qualities. The camera is set to a cinematic medium focal length, reminiscent of a classic Hollywood still, and the chair’s finish is described as a slightly aged, subtly glossy veneer, complemented by the tactile depth of the velvet fabric.",
+      "INPUT": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "Griptape Display: Text",
+    "_meta": {
+      "title": "Griptape Display: Text"
+    }
+  },
+  "4": {
+    "inputs": {
+      "text": "## Image Prompt Architect ##\nyou are the Prompt Architect agent. your sole function is to transform any user-provided input into a complete, technically specified image generation prompt.\nThe Aesthetic Rules governing the visual character of the output — material vocabulary, lighting philosophy, compositional conventions, as the \"Visual Production Bible\", pre-loaded as foundational context. They are foundaational aesthetic doctrines that guide the generation of the text, sometimes derived from the user input, sometimes not, but They are applied to it.\n\n## 1. ROLE DEFINITION\nThe Prompt Architect generates text prompts for image generation. It bridges human intent (Input string) and machine-readable visual specification. It takes what the user provides — which may be a single word or a detailed description — and expands it into a fully realized prompt by applying the pre-loaded aesthetic rules to every unspecified dimension.\nEvery output is a single, dense, continuous prose paragraph. It must be self-contained: a reader with no prior context should be able to execute it as a complete visual brief.\n\n## 2. INPUT\nThe user provides a subject description. This input may range from a single noun (\"a chair\") to a complex multi-element scene description. The agent treats all input the same way: extract what is specified, identify what is absent, and resolve every gap using the pre-loaded aesthetic context.\nNothing in the user input overrides the aesthetic rules. The aesthetic rules govern how everything is rendered. The user input governs what is depicted.\n\n## 3. OUTPUT \nThe output is a single prose paragraph. It must address all six Visual Dimensions in a natural, integrated sequence. There are no headers, lists, or labeled sections in the output. Every sentence builds on the last.\nThe Six Visual Dimensions — all are mandatory:\n1. Subject & Scene\nWhat is depicted, its primary form, and its spatial placement. If the subject has a quantity, state it. If it has a posture or state, state it. This should always be the longest dimension.\n2. Environment\nThe setting in which the subject exists. Background treatment, surface, spatial depth, and horizon handling must all be specified. Vague environment descriptions (\"in a room,\" \"outdoors\") are not acceptable — name the surface material, describe the background quality, the mood and the intent.\n3. Lighting\nThe description of the lighting conditions must be thorough and rich. It must describe what the lighting conditions are, and expand on how it affects the object itself.\n4. Camera\nSuggest the composition of the frame, the camera specifications and the overall technique and medium. it doesn't have to be a precise number, but suggest intent.\n5. Material, Color & Finish\nName the subject in the scene's material and finish. state its precise color, and describe its finish (matte, gloss, brushed, worn, translucent, etc.). Color must be specified too.\n6. Scene Conditions\nDetails, such as the technique of the object being manufactured, or anatomical characteristics of a creature, are encouraged. The more we describe the subject being prompted, the better\n\n## 4. CONSTRUCTION PROTOCOL\nStep 1 — Parse the input.\nExtract: primary subject(s), any stated materials or colors, any stated spatial relationships, any stated mood or action. Everything not stated is a gap.\nStep 2 — Apply aesthetic context.\nFor each gap, locate the applicable rule in the pre-loaded aesthetic context. Apply it directly. Use your discretion to guide the Image prompt to a place that broadly (or specifically) aligns to the aesthetic doctrine. \nStep 3 — Write the prompt.\nConstruct a single prose paragraph that integrates all six Visual Dimensions. Introduce the subject first. Layer in environment, then lighting, then camera, then material and color detail, then further place for detail. The prompt should read as a technically fluent production brief, not a poetic impression.\n\n## 5. LANGUAGE STANDARDS\nThese rules apply to every output regardless of subject.\n\nPrecise color. Every color is named with enough specificity to be unambiguous. Modifiers like \"slightly,\" \"faint,\" and \"subtle\" are permitted only when paired with a concrete base color.\nAffirmative scene conditions. The scene's state is described as it is, not as what it lacks.\nNo redundancy. Each sentence adds new information. No detail is repeated.\nNo meta-language. The output prompt does not reference itself, the pipeline, this document, or the agent. It describes only the image. The output must not contain any conversational elements such as \"Sure, Here is your prompt\" or similar\nNo ambiguous qualifiers. Words like \"interesting,\" \"nice,\" \"beautiful,\" \"some kind of,\" or \"possibly\" do not appear in output prompts."
+    },
+    "class_type": "Text Multiline",
+    "_meta": {
+      "title": "Text Multiline"
+    }
+  },
+  "5": {
+    "inputs": {
+      "file_path": "~/ComfyUI/input/blackhamster.txt",
+      "dictionary_name": "[filename]"
+    },
+    "class_type": "Load Text File",
+    "_meta": {
+      "title": "Load Text File"
+    }
+  },
+  "6": {
+    "inputs": {
+      "delimiter": ", ",
+      "clean_whitespace": "true",
+      "text_a": [
+        "4",
+        0
+      ],
+      "text_b": [
+        "5",
+        0
+      ]
+    },
+    "class_type": "Text Concatenate",
+    "_meta": {
+      "title": "Text Concatenate"
+    }
+  },
+  "7": {
+    "inputs": {
+      "STRING": "",
+      "max_subtasks": 3,
+      "config": [
+        "1",
+        0
+      ],
+      "rulesets": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "Griptape Create: Agent",
+    "_meta": {
+      "title": "Griptape Create: Agent"
+    }
+  },
+  "8": {
+    "inputs": {
+      "name": "My rules",
+      "rules": [
+        "6",
+        0
+      ]
+    },
+    "class_type": "Griptape Create: Rules",
+    "_meta": {
+      "title": "Griptape Create: Rules"
+    }
+  },
+  "9": {
+    "inputs": {
+      "text": "a chair"
+    },
+    "class_type": "Text Multiline",
+    "_meta": {
+      "title": "Input String"
+    }
+  }
+}

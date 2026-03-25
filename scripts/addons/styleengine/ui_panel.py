@@ -426,6 +426,17 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         default=False
     )
     
+    prompt_llm_profile: bpy.props.EnumProperty(
+        name="Prompt LLM Profile",
+        description="Which ComfyUI text/vision workflows to use for Refine Prompt and image description",
+        items=[
+            ('DEFAULT', "Default", "TextRefine, TextImage, TextViewport JSON workflows"),
+            ('BLACKHAMSTER', "Blackhamster Agents", "AgentTextRefine and AgentImageRefine workflows"),
+        ],
+        default='DEFAULT',
+        update=update_session_json,
+    )
+    
     show_image_generation_main: bpy.props.BoolProperty(
         name="Show Image Generation",
         description="Expand or collapse the Image Generation section",
@@ -616,6 +627,19 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
             ('1536', "1536", "High quality, slower"),
         ],
         default='1024',
+    )
+
+    trellis_decimation: bpy.props.IntProperty(
+        name="Max Polygons",
+        description=(
+            "Maximum polygon count for the generated mesh. "
+            "Very high values (>500k) can crash Blender during import "
+            "due to NumPy memory limits. Keep at 300k or below for safety."
+        ),
+        default=300000,
+        min=10000,
+        max=1000000,
+        step=10000,
     )
 
     # ----------------------------------------------------------------
@@ -3375,12 +3399,13 @@ class WM_OT_TrellisGenerate(bpy.types.Operator):
         tex_size     = int(getattr(props, 'trellis_texture_size', '4096'))
         remove_bg    = getattr(props, 'trellis_remove_bg',    True)
         seed         = getattr(props, 'seed_value',           42)
+        decimation   = getattr(props, 'trellis_decimation',   300000)
 
         print(f"[TRELLIS] ============================================")
         print(f"[TRELLIS] STARTING TRELLIS2 3D GENERATION")
         print(f"[TRELLIS] Server: {trellis_url}")
         print(f"[TRELLIS] Quality: {quality} | Steps: {steps} | Guidance: {guidance}")
-        print(f"[TRELLIS] Remove BG: {remove_bg} | Texture: {tex_size}px")
+        print(f"[TRELLIS] Remove BG: {remove_bg} | Texture: {tex_size}px | Max Polys: {decimation}")
         if proxy_name:
             print(f"[TRELLIS] Proxy: {proxy_name} (max_dim {proxy_max_dim:.3f} m)")
         else:
@@ -3424,11 +3449,12 @@ class WM_OT_TrellisGenerate(bpy.types.Operator):
                 job_id = trellis_client.submit_generate(
                     trellis_url,
                     str(input_img),
-                    pipeline_type  = quality,
-                    seed           = seed,
-                    steps          = steps,
-                    guidance       = guidance,
-                    texture_size   = tex_size,
+                    pipeline_type      = quality,
+                    seed               = seed,
+                    steps              = steps,
+                    guidance           = guidance,
+                    texture_size       = tex_size,
+                    decimation_target  = decimation,
                 )
                 print(f"[TRELLIS] Job submitted: {job_id[:8]}…")
                 captured['job_id'] = job_id
@@ -3927,25 +3953,64 @@ class WM_OT_SegmentMesh(bpy.types.Operator):
                             proxy_max_v.z - proxy_min.z, 0.001)
         proxy_name    = obj.name
 
-        # ── Export mesh as .obj (geometry only — fastest upload) ─────────
+        # ── Prepare mesh: merge vertices, keep largest island, export GLB ──
         token    = uuid.uuid4().hex[:8]
-        obj_path = temp_dir / f"part_input_{token}.obj"
+        obj_path = temp_dir / f"part_input_{token}.glb"
 
         bpy.ops.object.select_all(action='DESELECT')
         obj.select_set(True)
         context.view_layer.objects.active = obj
 
         try:
-            bpy.ops.wm.obj_export(
-                filepath      = str(obj_path),
-                export_selected_objects = True,
-                export_materials = False,
-                export_normals   = True,
-                export_uv        = False,
-                export_colors    = False,
+            # Work on a temporary copy so the original is untouched
+            bpy.ops.object.duplicate(linked=False)
+            work_obj = context.active_object
+            work_obj.name = f"_part_prep_{token}"
+
+            # Enter edit mode for cleanup
+            bpy.ops.object.mode_set(mode='EDIT')
+            bpy.ops.mesh.select_all(action='SELECT')
+            bpy.ops.mesh.remove_doubles(threshold=0.0001)
+            bpy.ops.mesh.separate(type='LOOSE')
+            bpy.ops.object.mode_set(mode='OBJECT')
+
+            # Find the largest part by face count among the separated pieces
+            candidates = [o for o in context.selected_objects if o.type == 'MESH']
+            if candidates:
+                largest = max(candidates, key=lambda o: len(o.data.polygons))
+                # Remove everything except the largest
+                for c in candidates:
+                    if c is not largest:
+                        bpy.data.objects.remove(c, do_unlink=True)
+                # Select only the largest for export
+                bpy.ops.object.select_all(action='DESELECT')
+                largest.select_set(True)
+                context.view_layer.objects.active = largest
+            else:
+                largest = work_obj
+
+            print(f"[Part] Cleaned mesh: {len(largest.data.polygons)} faces "
+                  f"(merge + keep largest island)")
+
+            # Export as GLB (geometry only, no textures)
+            bpy.ops.export_scene.gltf(
+                filepath=str(obj_path),
+                export_format='GLB',
+                use_selection=True,
+                export_materials='NONE',
+                export_apply=True,
             )
+
+            # Clean up the temporary object
+            bpy.data.objects.remove(largest, do_unlink=True)
+
         except Exception as e:
+            # Clean up any leftover temp objects on failure
+            for o in list(bpy.data.objects):
+                if o.name.startswith(f"_part_prep_{token}"):
+                    bpy.data.objects.remove(o, do_unlink=True)
             self.report({'ERROR'}, f"Mesh export failed: {e}")
+            import traceback; traceback.print_exc()
             return {'CANCELLED'}
 
         if not obj_path.exists():
@@ -3984,6 +4049,61 @@ class WM_OT_SegmentMesh(bpy.types.Operator):
         # ----------------------------------------------------------------
         # Background thread: upload → predict → download
         # ----------------------------------------------------------------
+        _UA = {"User-Agent": "StyleEngine-Blender/1.0"}
+
+        def _try_request(url, data=None, headers=None, method="GET", timeout=60,
+                         soft_errors=(404,)):
+            """Fire an HTTP request.
+
+            Returns (response_bytes, status_code).
+            For codes in *soft_errors* returns (error_body_or_None, code) instead
+            of raising.  All other HTTP errors are raised.
+            """
+            hdrs = dict(_UA)
+            if headers:
+                hdrs.update(headers)
+            req = urllib.request.Request(url, data=data, headers=hdrs, method=method)
+            try:
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    return resp.read(), resp.getcode()
+            except urllib.error.HTTPError as e:
+                if e.code in soft_errors:
+                    try:
+                        err_body = e.read()
+                    except Exception:
+                        err_body = None
+                    return err_body, e.code
+                raise
+
+        def _parse_sse_result(sse_bytes):
+            """Parse a Gradio SSE stream and return the final 'complete' data list."""
+            event_type = None
+            all_events = []
+            for raw_line in sse_bytes.split(b"\n"):
+                line = raw_line.decode("utf-8", errors="replace").strip()
+                if not line:
+                    continue
+                if line.startswith("event:"):
+                    event_type = line.split(":", 1)[1].strip()
+                elif line.startswith("data:"):
+                    payload = line.split(":", 1)[1].strip()
+                    all_events.append((event_type, payload))
+                    print(f"[Part] SSE event={event_type} data={payload[:300]}")
+                    if event_type == "error":
+                        # Gradio sends data: null or data: "error message"
+                        if payload and payload != "null":
+                            raise RuntimeError(f"Gradio pipeline error: {payload}")
+                        raise RuntimeError(
+                            "Gradio pipeline returned an error (no detail). "
+                            "Check the Hunyuan3D-Part server/container logs for "
+                            "the Python traceback."
+                        )
+                    if event_type == "complete":
+                        return json.loads(payload)
+            print(f"[Part] SSE stream ended without 'complete'. "
+                  f"Events received: {[e[0] for e in all_events]}")
+            return None
+
         def _segment_thread():
             try:
                 orig_name = obj_path.name
@@ -3999,77 +4119,125 @@ class WM_OT_SegmentMesh(bpy.types.Operator):
                     f"Content-Type: application/octet-stream\r\n\r\n"
                 ).encode() + file_data + f"\r\n--{boundary}--\r\n".encode()
 
-                upload_headers = {
-                    "Content-Type": f"multipart/form-data; boundary={boundary}",
-                    "User-Agent":   "StyleEngine-Blender/1.0",
-                }
+                upload_ct = {"Content-Type": f"multipart/form-data; boundary={boundary}"}
 
-                # Try both Gradio 3.x/4.x (/upload) and 5.x (/api/upload)
                 file_input = None
-                for upload_url in [f"{part_url}/upload", f"{part_url}/api/upload"]:
-                    try:
-                        upload_req = urllib.request.Request(
-                            upload_url, data=upload_body,
-                            headers=upload_headers, method="POST",
-                        )
-                        with urllib.request.urlopen(upload_req, timeout=60) as resp:
-                            remote_paths = json.loads(resp.read().decode())
-                        # Normalise: Gradio 3.x returns ["/path/..."],
-                        # Gradio 4.x+ returns [{"path": "...", ...}]
-                        first = remote_paths[0]
-                        if isinstance(first, dict):
-                            remote_path = first.get("path", "")
-                            file_input  = {"path": remote_path, "orig_name": orig_name}
-                        else:
-                            remote_path = first
-                            file_input  = {"path": remote_path, "orig_name": orig_name}
-                        print(f"[Part] Uploaded via {upload_url} → {remote_path}")
-                        break
-                    except urllib.error.HTTPError as e:
-                        if e.code == 404:
-                            print(f"[Part] {upload_url} not found, trying next…")
-                            continue
-                        raise
+                for upload_url in [
+                    f"{part_url}/gradio_api/upload",
+                    f"{part_url}/upload",
+                    f"{part_url}/api/upload",
+                ]:
+                    body, status = _try_request(upload_url, data=upload_body,
+                                                headers=upload_ct, method="POST",
+                                                soft_errors=(404, 405))
+                    if status in (404, 405):
+                        print(f"[Part] {upload_url} -> {status}, trying next...")
+                        continue
+                    remote_paths = json.loads(body.decode())
+                    first = remote_paths[0]
+                    remote_path = first.get("path", first) if isinstance(first, dict) else first
+                    file_input = {
+                        "path": remote_path,
+                        "orig_name": orig_name,
+                        "meta": {"_type": "gradio.FileData"},
+                    }
+                    print(f"[Part] Uploaded via {upload_url} -> {remote_path}")
+                    break
 
                 if file_input is None:
-                    # Last-resort: base64 embed (compatible with Gradio 3.x predict)
                     import base64 as _b64
                     b64 = _b64.b64encode(file_data).decode()
                     file_input = {
                         "name": orig_name,
                         "data": f"data:application/octet-stream;base64,{b64}",
+                        "meta": {"_type": "gradio.FileData"},
                     }
-                    print(f"[Part] No upload endpoint found — embedding as base64 "
+                    print(f"[Part] No upload endpoint found -- embedding as base64 "
                           f"({len(b64) // 1024} KB)")
 
-                # ── Step 2: predict (synchronous, blocks until done) ─────
-                predict_payload = json.dumps({
-                    "data": [
-                        file_input,
-                        point_num,
-                        prompt_num,
-                        16,    # prompt_bs — fixed safe value
-                        seed,
-                    ]
-                }).encode()
+                # ── Step 2: call /run_pipeline (single endpoint, full pipeline) ──
+                # Parameters (from /gradio_api/info):
+                #   mesh_file, mode, point_num, prompt_num, prompt_bs,
+                #   threshold, post_process, num_inference_steps,
+                #   octree_resolution, guidance_scale, dual_guidance_scale,
+                #   eta, mc_level, num_chunks, seed
+                # Returns 5 outputs: assembled GLB, exploded GLB, bbox GLB,
+                #   aabb.npy, status markdown
 
-                predict_req = urllib.request.Request(
-                    f"{part_url}/api/predict",
-                    data=predict_payload,
-                    headers={
-                        "Content-Type": "application/json",
-                        "User-Agent":   "StyleEngine-Blender/1.0",
-                    },
-                    method="POST",
-                )
-                print(f"[Part] Running pipeline (may take 2–5 min)…")
-                with urllib.request.urlopen(predict_req, timeout=360) as resp:
-                    result = json.loads(resp.read().decode())
+                json_ct = {"Content-Type": "application/json"}
+                last_server_error = None
 
-                outputs = result.get("data", [])
-                print(f"[Part] Pipeline done. Duration: {result.get('duration', '?'):.1f}s")
-                if len(outputs) >= 4:
-                    print(f"[Part] Status: {outputs[3]}")
+                pipeline_data = [
+                    file_input,             # mesh_file
+                    "Full Pipeline",        # mode
+                    point_num,              # point_num (default 50000)
+                    prompt_num,             # prompt_num (default 128)
+                    16,                     # prompt_bs
+                    0.95,                   # threshold (NMS IoU merge)
+                    False,                  # post_process (merge pass)
+                    50,                     # num_inference_steps
+                    512,                    # octree_resolution
+                    -1.0,                   # guidance_scale (-1 = disabled)
+                    10.5,                   # dual_guidance_scale
+                    0.0,                    # eta (0 = deterministic)
+                    -0.001953125,           # mc_level (isosurface)
+                    400000,                 # num_chunks
+                    seed,                   # seed
+                ]
+                payload = json.dumps({"data": pipeline_data}).encode()
+
+                result = None
+                for prefix in ["", "/gradio_api"]:
+                    call_url = f"{part_url}{prefix}/call/run_pipeline"
+                    body, status = _try_request(
+                        call_url, data=payload,
+                        headers=json_ct, method="POST", timeout=30,
+                        soft_errors=(404, 405, 422, 500, 502, 503),
+                    )
+                    if status == 404:
+                        print(f"[Part] {call_url} not found, trying next...")
+                        continue
+                    if status in (405, 422, 500, 502, 503):
+                        snippet = (body or b"")[:500].decode("utf-8", errors="replace")
+                        print(f"[Part] {call_url} -> HTTP {status}: {snippet}")
+                        last_server_error = f"HTTP {status} from {call_url}: {snippet}"
+                        continue
+
+                    call_resp = json.loads(body.decode())
+                    event_id = call_resp.get("event_id")
+                    if not event_id:
+                        print(f"[Part] No event_id from {call_url}: {call_resp}")
+                        continue
+
+                    print(f"[Part] Pipeline running via {call_url} "
+                          f"(event_id={event_id}, may take 2-5 min)...")
+
+                    sse_url = f"{call_url}/{event_id}"
+                    sse_body, sse_status = _try_request(
+                        sse_url, timeout=600,
+                        soft_errors=(404,),
+                    )
+                    if sse_status == 404:
+                        print(f"[Part] SSE {sse_url} returned 404")
+                        continue
+
+                    parsed = _parse_sse_result(sse_body)
+                    if parsed is not None:
+                        result = parsed
+                        break
+
+                if result is None:
+                    detail = last_server_error or "run_pipeline endpoint not found"
+                    raise RuntimeError(
+                        f"Gradio run_pipeline failed. {detail}. "
+                        "Check Hunyuan3D-Part server logs."
+                    )
+
+                # result = [assembled_glb, exploded_glb, bbox_glb, aabb_npy, status_md]
+                outputs = result
+                print(f"[Part] Pipeline done. {len(outputs)} outputs returned.")
+                if len(outputs) >= 5 and isinstance(outputs[4], str):
+                    print(f"[Part] Status: {outputs[4][:200]}")
 
                 # ── Step 3: download assembled.glb (data[0]) ────────────
                 if not outputs or outputs[0] is None:
@@ -4079,29 +4247,33 @@ class WM_OT_SegmentMesh(bpy.types.Operator):
                 print(f"[Part] Output[0] type: {type(out0).__name__} | value: {str(out0)[:120]}")
 
                 if isinstance(out0, dict):
-                    # Prefer a direct URL if provided (Gradio 4.x+)
                     direct_url = out0.get("url") or out0.get("value")
                     remote_path_out = out0.get("path", "")
                     if direct_url and direct_url.startswith("http"):
                         dl_url = direct_url
                     elif remote_path_out:
-                        dl_url = f"{part_url}/file={remote_path_out}"
+                        dl_url = f"{part_url}/gradio_api/file={remote_path_out}"
                     else:
                         raise RuntimeError(f"Cannot extract download URL from: {out0}")
                 elif isinstance(out0, str):
-                    # Gradio 3.x returns raw path string
                     if out0.startswith("http"):
                         dl_url = out0
                     else:
-                        dl_url = f"{part_url}/file={out0}"
+                        dl_url = f"{part_url}/gradio_api/file={out0}"
                 else:
                     raise RuntimeError(f"Unexpected output format: {out0}")
 
+                # Try download; fall back to legacy /file= path
                 print(f"[Part] Downloading from: {dl_url}")
-                dl_req = urllib.request.Request(
-                    dl_url, headers={"User-Agent": "StyleEngine-Blender/1.0"})
-                with urllib.request.urlopen(dl_req, timeout=60) as dl_resp:
-                    glb_data = dl_resp.read()
+                glb_data, dl_status = _try_request(dl_url, timeout=120,
+                                                    soft_errors=(404,))
+                if dl_status == 404 and "/gradio_api/file=" in dl_url:
+                    legacy_dl = dl_url.replace("/gradio_api/file=", "/file=")
+                    print(f"[Part] Retrying legacy path: {legacy_dl}")
+                    glb_data, dl_status = _try_request(legacy_dl, timeout=120,
+                                                        soft_errors=(404,))
+                if dl_status == 404 or glb_data is None:
+                    raise RuntimeError(f"Failed to download assembled GLB (HTTP {dl_status})")
 
                 dl_path = captured['temp_dir'] / f"part_{token}.glb"
                 with open(str(dl_path), 'wb') as f:
@@ -6658,164 +6830,405 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
             row.label(text=f"Queue: {queue}", icon='LINENUMBERS_ON')
 
         # ================================================================
-        # FILE CATEGORY (Collapsible)
+        # VIEW CATEGORY (Collapsible) — Q · visibility
         # ================================================================
+        view_box = layout.box()
+        view_header = view_box.row(align=True)
+        view_icon = 'TRIA_DOWN' if style_props.show_view_settings else 'TRIA_RIGHT'
+        view_header.prop(style_props, "show_view_settings", text="View", icon=view_icon, emboss=False, toggle=True)
+        view_header.label(text="", icon='VIEW_CAMERA')
+
+        if style_props.show_view_settings:
+            # Visualization Type Buttons (SDXL only)
+            if style_props.ai_model != 'GEMINI':
+                col = view_box.column(align=True)
+                col.label(text="Visualization:")
+                row = col.row(align=True)
+                row.scale_y = 1.3
+                op = row.operator("style_engine.set_visualization", text="Combined", icon='IMAGE_DATA',
+                                  depress=(style_props.visualization_type == 'COMBINED'))
+                op.viz_type = 'COMBINED'
+                op = row.operator("style_engine.set_visualization", text="Silhouette", icon='MESH_PLANE',
+                                  depress=(style_props.visualization_type == 'CANNY'))
+                op.viz_type = 'CANNY'
+                op = row.operator("style_engine.set_visualization", text="Depth", icon='EMPTY_SINGLE_ARROW',
+                                  depress=(style_props.visualization_type == 'DEPTH'))
+                op.viz_type = 'DEPTH'
+
+            # Background Opacity
+            view_box.separator()
+            col = view_box.column(align=True)
+            col.label(text="Background Opacity:")
+            col.prop(style_props, "background_opacity", text="", slider=True)
+
+            # Generation Browser
+            view_box.separator()
+            col = view_box.column(align=True)
+            col.label(text="Generation Browser:")
+            from . import workspace_setup
+            generations = workspace_setup.get_generation_list(context)
+            if generations:
+                row = col.row(align=True)
+                row.scale_y = 1.2
+                at_oldest = (style_props.current_generation_index == 0)
+                at_latest = (style_props.current_generation_index == -1)
+                prev_row = row.row(align=True)
+                prev_row.enabled = not at_oldest
+                prev_row.operator("style_engine.prev_generation", text="", icon='TRIA_LEFT')
+                if at_latest:
+                    current_text = f"Latest ({len(generations)})"
+                else:
+                    current_text = f"{style_props.current_generation_index + 1}/{len(generations)}"
+                row.label(text=current_text)
+                next_row = row.row(align=True)
+                next_row.enabled = not at_latest
+                next_row.operator("style_engine.next_generation", text="", icon='TRIA_RIGHT')
+            else:
+                col.label(text="No generations yet", icon='INFO')
+
+        # ================================================================
+        # FILE CATEGORY (Collapsible) — Q · workspace
+        # ================================================================
+        layout.separator()
         file_box = layout.box()
         file_header = file_box.row(align=True)
         icon = 'TRIA_DOWN' if style_props.show_file_settings else 'TRIA_RIGHT'
         file_header.prop(style_props, "show_file_settings", text="File", icon=icon, emboss=False, toggle=True)
         file_header.label(text="", icon='FILE_FOLDER')
-        
+
         if style_props.show_file_settings:
-            # Output Path
             col = file_box.column(align=True)
             col.label(text="Output Path:")
             col.prop(style_props, "output_path", text="")
-            
-            # Resolution
-            file_box.separator()
-            col = file_box.column(align=True)
-            col.label(text="Resolution:")
-            col.prop(style_props, "ai_resolution", text="")
-            
-            # Render Quality
-            file_box.separator()
-            col = file_box.column(align=True)
-            col.label(text="Render Quality:")
-            col.prop(style_props, "render_quality", text="")
-            
-            # Seed
+
+            # Resolution — hidden when Gemini is active (uses render resolution directly)
+            if style_props.ai_model != 'GEMINI':
+                file_box.separator()
+                col = file_box.column(align=True)
+                col.label(text="Resolution:")
+                col.prop(style_props, "ai_resolution", text="")
+
             file_box.separator()
             row = file_box.row(align=True)
             row.prop(style_props, "seed_value", text="Seed")
             row.operator("style_engine.reroll_seed", text="", icon='FILE_REFRESH')
-            
-            # Model
+
             file_box.separator()
             col = file_box.column(align=True)
             col.label(text="Model:")
             col.prop(style_props, "ai_model", text="")
-            
-            # ────────────────────────────────────────────────────────────
-            # VIEW SUB-CATEGORY (Collapsible)
-            # ────────────────────────────────────────────────────────────
-            file_box.separator()
-            view_box = file_box.box()
-            view_header = view_box.row(align=True)
-            view_icon = 'TRIA_DOWN' if style_props.show_view_settings else 'TRIA_RIGHT'
-            view_header.prop(style_props, "show_view_settings", text="View", icon=view_icon, emboss=False, toggle=True)
-            view_header.label(text="", icon='VIEW_CAMERA')
-            
-            if style_props.show_view_settings:
-                # Visualization Type Buttons (SDXL only — Gemini outputs a single image, no previews)
-                if style_props.ai_model != 'GEMINI':
-                    col = view_box.column(align=True)
-                    col.label(text="Visualization:")
-                    row = col.row(align=True)
-                    row.scale_y = 1.3
-
-                    op = row.operator("style_engine.set_visualization",
-                                     text="Combined",
-                                     icon='IMAGE_DATA',
-                                     depress=(style_props.visualization_type == 'COMBINED'))
-                    op.viz_type = 'COMBINED'
-
-                    op = row.operator("style_engine.set_visualization",
-                                     text="Silhouette",
-                                     icon='MESH_PLANE',
-                                     depress=(style_props.visualization_type == 'CANNY'))
-                    op.viz_type = 'CANNY'
-
-                    op = row.operator("style_engine.set_visualization",
-                                     text="Depth",
-                                     icon='EMPTY_SINGLE_ARROW',
-                                     depress=(style_props.visualization_type == 'DEPTH'))
-                    op.viz_type = 'DEPTH'
-
-                # Background Opacity
-                view_box.separator()
-                col = view_box.column(align=True)
-                col.label(text="Background Opacity:")
-                col.prop(style_props, "background_opacity", text="", slider=True)
-                
-                # Generation Browser
-                view_box.separator()
-                col = view_box.column(align=True)
-                col.label(text="Generation Browser:")
-                
-                # Get generation info
-                from . import workspace_setup
-                generations = workspace_setup.get_generation_list(context)
-                
-                if generations:
-                    # Navigation buttons
-                    row = col.row(align=True)
-                    row.scale_y = 1.2
-                    
-                    # Check if at boundaries
-                    at_oldest = (style_props.current_generation_index == 0)
-                    at_latest = (style_props.current_generation_index == -1)
-                    
-                    # Previous button (go to older)
-                    prev_row = row.row(align=True)
-                    prev_row.enabled = not at_oldest
-                    prev_row.operator("style_engine.prev_generation", text="", icon='TRIA_LEFT')
-                    
-                    # Current generation indicator
-                    if at_latest:
-                        current_text = f"Latest ({len(generations)})"
-                    else:
-                        current_text = f"{style_props.current_generation_index + 1}/{len(generations)}"
-                    
-                    row.label(text=current_text)
-                    
-                    # Next button (go to newer)
-                    next_row = row.row(align=True)
-                    next_row.enabled = not at_latest
-                    next_row.operator("style_engine.next_generation", text="", icon='TRIA_RIGHT')
-                else:
-                    col.label(text="No generations yet", icon='INFO')
 
         # ================================================================
-        # TEXT GENERATION CATEGORY (Collapsible)
+        # IMAGE GENERATION CATEGORY (Collapsible) — Q · image
         # ================================================================
         layout.separator()
-        text_box = layout.box()
-        text_header = text_box.row(align=True)
-        text_icon = 'TRIA_DOWN' if style_props.show_text_generation else 'TRIA_RIGHT'
-        text_header.prop(style_props, "show_text_generation", text="Text Generation", icon=text_icon, emboss=False, toggle=True)
-        text_header.label(text="", icon='TEXT')
-        
+        img_gen_box = layout.box()
+        img_gen_header = img_gen_box.row(align=True)
+        img_gen_icon = 'TRIA_DOWN' if style_props.show_image_generation_main else 'TRIA_RIGHT'
+        img_gen_header.prop(style_props, "show_image_generation_main", text="Image Generation", icon=img_gen_icon, emboss=False, toggle=True)
+        img_gen_header.label(text="", icon='IMAGE_DATA')
+
+        if style_props.show_image_generation_main:
+            # Always-visible: Generate Image + Upload companion
+            row = img_gen_box.row(align=True)
+            row.scale_y = 2.0
+            row.operator("style_engine.generate_ai_quick", text="Generate Image", icon='IMAGE_DATA')
+            row.operator("style_engine.upload_current_ai", text="", icon='IMPORT')
+
+            # Always-visible: Refine Current Image
+            refine_row = img_gen_box.row(align=True)
+            refine_row.scale_y = 1.3
+            refine_row.operator("style_engine.refine_current_image", text="Refine Current Image", icon='IMAGE_REFERENCE')
+
+            # ── Settings (collapsible) ──────────────────────────────────
+            img_gen_box.separator()
+            settings_box = img_gen_box.box()
+            settings_header = settings_box.row(align=True)
+            settings_icon = 'TRIA_DOWN' if style_props.show_influence else 'TRIA_RIGHT'
+            settings_header.prop(style_props, "show_influence", text="Settings", icon=settings_icon, emboss=False, toggle=True)
+            settings_header.label(text="", icon='PREFERENCES')
+
+            if style_props.show_influence:
+                if style_props.ai_model == 'GEMINI':
+                    # ── Gemini controls ───────────────────────────────────────
+                    col = settings_box.column(align=True)
+                    col.prop(style_props, "gemini_temperature", text="Temperature", slider=True)
+                    col.prop(style_props, "gemini_image_size", text="Size")
+                    col.prop(style_props, "gemini_instructions", text="Instructions")
+
+                    settings_box.separator()
+                    row = settings_box.row(align=True)
+                    row.scale_y = 1.3
+                    row.prop(style_props, "gemini_alignment", text="Alignment", toggle=True, icon='CON_LOCLIKE')
+                    row.prop(style_props, "gemini_remove_bg", text="Remove BG", toggle=True, icon='IMAGE_ALPHA')
+
+                    w = context.scene.render.resolution_x
+                    h = context.scene.render.resolution_y
+                    settings_box.label(text=f"Aspect: {w}x{h}", icon='FULLSCREEN_ENTER')
+
+                    # Gemini Reference Images
+                    settings_box.separator()
+                    gref_box = settings_box.box()
+                    gref_header = gref_box.row(align=True)
+                    gref_icon = 'TRIA_DOWN' if style_props.show_gemini_references else 'TRIA_RIGHT'
+                    gref_header.prop(style_props, "show_gemini_references", text="Reference Images", icon=gref_icon, emboss=False, toggle=True)
+                    gref_header.label(text="", icon='IMAGE_REFERENCE')
+
+                    if style_props.show_gemini_references:
+                        gemini_ref_slots = [
+                            ("gemini_ref1", "gemini_ref1_image", "REF1"),
+                            ("gemini_ref2", "gemini_ref2_image", "REF2"),
+                            ("gemini_ref3", "gemini_ref3_image", "REF3"),
+                            ("gemini_ref4", "gemini_ref4_image", "REF4"),
+                            ("gemini_ref5", "gemini_ref5_image", "REF5"),
+                        ]
+                        gref_box.separator()
+                        grid = gref_box.grid_flow(row_major=True, columns=3, even_columns=True, even_rows=True, align=True)
+                        for slot_id, img_prop, label in gemini_ref_slots:
+                            img = getattr(style_props, img_prop)
+                            card = grid.box()
+                            card.scale_y = 1.0
+                            if img:
+                                col = card.column(align=True)
+                                preview_box = col.box()
+                                preview_col = preview_box.column(align=True)
+                                try:
+                                    pcoll = preview_collections.get("ref_images")
+                                    if pcoll is not None:
+                                        thumb_key = f"{slot_id}_{img.name}"
+                                        if thumb_key not in pcoll:
+                                            if img.filepath:
+                                                abs_path = bpy.path.abspath(img.filepath)
+                                                try:
+                                                    pcoll.load(thumb_key, abs_path, 'IMAGE')
+                                                except Exception:
+                                                    pass
+                                        if thumb_key in pcoll and pcoll[thumb_key].icon_id > 0:
+                                            preview_col.template_icon(icon_value=pcoll[thumb_key].icon_id, scale=5.0)
+                                        else:
+                                            preview_col.label(text="[Preview]", icon='IMAGE_DATA')
+                                    else:
+                                        preview_col.label(text="[No Collection]", icon='ERROR')
+                                except Exception:
+                                    preview_col.label(text="[Error]", icon='ERROR')
+                                col.separator(factor=0.2)
+                                info_col = col.column(align=True)
+                                info_col.scale_y = 0.7
+                                lbl_row = info_col.row()
+                                lbl_row.alignment = 'CENTER'
+                                lbl_row.label(text=label, icon='IMAGE_DATA')
+                                name_row = info_col.row()
+                                name_row.alignment = 'CENTER'
+                                display_name = img.name[:10] + "..." if len(img.name) > 13 else img.name
+                                name_row.label(text=display_name)
+                                col.separator(factor=0.3)
+                                btn_row = col.row(align=True)
+                                btn_row.scale_y = 0.7
+                                reload_op = btn_row.operator("style_engine.reload_reference", text="", icon='FILE_REFRESH')
+                                reload_op.slot = slot_id
+                                clear_op = btn_row.operator("style_engine.clear_reference", text="", icon='X')
+                                clear_op.slot = slot_id
+                            else:
+                                col = card.column(align=True)
+                                col.scale_y = 2.5
+                                col.separator()
+                                load_op = col.operator("style_engine.load_reference", text=f"{label}\n+", icon='ADD', emboss=True)
+                                load_op.slot = slot_id
+                                col.separator()
+
+                else:
+                    # ── SDXL controls ─────────────────────────────────────────
+                    col = settings_box.column(align=True)
+                    col.prop(style_props, "silhouette_influence", text="Silhouette", slider=True)
+                    col.prop(style_props, "depth_influence", text="Depth", slider=True)
+                    col.prop(style_props, "texture_influence", text="Viewport", slider=True)
+                    settings_box.separator()
+                    col = settings_box.column(align=True)
+                    col.label(text="Steps:")
+                    col.prop(style_props, "steps", text="", slider=True)
+
+                    settings_box.separator()
+                    rembg_row = settings_box.row(align=True)
+                    rembg_row.scale_y = 1.3
+                    rembg_row.prop(style_props, "sdxl_remove_bg", text="Remove BG", toggle=True, icon='IMAGE_ALPHA')
+
+                    # Reference Images
+                    settings_box.separator()
+                    ref_box = settings_box.box()
+                    ref_header = ref_box.row(align=True)
+                    ref_icon = 'TRIA_DOWN' if style_props.show_reference_images else 'TRIA_RIGHT'
+                    ref_header.prop(style_props, "show_reference_images", text="Reference Images", icon=ref_icon, emboss=False, toggle=True)
+                    ref_header.label(text="", icon='IMAGE_REFERENCE')
+
+                    if style_props.show_reference_images:
+                        adv_row = ref_box.row(align=True)
+                        adv_row.prop(style_props, "show_advanced_ref_controls", text="Advanced Control", toggle=True, icon='PREFERENCES')
+
+                        def draw_reference_section(box, title, icon, show_prop, slots, strength_prop, show_weights=False):
+                            section_box = box.box()
+                            header = section_box.row(align=True)
+                            icon_tri = 'TRIA_DOWN' if getattr(style_props, show_prop) else 'TRIA_RIGHT'
+                            header.prop(style_props, show_prop, text=title, icon=icon_tri, emboss=False, toggle=True)
+                            if getattr(style_props, show_prop):
+                                section_box.separator()
+                                strength_row = section_box.row()
+                                strength_row.scale_y = 1.5
+                                strength_row.prop(style_props, strength_prop, text="Global Strength", slider=True)
+                                section_box.separator()
+                                grid = section_box.grid_flow(row_major=True, columns=3, even_columns=True, even_rows=True, align=True)
+                                for slot_id, img_prop, weight_prop, label in slots:
+                                    img = getattr(style_props, img_prop)
+                                    card = grid.box()
+                                    card.scale_y = 1.0
+                                    if img:
+                                        col = card.column(align=True)
+                                        preview_box = col.box()
+                                        preview_col = preview_box.column(align=True)
+                                        try:
+                                            pcoll = preview_collections.get("ref_images")
+                                            if pcoll is None:
+                                                preview_col.label(text="[No Collection]", icon='ERROR')
+                                            else:
+                                                thumb_key = f"{slot_id}_{img.name}"
+                                                if thumb_key not in pcoll:
+                                                    if img.filepath:
+                                                        abs_path = bpy.path.abspath(img.filepath)
+                                                        try:
+                                                            pcoll.load(thumb_key, abs_path, 'IMAGE')
+                                                        except Exception as e:
+                                                            print(f"[UI] Failed to load preview for {img.name}: {e}")
+                                                if thumb_key in pcoll:
+                                                    thumb = pcoll[thumb_key]
+                                                    if thumb.icon_id > 0:
+                                                        preview_col.template_icon(icon_value=thumb.icon_id, scale=5.0)
+                                                    else:
+                                                        preview_col.label(text="[Invalid Icon]", icon='IMAGE_DATA')
+                                                else:
+                                                    preview_col.label(text="[Not Loaded]", icon='IMAGE_DATA')
+                                        except Exception as e:
+                                            preview_col.label(text="[Error]", icon='ERROR')
+                                        col.separator(factor=0.2)
+                                        info_col = col.column(align=True)
+                                        info_col.scale_y = 0.7
+                                        label_row = info_col.row()
+                                        label_row.alignment = 'CENTER'
+                                        label_row.label(text=label, icon='IMAGE_DATA')
+                                        name_row = info_col.row()
+                                        name_row.alignment = 'CENTER'
+                                        display_name = img.name[:10] + "..." if len(img.name) > 13 else img.name
+                                        name_row.label(text=display_name)
+                                        col.separator(factor=0.3)
+                                        if show_weights:
+                                            col.prop(style_props, weight_prop, text="", slider=True)
+                                            col.separator(factor=0.2)
+                                        btn_row = col.row(align=True)
+                                        btn_row.scale_y = 0.7
+                                        reload_op = btn_row.operator("style_engine.reload_reference", text="", icon='FILE_REFRESH')
+                                        reload_op.slot = slot_id
+                                        clear_op = btn_row.operator("style_engine.clear_reference", text="", icon='X')
+                                        clear_op.slot = slot_id
+                                    else:
+                                        col = card.column(align=True)
+                                        col.scale_y = 2.5
+                                        col.separator()
+                                        load_op = col.operator("style_engine.load_reference", text=f"{label}\n+", icon='ADD', emboss=True)
+                                        load_op.slot = slot_id
+                                        col.separator()
+
+                        st_slots = [
+                            ("st1", "st1_image", "st1_weight", "ST1"),
+                            ("st2", "st2_image", "st2_weight", "ST2"),
+                            ("st3", "st3_image", "st3_weight", "ST3"),
+                            ("st4", "st4_image", "st4_weight", "ST4"),
+                            ("st5", "st5_image", "st5_weight", "ST5"),
+                        ]
+                        draw_reference_section(ref_box, "Style", 'BRUSH_DATA',
+                                               "show_style_transfer", st_slots, "style_transfer_strength",
+                                               show_weights=style_props.show_advanced_ref_controls)
+
+                        comp_slots = [
+                            ("comp1", "comp1_image", "comp1_weight", "COMP1"),
+                            ("comp2", "comp2_image", "comp2_weight", "COMP2"),
+                            ("comp3", "comp3_image", "comp3_weight", "COMP3"),
+                            ("comp4", "comp4_image", "comp4_weight", "COMP4"),
+                            ("comp5", "comp5_image", "comp5_weight", "COMP5"),
+                        ]
+                        draw_reference_section(ref_box, "Composition", 'MESH_GRID',
+                                               "show_composition", comp_slots, "composition_strength",
+                                               show_weights=style_props.show_advanced_ref_controls)
+
+                    # LoRas
+                    settings_box.separator()
+                    lora_box = settings_box.box()
+                    lora_header = lora_box.row(align=True)
+                    lora_icon = 'TRIA_DOWN' if style_props.show_loras else 'TRIA_RIGHT'
+                    lora_header.prop(style_props, "show_loras", text="LoRas", icon=lora_icon, emboss=False, toggle=True)
+                    lora_header.label(text="", icon='MODIFIER')
+
+                    if style_props.show_loras:
+                        lora_col = lora_box.column(align=False)
+                        lora1_box = lora_col.box()
+                        lora1_col = lora1_box.column(align=True)
+                        row = lora1_col.row()
+                        row.scale_y = 1.4
+                        row.prop(style_props, "lora_enabled", text="Use LoRa", toggle=True, icon='MODIFIER')
+                        if style_props.lora_enabled:
+                            lora1_col.separator(factor=0.3)
+                            refresh_row = lora1_col.row(align=True)
+                            refresh_row.prop(style_props, "lora_name", text="")
+                            refresh_row.operator("style_engine.refresh_lora_list", text="", icon='FILE_REFRESH')
+                            lora1_col.prop(style_props, "lora_strength_model", text="Strength", slider=True)
+                        lora2_box = lora_col.box()
+                        lora2_col = lora2_box.column(align=True)
+                        lora2_col.prop(style_props, "lora2_enabled", text="Use LoRa 2", toggle=True, icon='MODIFIER')
+                        if style_props.lora2_enabled:
+                            lora2_col.separator(factor=0.3)
+                            lora2_col.prop(style_props, "lora2_name", text="")
+                            lora2_col.prop(style_props, "lora2_strength_model", text="Strength", slider=True)
+                        lora_col.separator(factor=0.3)
+                        lora_col.operator("style_engine.load_lora_keywords", text="Load Keywords", icon='TEXT')
+                        active_loras = []
+                        if style_props.lora_enabled and style_props.lora_name != 'NONE':
+                            active_loras.append(f"L1: {style_props.lora_name.replace('.safetensors', '')[:12]}")
+                        if style_props.lora2_enabled and style_props.lora2_name != 'NONE':
+                            active_loras.append(f"L2: {style_props.lora2_name.replace('.safetensors', '')[:12]}")
+                        if active_loras:
+                            info_row = lora_col.row()
+                            info_row.scale_y = 0.7
+                            info_row.label(text=", ".join(active_loras), icon='CHECKMARK')
+
+        # ================================================================
+        # AGENT CATEGORY (Collapsible) — W
+        # ================================================================
+        layout.separator()
+        agent_box = layout.box()
+        agent_header = agent_box.row(align=True)
+        agent_icon = 'TRIA_DOWN' if style_props.show_text_generation else 'TRIA_RIGHT'
+        agent_header.prop(style_props, "show_text_generation", text="Agent", icon=agent_icon, emboss=False, toggle=True)
+        agent_header.label(text="", icon='OUTLINER_OB_SPEAKER')
+
         if style_props.show_text_generation:
-            # Refine Prompt - main action (largest button)
-            row = text_box.row()
+            agent_box.prop(style_props, "prompt_llm_profile", text="Agents")
+            row = agent_box.row()
             row.scale_y = 2.0
             row.operator("style_engine.refine_prompt", text="Refine Prompt", icon='SORTALPHA')
-            
-            text_box.separator()
-            
-            # Other text generation actions (smaller buttons)
-            col = text_box.column(align=True)
+
+            agent_box.separator()
+            col = agent_box.column(align=True)
             col.scale_y = 1.2
             col.operator("style_engine.generate_image_description", text="Describe Current Image", icon='FILE_TEXT')
             col.operator("style_engine.generate_image_description_from_file", text="Describe Image from File", icon='FILEBROWSER')
             col.operator("style_engine.generate_image_description_from_viewport", text="Describe Viewport", icon='VIEW_CAMERA')
-            
+
             # Prompt Browser
-            text_box.separator()
-            col = text_box.column(align=True)
+            agent_box.separator()
+            col = agent_box.column(align=True)
             col.label(text="Prompt Browser:", icon='BOOKMARKS')
-            
-            # Get prompt history info
-            from . import workspace_setup
-            prompts = workspace_setup.get_prompt_list(context)
-            
+            from . import workspace_setup as _ws_agent
+            prompts = _ws_agent.get_prompt_list(context)
             if prompts:
-                # Navigation buttons
                 row = col.row(align=True)
                 row.scale_y = 1.2
-                
-                # Check if at boundaries
                 at_oldest = (style_props.current_prompt_index == 0)
                 at_latest = (style_props.current_prompt_index == -1)
                 
@@ -7073,18 +7486,178 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
         #     #             row.prop(group, "keywords", text="")
         
         # ================================================================
-        # IMAGE GENERATION CATEGORY (Collapsible)
+        # 3D GENERATION CATEGORY (Collapsible) — E
         # ================================================================
         layout.separator()
-        img_gen_box = layout.box()
-        img_gen_header = img_gen_box.row(align=True)
-        img_gen_icon = 'TRIA_DOWN' if style_props.show_image_generation_main else 'TRIA_RIGHT'
-        img_gen_header.prop(style_props, "show_image_generation_main", text="Image Generation", icon=img_gen_icon, emboss=False, toggle=True)
-        img_gen_header.label(text="", icon='IMAGE_DATA')
-        
-        if style_props.show_image_generation_main:
-            # Generate Image button (main action) + Upload Image companion
-            row = img_gen_box.row(align=True)
+        gen3d_box = layout.box()
+        gen3d_header = gen3d_box.row(align=True)
+        gen3d_icon = 'TRIA_DOWN' if style_props.show_3d_generation else 'TRIA_RIGHT'
+        gen3d_header.prop(style_props, "show_3d_generation", text="3D Generation", icon=gen3d_icon, emboss=False, toggle=True)
+        gen3d_header.label(text="", icon='MESH_CUBE')
+
+        if style_props.show_3d_generation:
+            # Generate 3D — main button
+            row = gen3d_box.row()
+            row.scale_y = 2.0
+            row.operator("style_engine.trellis_generate", text="Generate 3D", icon='MESH_UVSPHERE')
+
+            gen3d_box.separator(factor=0.5)
+            t_col = gen3d_box.column(align=True)
+            t_col.prop(style_props, "trellis_quality", text="")
+            t_col.prop(style_props, "trellis_texture_size", text="Texture")
+
+            t_row = gen3d_box.row(align=True)
+            t_row.prop(style_props, "trellis_steps",    text="Steps")
+            t_row.prop(style_props, "trellis_guidance", text="Guidance")
+
+            gen3d_box.prop(style_props, "trellis_decimation", text="Max Polygons")
+
+            rembg_row = gen3d_box.row(align=True)
+            rembg_row.scale_y = 1.2
+            rembg_row.prop(style_props, "trellis_remove_bg", text="Remove BG", toggle=True, icon='IMAGE_ALPHA')
+
+            # Retexture advanced params
+            gen3d_box.separator(factor=0.5)
+            rt_col = gen3d_box.column(align=True)
+            rt_col.scale_y = 0.9
+            rt_col.label(text="Retexture params:", icon='MATSHADERBALL')
+            rt_col.prop(style_props, "trellis_tex_resolution", text="Res")
+            rt_col.prop(style_props, "trellis_tex_steps",    text="Steps")
+            rt_col.prop(style_props, "trellis_tex_guidance", text="Guidance")
+
+            # Model Browser
+            gen3d_box.separator()
+            col = gen3d_box.column(align=True)
+            col.label(text="Model Browser:", icon='FILE_3D')
+            from . import workspace_setup as _ws_3d
+            models = _ws_3d.get_model_list(context)
+            if models:
+                row = col.row(align=True)
+                row.scale_y = 1.2
+                at_oldest = (style_props.current_model_index == 0)
+                at_latest = (style_props.current_model_index == -1)
+                prev_row = row.row(align=True)
+                prev_row.enabled = not at_oldest
+                prev_row.operator("style_engine.prev_model", text="", icon='TRIA_LEFT')
+                if at_latest:
+                    current_text = f"Latest ({len(models)})"
+                else:
+                    current_text = f"{style_props.current_model_index + 1}/{len(models)}"
+                row.label(text=current_text)
+                next_row = row.row(align=True)
+                next_row.enabled = not at_latest
+                next_row.operator("style_engine.next_model", text="", icon='TRIA_RIGHT')
+                col.separator()
+                spawn_row = col.row(align=True)
+                spawn_row.scale_y = 1.3
+                spawn_row.operator("style_engine.spawn_model", text="Spawn Model", icon='IMPORT')
+            else:
+                col.label(text="No models yet", icon='INFO')
+
+        # ================================================================
+        # REFINEMENT CATEGORY (Collapsible) — R
+        # ================================================================
+        layout.separator()
+        refine_box = layout.box()
+        refine_header = refine_box.row(align=True)
+        refine_icon = 'TRIA_DOWN' if style_props.show_3d_single_image else 'TRIA_RIGHT'
+        refine_header.prop(style_props, "show_3d_single_image", text="Refinement", icon=refine_icon, emboss=False, toggle=True)
+        refine_header.label(text="", icon='OUTLINER_OB_SURFACE')
+
+        if style_props.show_3d_single_image:
+            # ── Refine Mesh (Omni) ─────────────────────────────────────────
+            omni_box = refine_box.box()
+            omni_col = omni_box.column(align=True)
+            omni_col.label(text="Refine Mesh", icon='MESH_CUBE')
+            row = omni_col.row()
+            row.scale_y = 1.8
+            row.operator("style_engine.omni_generate", text="Refine Mesh", icon='MESH_CUBE')
+
+            omni_col.separator(factor=0.3)
+            ctrl_col = omni_col.column(align=True)
+            ctrl_col.scale_y = 0.9
+            ctrl_col.prop(style_props, "omni_control_type", text="")
+            ctrl_col.prop(style_props, "omni_guidance_scale", text="Guidance", slider=True)
+            if style_props.omni_control_type in ('POINT', 'VOXEL'):
+                ctrl_col.prop(style_props, "omni_remesh_depth", text="Remesh Depth", slider=True)
+                ctrl_col.prop(style_props, "omni_precenter", text="Pre-center", toggle=True)
+            if style_props.omni_control_type == 'BBOX':
+                omni_col.separator(factor=0.3)
+                omni_col.operator("style_engine.omni_bbox_debug", text="Calculate BBox", icon='SNAP_VOLUME')
+
+            refine_box.separator()
+
+            # ── Part Segmentation ──────────────────────────────────────────
+            seg_box = refine_box.box()
+            seg_col = seg_box.column(align=True)
+            seg_col.label(text="Part Segmentation", icon='OUTLINER_OB_SURFACE')
+            row = seg_col.row()
+            row.scale_y = 1.8
+            row.operator("style_engine.segment_mesh", text="Segment Mesh", icon='OUTLINER_OB_SURFACE')
+            seg_col.separator(factor=0.3)
+            param_col = seg_col.column(align=True)
+            param_col.scale_y = 0.9
+            param_col.prop(style_props, "part_point_num",  text="Point Samples")
+            param_col.prop(style_props, "part_prompt_num", text="Query Points")
+
+        # ================================================================
+        # TEXTURE CATEGORY (Collapsible) — T
+        # ================================================================
+        layout.separator()
+        tex_box = layout.box()
+        tex_header = tex_box.row(align=True)
+        tex_icon = 'TRIA_DOWN' if style_props.show_3d_multiview else 'TRIA_RIGHT'
+        tex_header.prop(style_props, "show_3d_multiview", text="Texture", icon=tex_icon, emboss=False, toggle=True)
+        tex_header.label(text="", icon='MATSHADERBALL')
+
+        if style_props.show_3d_multiview:
+            # Project Texture — main action
+            row = tex_box.row()
+            row.scale_y = 1.5
+            row.operator("style_engine.project_texture", text="Project Texture", icon='UV')
+
+            # Conditional buttons (only when active mesh has iteration material)
+            obj = context.active_object
+            has_iteration_mat = (
+                obj and obj.type == 'MESH' and obj.data.materials and
+                any(m and m.name.startswith('iteration_') for m in obj.data.materials)
+            )
+            if has_iteration_mat:
+                if style_props.patch_mode_active:
+                    row = tex_box.row()
+                    row.scale_y = 1.3
+                    row.operator("style_engine.apply_patch", text="Apply Patch", icon='BRUSH_DATA')
+                    row = tex_box.row()
+                    row.operator("style_engine.toggle_patch_camera", text="Cancel Patch", icon='X')
+                else:
+                    row = tex_box.row()
+                    row.scale_y = 1.2
+                    row.operator("style_engine.toggle_patch_camera", text="Patch", icon='BRUSH_DATA')
+
+                row = tex_box.row()
+                row.scale_y = 1.2
+                row.operator("style_engine.pbr_from_projected", text="PBR from Projected Texture", icon='MATSHADERBALL')
+
+                already_multiview = (
+                    obj.data and hasattr(obj.data, 'materials') and obj.data.materials and
+                    any(m and (m.name.startswith('left_iteration_') or m.name.startswith('right_iteration_'))
+                        for m in obj.data.materials)
+                )
+                if not already_multiview:
+                    row = tex_box.row()
+                    row.scale_y = 1.1
+                    row.operator("style_engine.multiview_from_projected", text="Multiview from Projected", icon='VIEW_CAMERA')
+
+            tex_box.separator()
+            col = tex_box.column(align=True)
+            col.scale_y = 1.2
+            col.operator("style_engine.pbr_from_text", text="Generate PBR Layers", icon='MATSHADERBALL')
+            col.operator("style_engine.trellis_retexture", text="Retexture Mesh", icon='SHADING_TEXTURE')
+
+        # (draw method ends here)
+
+        if False:  # old body tombstone — never executed
+            row = layout.row(align=True)
             row.scale_y = 2.0
             row.operator("style_engine.generate_ai_quick",
                          text="Generate Image",
@@ -7476,6 +8049,8 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                 t_row.prop(style_props, "trellis_steps",    text="Steps")
                 t_row.prop(style_props, "trellis_guidance", text="Guidance")
 
+                single_box.prop(style_props, "trellis_decimation", text="Max Polygons")
+
                 rembg_row = single_box.row(align=True)
                 rembg_row.scale_y = 1.2
                 rembg_row.prop(style_props, "trellis_remove_bg",
@@ -7606,6 +8181,28 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
 # 3.5 PROMPT REFINEMENT OPERATOR
 # ----------------------------------------------------------------
 
+def _prompt_llm_workflow_spec(props, role):
+    """
+    Map UI profile + logical role to workflow filename and node IDs to patch.
+
+    role: 'refine' | 'image' | 'viewport'
+    Returns dict with keys: file, text_node (or None), load_image_node (or None).
+    """
+    profile = getattr(props, "prompt_llm_profile", "DEFAULT") or "DEFAULT"
+    if profile == "BLACKHAMSTER":
+        if role == "refine":
+            return {"file": "AgentTextRefine.json", "text_node": "9", "load_image_node": None}
+        if role in ("image", "viewport"):
+            return {"file": "AgentImageRefine.json", "text_node": None, "load_image_node": "11"}
+    if role == "refine":
+        return {"file": "TextRefine.json", "text_node": "7", "load_image_node": None}
+    if role == "image":
+        return {"file": "TextImage.json", "text_node": None, "load_image_node": "23"}
+    if role == "viewport":
+        return {"file": "TextViewport.json", "text_node": None, "load_image_node": "23"}
+    return {"file": "TextRefine.json", "text_node": "7", "load_image_node": None}
+
+
 def _extract_text_from_griptape_output(outputs):
     """
     Helper function to extract text from Griptape workflow outputs.
@@ -7616,13 +8213,21 @@ def _extract_text_from_griptape_output(outputs):
     """
     refined_text = None
     
-    # Try node 17 first (Griptape Run: Agent)
+    # Try node 17 first (Griptape Run: Agent — TextRefine)
     if "17" in outputs:
         node_17_output = outputs["17"]
         if isinstance(node_17_output, dict) and "string" in node_17_output:
             refined_text = node_17_output["string"][0] if isinstance(node_17_output["string"], list) else node_17_output["string"]
         elif isinstance(node_17_output, list) and len(node_17_output) > 0:
             refined_text = node_17_output[0]
+    
+    # Node 2 — Griptape Run: Agent (AgentTextRefine)
+    if not refined_text and "2" in outputs:
+        node_2_output = outputs["2"]
+        if isinstance(node_2_output, dict) and "string" in node_2_output:
+            refined_text = node_2_output["string"][0] if isinstance(node_2_output["string"], list) else node_2_output["string"]
+        elif isinstance(node_2_output, list) and len(node_2_output) > 0:
+            refined_text = node_2_output[0]
     
     # Try node 19 if node 17 didn't work (Griptape Display: Text)
     if not refined_text and "19" in outputs:
@@ -7660,7 +8265,40 @@ def _extract_text_from_griptape_output(outputs):
         elif isinstance(node_19_output, str):
             refined_text = node_19_output
     
-    # Try node 20 (fallback)
+    # Node 3 — Griptape Display: Text (AgentTextRefine / AgentImageRefine)
+    if not refined_text and "3" in outputs:
+        node_3_output = outputs["3"]
+        if isinstance(node_3_output, dict):
+            for key in ["string", "text", "STRING", "INPUT"]:
+                if key in node_3_output:
+                    val = node_3_output[key]
+                    if isinstance(val, list) and len(val) > 0:
+                        if all(isinstance(c, str) and len(c) <= 1 for c in val[:10]):
+                            refined_text = ''.join(val)
+                        else:
+                            refined_text = val[0]
+                    elif isinstance(val, str):
+                        refined_text = val
+                    if refined_text:
+                        break
+            if not refined_text:
+                for key, value in node_3_output.items():
+                    if isinstance(value, str) and len(value) > 10:
+                        refined_text = value
+                        break
+                    elif isinstance(value, list) and len(value) > 0:
+                        if all(isinstance(c, str) and len(c) <= 1 for c in value[:10]):
+                            refined_text = ''.join(value)
+                            break
+                        elif isinstance(value[0], str):
+                            refined_text = value[0]
+                            break
+        elif isinstance(node_3_output, list) and len(node_3_output) > 0:
+            refined_text = node_3_output[0]
+        elif isinstance(node_3_output, str):
+            refined_text = node_3_output
+    
+    # Try node 20 (fallback — TextImage chain)
     if not refined_text and "20" in outputs:
         node_20_output = outputs["20"]
         if isinstance(node_20_output, dict) and "string" in node_20_output:
@@ -7668,42 +8306,40 @@ def _extract_text_from_griptape_output(outputs):
         elif isinstance(node_20_output, str):
             refined_text = node_20_output
     
+    # Node 10 — Griptape Run: Image Description (AgentImageRefine)
+    if not refined_text and "10" in outputs:
+        node_10_output = outputs["10"]
+        if isinstance(node_10_output, dict) and "string" in node_10_output:
+            refined_text = node_10_output["string"][0] if isinstance(node_10_output["string"], list) else node_10_output["string"]
+        elif isinstance(node_10_output, str):
+            refined_text = node_10_output
+    
     return refined_text.strip() if refined_text else None
 
 
 class WM_OT_RefinePrompt(bpy.types.Operator):
-    """Use local LLM to refine the prompt text (extracts <p> content, enhances it, and updates the text editor)"""
+    """Use local LLM to refine the full prompt text in STYLEENGINE_Prompt"""
     bl_idname = "style_engine.refine_prompt"
     bl_label = "Refine Prompt (LLM)"
-    bl_description = "Use local LLM to enhance the main prompt (<p> tag)"
-    
+    bl_description = "Use local LLM to enhance the prompt text"
+
     def execute(self, context):
-        import re
         import json
         from pathlib import Path
         from . import runcomfy_deployment
-        
+
         # 1. Get text editor content
         text_block = bpy.data.texts.get("STYLEENGINE_Prompt")
         if not text_block:
             self.report({'ERROR'}, "STYLEENGINE_Prompt text block not found")
             return {'CANCELLED'}
-        
-        current_content = text_block.as_string()
-        
-        # 2. Extract <p> content
-        p_match = re.search(r'<p>(.*?)</p>', current_content, re.DOTALL | re.IGNORECASE)
-        if not p_match:
-            self.report({'ERROR'}, "No <p> tag found in prompt text")
-            print("[Refine Prompt] No <p> tag found in text editor")
-            return {'CANCELLED'}
-        
-        original_prompt = p_match.group(1).strip()
+
+        original_prompt = text_block.as_string().strip()
         if not original_prompt:
-            self.report({'ERROR'}, "<p> tag is empty")
-            print("[Refine Prompt] <p> tag is empty")
+            self.report({'ERROR'}, "Prompt is empty")
+            print("[Refine Prompt] Prompt text block is empty")
             return {'CANCELLED'}
-        
+
         print(f"[Refine Prompt] Original prompt: {original_prompt}")
         
         # Save "before" snapshot
@@ -7717,28 +8353,29 @@ class WM_OT_RefinePrompt(bpy.types.Operator):
             return {'CANCELLED'}
         
         try:
-            # 4. Load TextRefine.json workflow
+            props = context.scene.style_engine_props
+            spec = _prompt_llm_workflow_spec(props, "refine")
             addon_dir = Path(__file__).parent
-            workflow_file = addon_dir / "workflows" / "Text" / "TextRefine.json"
+            workflow_file = addon_dir / "workflows" / "Text" / spec["file"]
             
             if not workflow_file.exists():
-                self.report({'ERROR'}, "TextRefine.json not found")
+                self.report({'ERROR'}, f"{spec['file']} not found")
                 print(f"[Refine Prompt] ❌ Workflow not found: {workflow_file}")
                 return {'CANCELLED'}
             
             with open(workflow_file, 'r') as f:
                 workflow = json.load(f)
             
-            print(f"[Refine Prompt] ✓ Loaded workflow: {workflow_file.name}")
+            print(f"[Refine Prompt] ✓ Loaded workflow: {workflow_file.name} (profile={props.prompt_llm_profile})")
             
-            # 5. Patch node 7 with the original prompt text
-            if "7" not in workflow:
-                self.report({'ERROR'}, "Invalid workflow structure (node 7 missing)")
-                print("[Refine Prompt] ❌ Node 7 not found in workflow")
+            text_node = spec["text_node"]
+            if text_node not in workflow:
+                self.report({'ERROR'}, f"Invalid workflow structure (node {text_node} missing)")
+                print(f"[Refine Prompt] ❌ Node {text_node} not found in workflow")
                 return {'CANCELLED'}
             
-            workflow["7"]["inputs"]["text"] = original_prompt
-            print(f"[Refine Prompt] ✓ Patched node 7 with prompt text")
+            workflow[text_node]["inputs"]["text"] = original_prompt
+            print(f"[Refine Prompt] ✓ Patched node {text_node} with prompt text")
             
             # 6. Submit to ComfyUI server
             server_client = runcomfy_deployment.get_server_client()
@@ -7776,23 +8413,15 @@ class WM_OT_RefinePrompt(bpy.types.Operator):
                         return
                     
                     print(f"[Refine Prompt] ✓ Refined prompt: {refined_text[:100]}...")
-                    
-                    # Update text editor
+
+                    # Replace the entire prompt text block with the refined version
                     text_block = bpy.data.texts.get("STYLEENGINE_Prompt")
                     if not text_block:
                         print("[Refine Prompt] ❌ Text block not found")
                         return
-                    
-                    current_content = text_block.as_string()
-                    new_content = re.sub(
-                        r'(<p>)(.*?)(</p>)',
-                        r'\1' + refined_text + r'\3',
-                        current_content,
-                        flags=re.DOTALL | re.IGNORECASE
-                    )
-                    
+
                     text_block.clear()
-                    text_block.write(new_content)
+                    text_block.write(refined_text)
                     
                     # Save "after" snapshot
                     workspace_setup.save_prompt_snapshot(bpy.context, prefix="after_refine")
@@ -7860,19 +8489,20 @@ class WM_OT_GenerateImageDescription(bpy.types.Operator):
         workspace_setup.save_prompt_snapshot(context, prefix="before_vision")
         
         try:
-            # 3. Load TextImage.json workflow (vision-based image description)
+            props = context.scene.style_engine_props
+            spec = _prompt_llm_workflow_spec(props, "image")
             addon_dir = Path(__file__).parent
-            workflow_file = addon_dir / "workflows" / "Text" / "TextImage.json"
+            workflow_file = addon_dir / "workflows" / "Text" / spec["file"]
             
             if not workflow_file.exists():
-                self.report({'ERROR'}, "TextImage.json not found")
+                self.report({'ERROR'}, f"{spec['file']} not found")
                 print(f"[Image Description] ❌ Workflow not found: {workflow_file}")
                 return {'CANCELLED'}
             
             with open(workflow_file, 'r') as f:
                 workflow = json.load(f)
             
-            print(f"[Image Description] ✓ Loaded workflow: {workflow_file.name}")
+            print(f"[Image Description] ✓ Loaded workflow: {workflow_file.name} (profile={props.prompt_llm_profile})")
             
             # 4. Upload image to ComfyUI server
             server_client = runcomfy_deployment.get_server_client()
@@ -7888,14 +8518,14 @@ class WM_OT_GenerateImageDescription(bpy.types.Operator):
             
             print(f"[Image Description] ✓ Uploaded image: {uploaded_filename}")
             
-            # 5. Patch node 23 (LoadImage) with the uploaded filename
-            if "23" not in workflow:
-                self.report({'ERROR'}, "Invalid workflow structure (node 23 missing)")
-                print("[Image Description] ❌ Node 23 not found in workflow")
+            load_nid = spec["load_image_node"]
+            if load_nid not in workflow:
+                self.report({'ERROR'}, f"Invalid workflow structure (node {load_nid} missing)")
+                print(f"[Image Description] ❌ Node {load_nid} not found in workflow")
                 return {'CANCELLED'}
             
-            workflow["23"]["inputs"]["image"] = uploaded_filename
-            print(f"[Image Description] ✓ Patched node 23 with image: {uploaded_filename}")
+            workflow[load_nid]["inputs"]["image"] = uploaded_filename
+            print(f"[Image Description] ✓ Patched node {load_nid} with image: {uploaded_filename}")
             
             # 6. Submit to ComfyUI server
             print(f"[Image Description] Submitting to ComfyUI server...")
@@ -8045,19 +8675,20 @@ class WM_OT_GenerateImageDescriptionFromFile(bpy.types.Operator):
         workspace_setup.save_prompt_snapshot(context, prefix="before_vision_file")
         
         try:
-            # 2. Load TextImage.json workflow
+            props = context.scene.style_engine_props
+            spec = _prompt_llm_workflow_spec(props, "image")
             addon_dir = Path(__file__).parent
-            workflow_file = addon_dir / "workflows" / "Text" / "TextImage.json"
+            workflow_file = addon_dir / "workflows" / "Text" / spec["file"]
             
             if not workflow_file.exists():
-                self.report({'ERROR'}, "TextImage.json not found")
+                self.report({'ERROR'}, f"{spec['file']} not found")
                 print(f"[Image Description from File] ❌ Workflow not found: {workflow_file}")
                 return {'CANCELLED'}
             
             with open(workflow_file, 'r') as f:
                 workflow = json.load(f)
             
-            print(f"[Image Description from File] ✓ Loaded workflow: {workflow_file.name}")
+            print(f"[Image Description from File] ✓ Loaded workflow: {workflow_file.name} (profile={props.prompt_llm_profile})")
             
             # 3. Upload image to ComfyUI server
             server_client = runcomfy_deployment.get_server_client()
@@ -8073,14 +8704,14 @@ class WM_OT_GenerateImageDescriptionFromFile(bpy.types.Operator):
             
             print(f"[Image Description from File] ✓ Uploaded image: {uploaded_filename}")
             
-            # 4. Patch node 23 (LoadImage) with the uploaded filename
-            if "23" not in workflow:
-                self.report({'ERROR'}, "Invalid workflow structure (node 23 missing)")
-                print("[Image Description from File] ❌ Node 23 not found in workflow")
+            load_nid = spec["load_image_node"]
+            if load_nid not in workflow:
+                self.report({'ERROR'}, f"Invalid workflow structure (node {load_nid} missing)")
+                print(f"[Image Description from File] ❌ Node {load_nid} not found in workflow")
                 return {'CANCELLED'}
             
-            workflow["23"]["inputs"]["image"] = uploaded_filename
-            print(f"[Image Description from File] ✓ Patched node 23 with image: {uploaded_filename}")
+            workflow[load_nid]["inputs"]["image"] = uploaded_filename
+            print(f"[Image Description from File] ✓ Patched node {load_nid} with image: {uploaded_filename}")
             
             # 5. Submit to ComfyUI server
             print(f"[Image Description from File] Submitting to ComfyUI server...")
@@ -8287,19 +8918,21 @@ class WM_OT_GenerateImageDescriptionFromViewport(bpy.types.Operator):
                 scene.render.resolution_x = original_resolution_x
                 scene.render.resolution_y = original_resolution_y
             
-            # 4. Load TextViewport.json workflow
+            # 4. Load TextViewport or AgentImageRefine (profile-dependent)
+            props = context.scene.style_engine_props
+            spec = _prompt_llm_workflow_spec(props, "viewport")
             addon_dir = Path(__file__).parent
-            workflow_file = addon_dir / "workflows" / "Text" / "TextViewport.json"
+            workflow_file = addon_dir / "workflows" / "Text" / spec["file"]
             
             if not workflow_file.exists():
-                self.report({'ERROR'}, "TextViewport.json not found")
+                self.report({'ERROR'}, f"{spec['file']} not found")
                 print(f"[Viewport Description] ❌ Workflow not found: {workflow_file}")
                 return {'CANCELLED'}
             
             with open(workflow_file, 'r') as f:
                 workflow = json.load(f)
             
-            print(f"[Viewport Description] ✓ Loaded workflow: {workflow_file.name}")
+            print(f"[Viewport Description] ✓ Loaded workflow: {workflow_file.name} (profile={props.prompt_llm_profile})")
             
             # 5. Upload image to ComfyUI server
             server_client = runcomfy_deployment.get_server_client()
@@ -8315,14 +8948,14 @@ class WM_OT_GenerateImageDescriptionFromViewport(bpy.types.Operator):
             
             print(f"[Viewport Description] ✓ Uploaded: {uploaded_filename}")
             
-            # 6. Patch node 23 (LoadImage) with the uploaded filename
-            if "23" not in workflow:
-                self.report({'ERROR'}, "Invalid workflow structure (node 23 missing)")
-                print("[Viewport Description] ❌ Node 23 not found in workflow")
+            load_nid = spec["load_image_node"]
+            if load_nid not in workflow:
+                self.report({'ERROR'}, f"Invalid workflow structure (node {load_nid} missing)")
+                print(f"[Viewport Description] ❌ Node {load_nid} not found in workflow")
                 return {'CANCELLED'}
             
-            workflow["23"]["inputs"]["image"] = uploaded_filename
-            print(f"[Viewport Description] ✓ Patched node 23 with image")
+            workflow[load_nid]["inputs"]["image"] = uploaded_filename
+            print(f"[Viewport Description] ✓ Patched node {load_nid} with image")
             
             # 7. Submit to ComfyUI server
             print(f"[Viewport Description] Submitting to ComfyUI server...")

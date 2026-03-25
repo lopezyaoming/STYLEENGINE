@@ -1,5 +1,6 @@
 import os
 import json
+import math
 from google import genai
 from google.genai import types
 from dotenv import load_dotenv
@@ -9,67 +10,80 @@ load_dotenv(override=True)
 # --- CONFIG ---
 PROJECT_ID = "ambient-sphere-469215-u9"
 LOCATION = "global"
-INPUT_FILE = "audit_results_partial.json" # Change to audit_results.json if final
-OUTPUT_FILE = "descriptive.md"
-# Increase timeout for high-thinking/large-context synthesis
-TIMEOUT = 900 # 15 minutes
+INPUT_FILE = "audit_results_partial.json"
+BATCH_SIZE = 10  # Number of audits to synthesize at once
+TIMEOUT = 600
 
 client = genai.Client(vertexai=True, project=PROJECT_ID, location=LOCATION)
 
-def run_descriptive_synthesis():
-    print("--- INITIALIZING SYNTHESIS AGENT: AESTHETIC AUTOPSY ---")
 
-    # 1. Load the Forensic Audits
+def run_recursive_synthesis():
+    print("--- INITIALIZING RECURSIVE SYNTHESIS AGENT ---")
+
     if not os.path.exists(INPUT_FILE):
-        print(f"Error: {INPUT_FILE} not found. Run audit_agent.py first.")
+        print(f"Error: {INPUT_FILE} not found.")
         return
 
     with open(INPUT_FILE, "r", encoding="utf-8") as f:
         audit_data = json.load(f)
 
-    print(f"Aggregating {len(audit_data)} forensic observations...")
+    items = list(audit_data.items())
+    num_batches = math.ceil(len(items) / BATCH_SIZE)
+    cluster_summaries = []
 
-    # 2. Format observations for the prompt
-    # We pair the artist's original intent with the machine's objective vision
-    formatted_observations = []
-    for miro_id, content in audit_data.items():
-        entry = (
-            f"--- ITEM {miro_id} ---\n"
-            f"ARTIST INTENT NOTE: {content['note']}\n"
-            f"FORENSIC AUDIT: {content['audit']}\n"
-        )
-        formatted_observations.append(entry)
+    # STAGE 1: CLUSTER SUMMARIZATION
+    for i in range(num_batches):
+        batch = items[i * BATCH_SIZE: (i + 1) * BATCH_SIZE]
+        print(f"Processing Cluster {i + 1}/{num_batches} ({len(batch)} items)...")
 
-    all_observations_text = "\n".join(formatted_observations)
+        batch_text = "\n".join([f"ID: {k} | NOTE: {v['note']} | AUDIT: {v['audit']}" for k, v in batch])
 
-    # 3. The Forensic Synthesis Prompt
+        cluster_prompt = f"""
+        Analyze this cluster of 3D asset audits and artist notes. 
+        Extract the recurring 'Aesthetic Facts' and 'Production Logic'.
+        Focus on: Subject, Mood, Medium, and Elements.
+
+        DATASET:
+        {batch_text}
+        """
+
+        try:
+            # We use Flash for the clusters—it's fast and handles large context well
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=[cluster_prompt]
+            )
+            cluster_summaries.append(response.text)
+        except Exception as e:
+            print(f"   > Cluster {i + 1} failed: {e}")
+
+    # STAGE 2: FINAL DNA AUTOPSY
+    print("\n--- ALL CLUSTERS SUMMARIZED. COMMENCING FINAL BIBLE SYNTHESIS ---")
+
+    final_input = "\n\n=== CLUSTER SUMMARY ===\n".join(cluster_summaries)
+
     synthesis_prompt = f"""
-    You are the Lead Aesthetic Analyst and Cognitive Mapper. 
-    Review the following dataset containing 300+ raw visual audit observations, artist comments, and structural notes from a Miro board.
+    You are the Lead Aesthetic Analyst. Review these Cluster Summaries from a Miro board audit.
 
-    NEW AUDIT OBSERVATIONS:
-    {all_observations_text}
+    CLUSTER DATA:
+    {final_input}
 
     TASK:
-    Generate 'descriptive.md'. It's a CoT (Chain-of-thought) documentation on a whole creative team's creative process. This is an exhaustive, objective autopsy of the project's aesthetic DNA. 
+    Generate 'descriptive.md'. This is an exhaustive, 1,500-word objective autopsy of the project's DNA.
 
     RULES:
-    1. NOT INSTRUCTIONAL: Do not use 'should' or 'must'. Describe what 'is' (e.g., 'The system utilizes macro-beveled edges' instead of 'The user should use bevels').
-    2. COGNITIVE TOPOLOGY: Map the mental structure of the artists. Identify 'Anchor Assets' (recurring pillars), 'Friction Points' (where style breaks), and 'Logical Clusters' (groups of related items).
-    3. HYPER-DETAILED: Describe the physics of light (specular response, subsurface scattering), shapes (weight, mass), and material collisions (silicone vs. resin).
-    4. NO CRITICAL TONE: Be a neutral observer documenting a factual visual system.
-    5. PLAIN LANGUAGE: Keep the language as straight-forward and technical as possible. Make an effort that the language is actionable, clear, and highly descriptive.
-    6. WORD LIMIT: Your report must be at least 1,500 words long to capture the depth of 300+ assets.
+    1. NOT INSTRUCTIONAL: Describe what 'is'.
+    2. COGNITIVE TOPOLOGY: Map 'Anchor Assets', 'Friction Points', and 'Logical Clusters'.
+    3. HYPER-DETAILED: Describe the physics of light, shapes, and material collisions.
+    4. WORD LIMIT: Minimum 1,500 words.
 
-    OUTPUT SECTIONS:
-    - CHAIN OF THOUGHT: Your observations on how the team thinks, what are their priorities, and what is their overall vision based on the audit.
-    - AESTHETIC PHILOSOPHY: How is the team building an aesthetic philosophy with clear intent, references and influences?
-    - SHAPE LANGUAGE: How is silhouette, form, proportion, and shape being expressed? What are the rules and boundaries of the geometry? 
-    - MOOD, TONE AND INTENT: What is the mood of the scene? What does the lighting, weather, and camerawork say about the state of the story? 
-    - VISUAL TAXONOMY (Pattern Matching): Name the elements present across the images. Find patterns in materials, characters, and settings. Document what is being repeated.
+    SECTIONS:
+    - CHAIN OF THOUGHT
+    - AESTHETIC PHILOSOPHY
+    - SHAPE LANGUAGE
+    - MOOD, TONE AND INTENT
+    - VISUAL TAXONOMY
     """
-
-    print("Sending to Gemini 3.1 Pro (Thinking: HIGH)... This will take a few minutes.")
 
     try:
         final_response = client.models.generate_content(
@@ -81,14 +95,13 @@ def run_descriptive_synthesis():
             )
         )
 
-        # 4. Save the Final Bible
-        with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
+        with open("descriptive.md", "w", encoding="utf-8") as f:
             f.write(final_response.text)
-
-        print(f"SUCCESS: {OUTPUT_FILE} has been generated.")
+        print("SUCCESS: descriptive.md is ready.")
 
     except Exception as e:
-        print(f"Synthesis failed: {e}")
+        print(f"Final Synthesis failed: {e}")
+
 
 if __name__ == "__main__":
-    run_descriptive_synthesis()
+    run_recursive_synthesis()

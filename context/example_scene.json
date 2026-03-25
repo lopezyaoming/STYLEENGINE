@@ -1,0 +1,23 @@
+{
+    "scene_identity": {
+      "filename": "act1_scene1_storyboard.blend"
+    },
+    "semantic_outliner": [
+      {
+        "name": "Corinthian_Column",
+        "type": "MESH",
+        "scale_category": "Architectural (Large)",
+        "material_name": "iteration_003_salt"
+      },
+      {
+        "name": "Hero_Character_Proxy",
+        "type": "MESH",
+        "scale_category": "Humanoid",
+        "status": "new_proxy"
+      }
+    ],
+    "active_agent_settings": {
+      "model": "gemma_bh",
+      "instruction_preset": "claymation"
+    }
+  }
