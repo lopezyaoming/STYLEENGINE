@@ -188,6 +188,102 @@ class ObjectGroup(bpy.types.PropertyGroup):
     )
 
 
+class RefineFeatureItem(bpy.types.PropertyGroup):
+    """A single feature string inside a subject_matter entry."""
+    value: bpy.props.StringProperty(name="Feature", default="")
+
+
+class RefineSubjectItem(bpy.types.PropertyGroup):
+    """One subject_matter entry in the Refine Image JSON schema."""
+    label: bpy.props.StringProperty(name="Label", default="object_1")
+    style: bpy.props.StringProperty(name="Style", default="")
+    scale: bpy.props.StringProperty(name="Scale", default="")
+    color: bpy.props.StringProperty(name="Color", default="")
+    material: bpy.props.StringProperty(name="Material", default="")
+    features: bpy.props.CollectionProperty(type=RefineFeatureItem)
+    features_index: bpy.props.IntProperty(default=0)
+    show_expanded: bpy.props.BoolProperty(default=True)
+
+
+class RefineTagItem(bpy.types.PropertyGroup):
+    """A single thematic tag string."""
+    value: bpy.props.StringProperty(name="Tag", default="")
+
+
+def _build_refine_json(props):
+    """Serialize the Refine Image form into a JSON string."""
+    import json as _json
+    subjects = []
+    for subj in props.refine_subjects:
+        features = [f.value for f in subj.features if f.value.strip()]
+        subjects.append({
+            "label": subj.label,
+            "style": subj.style,
+            "scale": subj.scale,
+            "color": subj.color,
+            "material": subj.material,
+            "features": features,
+        })
+    tags = [t.value for t in props.refine_tags if t.value.strip()]
+    data = {
+        "metadata": {
+            "filename": props.refine_meta_filename,
+            "dimensions": props.refine_meta_dimensions,
+            "aspect_ratio": props.refine_meta_aspect,
+        },
+        "visual_style": {
+            "art_style": props.refine_style_art_style,
+            "medium": props.refine_style_medium,
+            "lighting_condition": props.refine_style_lighting,
+        },
+        "composition": {
+            "perspective": props.refine_comp_perspective,
+            "focal_point": props.refine_comp_focal_point,
+        },
+        "subject_matter": subjects,
+        "thematic_tags": tags,
+    }
+    return _json.dumps(data, indent=2)
+
+
+def _populate_refine_from_json(props, json_str):
+    """Populate the Refine Image form fields from a JSON string."""
+    import json as _json
+    data = _json.loads(json_str)
+
+    meta = data.get("metadata", {})
+    props.refine_meta_filename = meta.get("filename", "")
+    props.refine_meta_dimensions = meta.get("dimensions", "")
+    props.refine_meta_aspect = meta.get("aspect_ratio", "")
+
+    vs = data.get("visual_style", {})
+    props.refine_style_art_style = vs.get("art_style", "")
+    props.refine_style_medium = vs.get("medium", "")
+    props.refine_style_lighting = vs.get("lighting_condition", "")
+
+    comp = data.get("composition", {})
+    props.refine_comp_perspective = comp.get("perspective", "")
+    props.refine_comp_focal_point = comp.get("focal_point", "")
+
+    props.refine_subjects.clear()
+    for subj_data in data.get("subject_matter", []):
+        subj = props.refine_subjects.add()
+        subj.label = subj_data.get("label", "object")
+        subj.style = subj_data.get("style", "")
+        subj.scale = subj_data.get("scale", "")
+        subj.color = subj_data.get("color", "")
+        subj.material = subj_data.get("material", "")
+        subj.show_expanded = False
+        for feat_str in subj_data.get("features", []):
+            feat = subj.features.add()
+            feat.value = feat_str
+
+    props.refine_tags.clear()
+    for tag_str in data.get("thematic_tags", []):
+        tag = props.refine_tags.add()
+        tag.value = tag_str
+
+
 def _get_gemini_instruction_items():
     """Scan templates/instructions_*.txt and return enum items for the dropdown."""
     from pathlib import Path
@@ -442,7 +538,41 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         description="Expand or collapse the Image Generation section",
         default=False
     )
-    
+
+    show_refine_image: bpy.props.BoolProperty(
+        name="Show Refine Image",
+        description="Expand or collapse the Refine Image JSON editor",
+        default=False
+    )
+
+    use_structured_editing: bpy.props.BoolProperty(
+        name="Use structured editing",
+        description="Pass the JSON form as a structured instruction to the agent",
+        default=False
+    )
+
+    # Refine Image — Metadata
+    refine_meta_filename: bpy.props.StringProperty(name="Filename", default="")
+    refine_meta_dimensions: bpy.props.StringProperty(name="Dimensions", default="")
+    refine_meta_aspect: bpy.props.StringProperty(name="Aspect Ratio", default="")
+
+    # Refine Image — Visual Style
+    refine_style_art_style: bpy.props.StringProperty(name="Art Style", default="")
+    refine_style_medium: bpy.props.StringProperty(name="Medium", default="")
+    refine_style_lighting: bpy.props.StringProperty(name="Lighting Condition", default="")
+
+    # Refine Image — Composition
+    refine_comp_perspective: bpy.props.StringProperty(name="Perspective", default="")
+    refine_comp_focal_point: bpy.props.StringProperty(name="Focal Point", default="")
+
+    # Refine Image — Subject matter (dynamic collection)
+    refine_subjects: bpy.props.CollectionProperty(type=RefineSubjectItem)
+    refine_subjects_index: bpy.props.IntProperty(default=0)
+
+    # Refine Image — Thematic tags (dynamic collection)
+    refine_tags: bpy.props.CollectionProperty(type=RefineTagItem)
+    refine_tags_index: bpy.props.IntProperty(default=0)
+
     show_influence: bpy.props.BoolProperty(
         name="Show Influence",
         description="Expand or collapse the Influence section",
@@ -7197,6 +7327,102 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                             info_row.scale_y = 0.7
                             info_row.label(text=", ".join(active_loras), icon='CHECKMARK')
 
+            # ── Refine Image (collapsible) ─────────────────────────────────
+            img_gen_box.separator()
+            ri_box = img_gen_box.box()
+            ri_header = ri_box.row(align=True)
+            ri_icon = 'TRIA_DOWN' if style_props.show_refine_image else 'TRIA_RIGHT'
+            ri_header.prop(style_props, "show_refine_image", text="Refine Image", icon=ri_icon, emboss=False, toggle=True)
+            ri_header.label(text="", icon='TEXTURE')
+
+            if style_props.show_refine_image:
+                # ── Top action row ─────────────────────────────────────────
+                top_row = ri_box.row(align=True)
+                top_row.scale_y = 1.2
+                top_row.operator("style_engine.refine_image_analyze_json", text="Analyze Image → JSON", icon='VIEWZOOM')
+                top_row.operator("style_engine.refine_image_paste_json", text="", icon='PASTEDOWN')
+
+                ri_box.separator()
+
+                # ── Metadata ───────────────────────────────────────────────
+                meta_box = ri_box.box()
+                meta_col = meta_box.column(align=True)
+                meta_row = meta_col.row()
+                meta_row.label(text="Metadata", icon='INFO')
+                meta_col.prop(style_props, "refine_meta_filename", text="Filename")
+                meta_col.prop(style_props, "refine_meta_dimensions", text="Dimensions")
+                meta_col.prop(style_props, "refine_meta_aspect", text="Aspect")
+
+                # ── Visual Style ───────────────────────────────────────────
+                vs_box = ri_box.box()
+                vs_col = vs_box.column(align=True)
+                vs_col.label(text="Visual Style", icon='BRUSH_DATA')
+                vs_col.prop(style_props, "refine_style_art_style", text="Art Style")
+                vs_col.prop(style_props, "refine_style_medium", text="Medium")
+                vs_col.prop(style_props, "refine_style_lighting", text="Lighting")
+
+                # ── Composition ────────────────────────────────────────────
+                comp_box = ri_box.box()
+                comp_col = comp_box.column(align=True)
+                comp_col.label(text="Composition", icon='MESH_GRID')
+                comp_col.prop(style_props, "refine_comp_perspective", text="Perspective")
+                comp_col.prop(style_props, "refine_comp_focal_point", text="Focal Point")
+
+                # ── Subjects (dynamic list) ────────────────────────────────
+                subj_box = ri_box.box()
+                subj_hdr = subj_box.row()
+                subj_hdr.label(text="Subjects", icon='OBJECT_DATA')
+                subj_hdr.operator("style_engine.refine_image_add_subject", text="", icon='ADD')
+
+                for si, subj in enumerate(style_props.refine_subjects):
+                    s_box = subj_box.box()
+                    s_hdr = s_box.row(align=True)
+                    exp_icon = 'TRIA_DOWN' if subj.show_expanded else 'TRIA_RIGHT'
+                    s_hdr.prop(subj, "show_expanded", text="", icon=exp_icon, emboss=False)
+                    s_hdr.prop(subj, "label", text="")
+                    rem_subj_op = s_hdr.operator("style_engine.refine_image_remove_subject", text="", icon='X')
+                    rem_subj_op.subject_index = si
+
+                    if subj.show_expanded:
+                        s_col = s_box.column(align=True)
+                        s_col.prop(subj, "style", text="Style")
+                        s_col.prop(subj, "scale", text="Scale")
+                        s_col.prop(subj, "color", text="Color")
+                        s_col.prop(subj, "material", text="Material")
+
+                        feat_hdr = s_box.row()
+                        feat_hdr.label(text="Features", icon='LINENUMBERS_ON')
+                        add_feat_op = feat_hdr.operator("style_engine.refine_image_add_feature", text="", icon='ADD')
+                        add_feat_op.subject_index = si
+
+                        for fi, feat in enumerate(subj.features):
+                            feat_row = s_box.row(align=True)
+                            feat_row.prop(feat, "value", text="")
+                            rem_feat_op = feat_row.operator("style_engine.refine_image_remove_feature", text="", icon='X')
+                            rem_feat_op.subject_index = si
+                            rem_feat_op.feature_index = fi
+
+                # ── Thematic Tags ──────────────────────────────────────────
+                tags_box = ri_box.box()
+                tags_hdr = tags_box.row()
+                tags_hdr.label(text="Thematic Tags", icon='BOOKMARKS')
+                tags_hdr.operator("style_engine.refine_image_add_tag", text="", icon='ADD')
+
+                for ti, tag in enumerate(style_props.refine_tags):
+                    tag_row = tags_box.row(align=True)
+                    tag_row.prop(tag, "value", text="")
+                    rem_tag_op = tag_row.operator("style_engine.refine_image_remove_tag", text="", icon='X')
+                    rem_tag_op.tag_index = ti
+
+                # ── Submit ─────────────────────────────────────────────────
+                ri_box.separator()
+                struct_row = ri_box.row()
+                struct_icon = 'CHECKBOX_HLT' if style_props.use_structured_editing else 'CHECKBOX_DEHLT'
+                struct_row.prop(style_props, "use_structured_editing", text="Use structured editing", icon=struct_icon)
+                submit_row = ri_box.row()
+                submit_row.scale_y = 1.5
+                submit_row.operator("style_engine.refine_image_submit", text="Refine with Agent", icon='RENDER_RESULT')
+
         # ================================================================
         # AGENT CATEGORY (Collapsible) — W
         # ================================================================
@@ -7220,38 +7446,38 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
             col.operator("style_engine.generate_image_description_from_file", text="Describe Image from File", icon='FILEBROWSER')
             col.operator("style_engine.generate_image_description_from_viewport", text="Describe Viewport", icon='VIEW_CAMERA')
 
-            # Prompt Browser
+            # ── Scene Context (sent to AI as ground-truth metadata) ──────────
             agent_box.separator()
-            col = agent_box.column(align=True)
-            col.label(text="Prompt Browser:", icon='BOOKMARKS')
-            from . import workspace_setup as _ws_agent
-            prompts = _ws_agent.get_prompt_list(context)
-            if prompts:
-                row = col.row(align=True)
-                row.scale_y = 1.2
-                at_oldest = (style_props.current_prompt_index == 0)
-                at_latest = (style_props.current_prompt_index == -1)
-                
-                # Previous button (go to older)
-                prev_row = row.row(align=True)
-                prev_row.enabled = not at_oldest
-                prev_row.operator("style_engine.prev_prompt", text="", icon='TRIA_LEFT')
-                
-                # Current prompt indicator
-                if at_latest:
-                    current_text = f"Latest ({len(prompts)})"
+            ctx_box = agent_box.box()
+            ctx_col = ctx_box.column(align=True)
+            ctx_col.scale_y = 0.85
+            ctx_col.label(text="Scene Context  (injected into Agent):", icon='INFO')
+
+            scene  = context.scene
+            render = scene.render
+            w, h   = render.resolution_x, render.resolution_y
+
+            from math import gcd as _gcd
+            import bpy as _bpy
+            g  = _gcd(w, h)
+            ar = f"{w // g}:{h // g}"
+            blend_name = _bpy.path.basename(_bpy.data.filepath).replace(".blend", "") if _bpy.data.is_saved else "unsaved"
+            ctx_col.label(text=f"  File:    {blend_name}")
+            ctx_col.label(text=f"  Render:  {w} × {h}  ({ar})")
+
+            cam_obj = scene.camera
+            if cam_obj and cam_obj.type == 'CAMERA':
+                cam = cam_obj.data
+                ctx_col.label(text=f"  Camera:  {cam_obj.name}  —  {round(cam.lens, 1)} mm")
+                dof = cam.dof
+                if dof.use_dof:
+                    focus = dof.focus_object.name if dof.focus_object else f"{round(dof.focus_distance, 2)} m"
+                    ctx_col.label(text=f"  DoF:     f/{round(dof.aperture_fstop, 1)}  focus={focus}")
                 else:
-                    current_text = f"{style_props.current_prompt_index + 1}/{len(prompts)}"
-                
-                row.label(text=current_text)
-                
-                # Next button (go to newer)
-                next_row = row.row(align=True)
-                next_row.enabled = not at_latest
-                next_row.operator("style_engine.next_prompt", text="", icon='TRIA_RIGHT')
+                    ctx_col.label(text="  DoF:     off")
             else:
-                col.label(text="No prompt history yet", icon='INFO')
-            
+                ctx_col.label(text="  Camera:  (none active — no camera data sent)")
+
             # # Helper text box - COMMENTED OUT FOR MINIMAL UI
             # prompt_box.separator()
             # help_box = prompt_box.box()
@@ -7654,528 +7880,6 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
             col.operator("style_engine.pbr_from_text", text="Generate PBR Layers", icon='MATSHADERBALL')
             col.operator("style_engine.trellis_retexture", text="Retexture Mesh", icon='SHADING_TEXTURE')
 
-        # (draw method ends here)
-
-        if False:  # old body tombstone — never executed
-            row = layout.row(align=True)
-            row.scale_y = 2.0
-            row.operator("style_engine.generate_ai_quick",
-                         text="Generate Image",
-                         icon='IMAGE_DATA')
-            row.operator("style_engine.upload_current_ai",
-                         text="",
-                         icon='IMPORT')
-
-            # Refine current image (skips render, feeds current_ai.png back in)
-            refine_row = img_gen_box.row(align=True)
-            refine_row.scale_y = 1.3
-            refine_row.operator("style_engine.refine_current_image",
-                                text="Refine Current Image",
-                                icon='IMAGE_REFERENCE')
-
-            img_gen_box.separator()
-            
-            if style_props.ai_model == 'GEMINI':
-                # ────────────────────────────────────────────────────────────
-                # GEMINI CONTROLS (simplified)
-                # ────────────────────────────────────────────────────────────
-                col = img_gen_box.column(align=True)
-                col.prop(style_props, "gemini_temperature", text="Temperature", slider=True)
-                col.prop(style_props, "gemini_image_size", text="Size")
-                
-                # Instructions dropdown
-                col.prop(style_props, "gemini_instructions", text="Instructions")
-                
-                # Alignment + Remove Background toggles
-                img_gen_box.separator()
-                row = img_gen_box.row(align=True)
-                row.scale_y = 1.3
-                row.prop(style_props, "gemini_alignment", text="Alignment", toggle=True, icon='CON_LOCLIKE')
-                row.prop(style_props, "gemini_remove_bg", text="Remove BG", toggle=True, icon='IMAGE_ALPHA')
-                
-                # Show auto-detected aspect ratio from render resolution
-                w = context.scene.render.resolution_x
-                h = context.scene.render.resolution_y
-                img_gen_box.label(text=f"Aspect: {w}x{h}", icon='FULLSCREEN_ENTER')
-
-                # ── GEMINI REFERENCE IMAGES ──
-                img_gen_box.separator()
-                gref_box = img_gen_box.box()
-                gref_header = gref_box.row(align=True)
-                gref_icon = 'TRIA_DOWN' if style_props.show_gemini_references else 'TRIA_RIGHT'
-                gref_header.prop(style_props, "show_gemini_references", text="Reference Images", icon=gref_icon, emboss=False, toggle=True)
-                gref_header.label(text="", icon='IMAGE_REFERENCE')
-
-                if style_props.show_gemini_references:
-                    gemini_ref_slots = [
-                        ("gemini_ref1", "gemini_ref1_image", "REF1"),
-                        ("gemini_ref2", "gemini_ref2_image", "REF2"),
-                        ("gemini_ref3", "gemini_ref3_image", "REF3"),
-                        ("gemini_ref4", "gemini_ref4_image", "REF4"),
-                        ("gemini_ref5", "gemini_ref5_image", "REF5"),
-                    ]
-
-                    gref_box.separator()
-                    grid = gref_box.grid_flow(row_major=True, columns=3, even_columns=True, even_rows=True, align=True)
-
-                    for slot_id, img_prop, label in gemini_ref_slots:
-                        img = getattr(style_props, img_prop)
-                        card = grid.box()
-                        card.scale_y = 1.0
-
-                        if img:
-                            col = card.column(align=True)
-                            preview_box = col.box()
-                            preview_col = preview_box.column(align=True)
-                            try:
-                                pcoll = preview_collections.get("ref_images")
-                                if pcoll is not None:
-                                    thumb_key = f"{slot_id}_{img.name}"
-                                    if thumb_key not in pcoll:
-                                        if img.filepath:
-                                            abs_path = bpy.path.abspath(img.filepath)
-                                            try:
-                                                pcoll.load(thumb_key, abs_path, 'IMAGE')
-                                            except Exception:
-                                                pass
-                                    if thumb_key in pcoll and pcoll[thumb_key].icon_id > 0:
-                                        preview_col.template_icon(icon_value=pcoll[thumb_key].icon_id, scale=5.0)
-                                    else:
-                                        preview_col.label(text="[Preview]", icon='IMAGE_DATA')
-                                else:
-                                    preview_col.label(text="[No Collection]", icon='ERROR')
-                            except Exception:
-                                preview_col.label(text="[Error]", icon='ERROR')
-
-                            col.separator(factor=0.2)
-                            info_col = col.column(align=True)
-                            info_col.scale_y = 0.7
-                            lbl_row = info_col.row()
-                            lbl_row.alignment = 'CENTER'
-                            lbl_row.label(text=label, icon='IMAGE_DATA')
-                            name_row = info_col.row()
-                            name_row.alignment = 'CENTER'
-                            display_name = img.name[:10] + "..." if len(img.name) > 13 else img.name
-                            name_row.label(text=display_name)
-                            col.separator(factor=0.3)
-                            btn_row = col.row(align=True)
-                            btn_row.scale_y = 0.7
-                            reload_op = btn_row.operator("style_engine.reload_reference", text="", icon='FILE_REFRESH')
-                            reload_op.slot = slot_id
-                            clear_op = btn_row.operator("style_engine.clear_reference", text="", icon='X')
-                            clear_op.slot = slot_id
-                        else:
-                            col = card.column(align=True)
-                            col.scale_y = 2.5
-                            col.separator()
-                            load_op = col.operator("style_engine.load_reference", text=f"{label}\n+", icon='ADD', emboss=True)
-                            load_op.slot = slot_id
-                            col.separator()
-
-            else:
-                # ────────────────────────────────────────────────────────────
-                # SDXL CONTROLS
-                # ────────────────────────────────────────────────────────────
-                
-                # INFLUENCE SUB-CATEGORY (Collapsible)
-                influence_box = img_gen_box.box()
-                influence_header = influence_box.row(align=True)
-                influence_icon = 'TRIA_DOWN' if style_props.show_influence else 'TRIA_RIGHT'
-                influence_header.prop(style_props, "show_influence", text="Influence", icon=influence_icon, emboss=False, toggle=True)
-                influence_header.label(text="", icon='SMOOTHCURVE')
-                
-                if style_props.show_influence:
-                    col = influence_box.column(align=True)
-                    col.prop(style_props, "silhouette_influence", text="Silhouette", slider=True)
-                    col.prop(style_props, "depth_influence", text="Depth", slider=True)
-                    col.prop(style_props, "texture_influence", text="Viewport", slider=True)
-                    
-                    influence_box.separator()
-                    col = influence_box.column(align=True)
-                    col.label(text="Steps:")
-                    col.prop(style_props, "steps", text="", slider=True)
-            
-                # REFERENCE IMAGES SUB-CATEGORY (Collapsible, closed by default)
-                img_gen_box.separator()
-                ref_box = img_gen_box.box()
-                ref_header = ref_box.row(align=True)
-                ref_icon = 'TRIA_DOWN' if style_props.show_reference_images else 'TRIA_RIGHT'
-                ref_header.prop(style_props, "show_reference_images", text="Reference Images", icon=ref_icon, emboss=False, toggle=True)
-                ref_header.label(text="", icon='IMAGE_REFERENCE')
-            
-                if style_props.show_reference_images:
-                    adv_row = ref_box.row(align=True)
-                    adv_row.prop(style_props, "show_advanced_ref_controls", text="Advanced Control", toggle=True, icon='PREFERENCES')
-                    
-                    def draw_reference_section(box, title, icon, show_prop, slots, strength_prop, show_weights=False):
-                        section_box = box.box()
-                        header = section_box.row(align=True)
-                        icon_tri = 'TRIA_DOWN' if getattr(style_props, show_prop) else 'TRIA_RIGHT'
-                        header.prop(style_props, show_prop, text=title, icon=icon_tri, emboss=False, toggle=True)
-                        if getattr(style_props, show_prop):
-                            section_box.separator()
-                            strength_row = section_box.row()
-                            strength_row.scale_y = 1.5
-                            strength_row.prop(style_props, strength_prop, text="Global Strength", slider=True)
-                            section_box.separator()
-                            grid = section_box.grid_flow(row_major=True, columns=3, even_columns=True, even_rows=True, align=True)
-                            for slot_id, img_prop, weight_prop, label in slots:
-                                img = getattr(style_props, img_prop)
-                                card = grid.box()
-                                card.scale_y = 1.0
-                                if img:
-                                    col = card.column(align=True)
-                                    preview_box = col.box()
-                                    preview_col = preview_box.column(align=True)
-                                    try:
-                                        pcoll = preview_collections.get("ref_images")
-                                        if pcoll is None:
-                                            preview_col.label(text="[No Collection]", icon='ERROR')
-                                        else:
-                                            thumb_key = f"{slot_id}_{img.name}"
-                                            if thumb_key not in pcoll:
-                                                if img.filepath:
-                                                    abs_path = bpy.path.abspath(img.filepath)
-                                                    try:
-                                                        pcoll.load(thumb_key, abs_path, 'IMAGE')
-                                                    except Exception as e:
-                                                        print(f"[UI] Failed to load preview for {img.name}: {e}")
-                                            if thumb_key in pcoll:
-                                                thumb = pcoll[thumb_key]
-                                                if thumb.icon_id > 0:
-                                                    preview_col.template_icon(icon_value=thumb.icon_id, scale=5.0)
-                                                else:
-                                                    preview_col.label(text="[Invalid Icon]", icon='IMAGE_DATA')
-                                            else:
-                                                preview_col.label(text="[Not Loaded]", icon='IMAGE_DATA')
-                                    except Exception as e:
-                                        preview_col.label(text="[Error]", icon='ERROR')
-                                    col.separator(factor=0.2)
-                                    info_col = col.column(align=True)
-                                    info_col.scale_y = 0.7
-                                    label_row = info_col.row()
-                                    label_row.alignment = 'CENTER'
-                                    label_row.label(text=label, icon='IMAGE_DATA')
-                                    name_row = info_col.row()
-                                    name_row.alignment = 'CENTER'
-                                    display_name = img.name[:10] + "..." if len(img.name) > 13 else img.name
-                                    name_row.label(text=display_name)
-                                    col.separator(factor=0.3)
-                                    if show_weights:
-                                        col.prop(style_props, weight_prop, text="", slider=True)
-                                        col.separator(factor=0.2)
-                                    btn_row = col.row(align=True)
-                                    btn_row.scale_y = 0.7
-                                    reload_op = btn_row.operator("style_engine.reload_reference", text="", icon='FILE_REFRESH')
-                                    reload_op.slot = slot_id
-                                    clear_op = btn_row.operator("style_engine.clear_reference", text="", icon='X')
-                                    clear_op.slot = slot_id
-                                else:
-                                    col = card.column(align=True)
-                                    col.scale_y = 2.5
-                                    col.separator()
-                                    load_op = col.operator("style_engine.load_reference", text=f"{label}\n+", icon='ADD', emboss=True)
-                                    load_op.slot = slot_id
-                                    col.separator()
-                
-                    st_slots = [
-                        ("st1", "st1_image", "st1_weight", "ST1"),
-                        ("st2", "st2_image", "st2_weight", "ST2"),
-                        ("st3", "st3_image", "st3_weight", "ST3"),
-                        ("st4", "st4_image", "st4_weight", "ST4"),
-                        ("st5", "st5_image", "st5_weight", "ST5"),
-                    ]
-                    draw_reference_section(ref_box, "Style", 'BRUSH_DATA', 
-                                         "show_style_transfer", st_slots, "style_transfer_strength",
-                                         show_weights=style_props.show_advanced_ref_controls)
-                    
-                    comp_slots = [
-                        ("comp1", "comp1_image", "comp1_weight", "COMP1"),
-                        ("comp2", "comp2_image", "comp2_weight", "COMP2"),
-                        ("comp3", "comp3_image", "comp3_weight", "COMP3"),
-                        ("comp4", "comp4_image", "comp4_weight", "COMP4"),
-                        ("comp5", "comp5_image", "comp5_weight", "COMP5"),
-                    ]
-                    draw_reference_section(ref_box, "Composition", 'MESH_GRID', 
-                                         "show_composition", comp_slots, "composition_strength",
-                                         show_weights=style_props.show_advanced_ref_controls)
-                
-                # LORAS SUB-CATEGORY (Collapsible, closed by default)
-                img_gen_box.separator()
-                lora_box = img_gen_box.box()
-                lora_header = lora_box.row(align=True)
-                lora_icon = 'TRIA_DOWN' if style_props.show_loras else 'TRIA_RIGHT'
-                lora_header.prop(style_props, "show_loras", text="LoRas", icon=lora_icon, emboss=False, toggle=True)
-                lora_header.label(text="", icon='MODIFIER')
-                
-                if style_props.show_loras:
-                    lora_col = lora_box.column(align=False)
-                    
-                    lora1_box = lora_col.box()
-                    lora1_col = lora1_box.column(align=True)
-                    
-                    row = lora1_col.row()
-                    row.scale_y = 1.4
-                    row.prop(style_props, "lora_enabled", text="Use LoRa", toggle=True, icon='MODIFIER')
-                    
-                    if style_props.lora_enabled:
-                        lora1_col.separator(factor=0.3)
-                        refresh_row = lora1_col.row(align=True)
-                        refresh_row.prop(style_props, "lora_name", text="")
-                        refresh_row.operator("style_engine.refresh_lora_list", text="", icon='FILE_REFRESH')
-                        lora1_col.prop(style_props, "lora_strength_model", text="Strength", slider=True)
-                    
-                    lora2_box = lora_col.box()
-                    lora2_col = lora2_box.column(align=True)
-                    lora2_col.prop(style_props, "lora2_enabled", text="Use LoRa 2", toggle=True, icon='MODIFIER')
-                    
-                    if style_props.lora2_enabled:
-                        lora2_col.separator(factor=0.3)
-                        lora2_col.prop(style_props, "lora2_name", text="")
-                        lora2_col.prop(style_props, "lora2_strength_model", text="Strength", slider=True)
-                    
-                    lora_col.separator(factor=0.3)
-                    lora_col.operator("style_engine.load_lora_keywords", text="Load Keywords", icon='TEXT')
-                    
-                    active_loras = []
-                    if style_props.lora_enabled and style_props.lora_name != 'NONE':
-                        active_loras.append(f"L1: {style_props.lora_name.replace('.safetensors', '')[:12]}")
-                    if style_props.lora2_enabled and style_props.lora2_name != 'NONE':
-                        active_loras.append(f"L2: {style_props.lora2_name.replace('.safetensors', '')[:12]}")
-                    
-                    if active_loras:
-                        info_row = lora_col.row()
-                        info_row.scale_y = 0.7
-                        info_row.label(text=", ".join(active_loras), icon='CHECKMARK')
-            
-            # Remove BG toggle (SDXL only)
-            if style_props.ai_model != 'GEMINI':
-                img_gen_box.separator()
-                rembg_row = img_gen_box.row(align=True)
-                rembg_row.scale_y = 1.3
-                rembg_row.prop(style_props, "sdxl_remove_bg", text="Remove BG", toggle=True, icon='IMAGE_ALPHA')
-
-            # ────────────────────────────────────────────────────────────
-            # PROJECT TEXTURE & PBR BUTTONS
-            # ────────────────────────────────────────────────────────────
-            img_gen_box.separator()
-            row = img_gen_box.row()
-            row.scale_y = 1.3
-            row.operator("style_engine.project_texture", text="Project Texture", icon='UV')
-            
-            # PBR from Projected Texture (conditional: only when active mesh has iteration_XXX material)
-            obj = context.active_object
-            has_iteration_mat = (
-                obj and obj.type == 'MESH' and obj.data.materials and
-                any(m and m.name.startswith('iteration_') for m in obj.data.materials)
-            )
-            if has_iteration_mat:
-                # Patch buttons (toggle between Patch/Apply+Cancel states)
-                if style_props.patch_mode_active:
-                    row = img_gen_box.row()
-                    row.scale_y = 1.3
-                    row.operator("style_engine.apply_patch", text="Apply Patch", icon='BRUSH_DATA')
-                    row = img_gen_box.row()
-                    row.operator("style_engine.toggle_patch_camera", text="Cancel Patch", icon='X')
-                else:
-                    row = img_gen_box.row()
-                    row.scale_y = 1.2
-                    row.operator("style_engine.toggle_patch_camera", text="Patch", icon='BRUSH_DATA')
-                
-                row = img_gen_box.row()
-                row.scale_y = 1.2
-                row.operator("style_engine.pbr_from_projected", text="PBR from Projected Texture", icon='MATSHADERBALL')
-            
-            # Multiview from Projected (conditional: only if iteration exists and not already multiview)
-            already_multiview = (
-                obj and obj.type == 'MESH' and obj.data and hasattr(obj.data, 'materials') and obj.data.materials and
-                any(m and (m.name.startswith('left_iteration_') or m.name.startswith('right_iteration_')) for m in obj.data.materials)
-            )
-            if has_iteration_mat and not already_multiview:
-                row = img_gen_box.row()
-                row.scale_y = 1.1
-                row.operator("style_engine.multiview_from_projected", text="Multiview from Projected", icon='VIEW_CAMERA')
-            
-            # Generate PBR Material from text (always visible)
-            row = img_gen_box.row()
-            row.scale_y = 1.2
-            row.operator("style_engine.pbr_from_text", text="Generate PBR Material", icon='MATSHADERBALL')
-        
-        # ================================================================
-        # 3D GENERATION CATEGORY (Collapsible)
-        # ================================================================
-        layout.separator()
-        gen3d_box = layout.box()
-        gen3d_header = gen3d_box.row(align=True)
-        gen3d_icon = 'TRIA_DOWN' if style_props.show_3d_generation else 'TRIA_RIGHT'
-        gen3d_header.prop(style_props, "show_3d_generation", text="3D Generation", icon=gen3d_icon, emboss=False, toggle=True)
-        gen3d_header.label(text="", icon='MESH_CUBE')
-        
-        if style_props.show_3d_generation:
-            # 3D Quality selector
-            col = gen3d_box.column(align=True)
-            col.label(text="3D Quality:")
-            col.prop(style_props, "object_quality", text="")
-            
-            gen3d_box.separator()
-            
-            # ────────────────────────────────────────────────────────────
-            # 3D FROM SINGLE IMAGE SUB-CATEGORY (Collapsible)
-            # ────────────────────────────────────────────────────────────
-            single_box = gen3d_box.box()
-            single_header = single_box.row(align=True)
-            single_icon = 'TRIA_DOWN' if style_props.show_3d_single_image else 'TRIA_RIGHT'
-            single_header.prop(style_props, "show_3d_single_image", text="3D from Single Image", icon=single_icon, emboss=False, toggle=True)
-            single_header.label(text="", icon='IMAGE_DATA')
-            
-            if style_props.show_3d_single_image:
-                # ── TRELLIS2 — main generation buttons ───────────────────
-                trellis_col = single_box.column(align=True)
-                trellis_col.scale_y = 1.4
-                trellis_col.operator("style_engine.trellis_generate",
-                                     text="Generate 3D",
-                                     icon='MESH_UVSPHERE')
-                trellis_col.operator("style_engine.trellis_retexture",
-                                     text="Retexture Mesh",
-                                     icon='MATSHADERBALL')
-
-                # ── TRELLIS2 — params ────────────────────────────────────
-                single_box.separator(factor=0.5)
-                t_col = single_box.column(align=True)
-                t_col.prop(style_props, "trellis_quality", text="")
-                t_col.prop(style_props, "trellis_texture_size", text="Texture")
-
-                t_row = single_box.row(align=True)
-                t_row.prop(style_props, "trellis_steps",    text="Steps")
-                t_row.prop(style_props, "trellis_guidance", text="Guidance")
-
-                single_box.prop(style_props, "trellis_decimation", text="Max Polygons")
-
-                rembg_row = single_box.row(align=True)
-                rembg_row.scale_y = 1.2
-                rembg_row.prop(style_props, "trellis_remove_bg",
-                               text="Remove BG", toggle=True, icon='IMAGE_ALPHA')
-
-                # ── Retexture advanced params (collapsible hint) ──────────
-                single_box.separator(factor=0.5)
-                rt_col = single_box.column(align=True)
-                rt_col.scale_y = 0.9
-                rt_col.label(text="Retexture params:", icon='MATSHADERBALL')
-                rt_col.prop(style_props, "trellis_tex_resolution", text="Res")
-                rt_col.prop(style_props, "trellis_tex_steps",    text="Steps")
-                rt_col.prop(style_props, "trellis_tex_guidance", text="Guidance")
-
-                single_box.separator()
-
-                # ── Omni sub-section ──────────────────────────────────────
-                omni_col = single_box.column(align=True)
-                omni_col.scale_y = 1.1
-                omni_col.prop(style_props, "omni_control_type", text="")
-                omni_col.prop(style_props, "omni_guidance_scale", text="Guidance", slider=True)
-
-                # Extra export controls for Point Cloud / Voxel
-                if style_props.omni_control_type in ('POINT', 'VOXEL'):
-                    omni_col.prop(style_props, "omni_remesh_depth", text="Remesh Depth", slider=True)
-                    omni_col.prop(style_props, "omni_precenter", text="Pre-center", toggle=True)
-
-                omni_col.operator("style_engine.omni_generate", text="Omni Mesh", icon='MESH_CUBE')
-
-                # BBox debug is only meaningful in bbox mode
-                if style_props.omni_control_type == 'BBOX':
-                    omni_col.operator("style_engine.omni_bbox_debug", text="Calculate BBox", icon='SNAP_VOLUME')
-
-                # ── Segment Mesh (Hunyuan3D-Part) ─────────────────────────
-                single_box.separator()
-                seg_col = single_box.column(align=True)
-                seg_col.label(text="Part Segmentation:", icon='OUTLINER_OB_SURFACE')
-                seg_btn = seg_col.row(align=True)
-                seg_btn.scale_y = 1.4
-                seg_btn.operator("style_engine.segment_mesh",
-                                 text="Segment Mesh",
-                                 icon='OUTLINER_OB_SURFACE')
-                param_col = single_box.column(align=True)
-                param_col.scale_y = 0.9
-                param_col.prop(style_props, "part_point_num",  text="Point Samples")
-                param_col.prop(style_props, "part_prompt_num", text="Query Points")
-
-            # ────────────────────────────────────────────────────────────
-            # 3D FROM MULTIVIEW SUB-CATEGORY (Collapsible, closed by default)
-            # ────────────────────────────────────────────────────────────
-            gen3d_box.separator()
-            multi_box = gen3d_box.box()
-            multi_header = multi_box.row(align=True)
-            multi_icon = 'TRIA_DOWN' if style_props.show_3d_multiview else 'TRIA_RIGHT'
-            multi_header.prop(style_props, "show_3d_multiview", text="3D from Multiview", icon=multi_icon, emboss=False, toggle=True)
-            multi_header.label(text="", icon='VIEW_ORTHO')
-            
-            if style_props.show_3d_multiview:
-                col = multi_box.column(align=True)
-                col.scale_y = 1.2
-                col.operator("style_engine.generate_mesh_multiview", text="Generate Mesh", icon='MESH_UVSPHERE')
-                col.operator("style_engine.generate_textured_mesh_multiview", text="Generate Textured Mesh", icon='SHADING_TEXTURE')
-            
-            # ────────────────────────────────────────────────────────────
-            # MODEL BROWSER
-            # ────────────────────────────────────────────────────────────
-            gen3d_box.separator()
-            col = gen3d_box.column(align=True)
-            col.label(text="Model Browser:", icon='FILE_3D')
-            
-            # Get model library info
-            from . import workspace_setup
-            models = workspace_setup.get_model_list(context)
-            
-            if models:
-                # Navigation buttons
-                row = col.row(align=True)
-                row.scale_y = 1.2
-                
-                # Check if at boundaries
-                at_oldest = (style_props.current_model_index == 0)
-                at_latest = (style_props.current_model_index == -1)
-                
-                # Previous button (go to older)
-                prev_row = row.row(align=True)
-                prev_row.enabled = not at_oldest
-                prev_row.operator("style_engine.prev_model", text="", icon='TRIA_LEFT')
-                
-                # Current model indicator
-                if at_latest:
-                    current_text = f"Latest ({len(models)})"
-                else:
-                    current_text = f"{style_props.current_model_index + 1}/{len(models)}"
-                
-                row.label(text=current_text)
-                
-                # Next button (go to newer)
-                next_row = row.row(align=True)
-                next_row.enabled = not at_latest
-                next_row.operator("style_engine.next_model", text="", icon='TRIA_RIGHT')
-                
-                # Spawn button
-                col.separator()
-                spawn_row = col.row(align=True)
-                spawn_row.scale_y = 1.3
-                spawn_row.operator("style_engine.spawn_model", text="Spawn Model", icon='IMPORT')
-            else:
-                col.label(text="No models yet", icon='INFO')
-        
-        # # --- Settings - COLLAPSIBLE --- COMMENTED OUT
-        # layout.separator()
-        # settings_box = layout.box()
-        # header_row = settings_box.row(align=True)
-        # icon = 'TRIA_DOWN' if style_props.show_settings else 'TRIA_RIGHT'
-        # header_row.prop(style_props, "show_settings", text="Settings", icon=icon, emboss=False, toggle=True)
-        # 
-        # if style_props.show_settings:
-        #     # Test Workflow button (formerly Generate Cloud, moved from Image Generation)
-        #     settings_box.operator("style_engine.test_cloud_generation", text="Test Workflow", icon='EXPERIMENTAL')
-        #     
-        #     settings_box.separator()
-        #     settings_box.label(text="(Advanced settings in addon preferences)", icon='INFO')
-
-        # Legacy action buttons removed (Visualize, Create 3D, Render)
-
 
 # ----------------------------------------------------------------
 # 3.5 PROMPT REFINEMENT OPERATOR
@@ -8474,15 +8178,22 @@ class WM_OT_GenerateImageDescription(bpy.types.Operator):
             print("[Image Description] ❌ Not in Server mode - feature requires direct ComfyUI connection")
             return {'CANCELLED'}
         
-        # 2. Get path to current_ai.png
-        temp_dir = workspace_setup.get_temp_directory(context)
-        image_path = temp_dir / "current_ai.png"
-        
-        if not image_path.exists():
-            self.report({'ERROR'}, "current_ai.png not found - generate an image first")
-            print(f"[Image Description] ❌ Image not found: {image_path}")
+        # 2. Locate current_ai.png (checks project temp then all fallback locations)
+        image_path = workspace_setup.find_current_ai(context)
+        print(f"[Image Description] Looking for current_ai.png → {image_path}")
+        if image_path is None:
+            canonical = workspace_setup.get_temp_directory(context) / "current_ai.png"
+            self.report(
+                {'ERROR'},
+                f"current_ai.png not found anywhere — generate an image first "
+                f"(expected: {canonical})"
+            )
+            print(
+                f"[Image Description] ❌ Not found in canonical or fallback locations. "
+                f"Canonical: {canonical}  |  .blend: {bpy.data.filepath!r}"
+            )
             return {'CANCELLED'}
-        
+
         print(f"[Image Description] Using image: {image_path}")
         
         # Save "before" snapshot
@@ -9079,10 +8790,394 @@ class WM_OT_GenerateTexturedMeshMultiview(bpy.types.Operator):
 
 
 # ----------------------------------------------------------------
+# Refine Image JSON Editor — Operators
+# ----------------------------------------------------------------
+
+class WM_OT_RefineImageAddSubject(bpy.types.Operator):
+    """Add a new subject to the Refine Image subject list"""
+    bl_idname = "style_engine.refine_image_add_subject"
+    bl_label = "Add Subject"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        props = context.scene.style_engine_props
+        subj = props.refine_subjects.add()
+        subj.label = f"object_{len(props.refine_subjects)}"
+        subj.show_expanded = True
+        return {'FINISHED'}
+
+
+class WM_OT_RefineImageRemoveSubject(bpy.types.Operator):
+    """Remove a subject from the Refine Image subject list"""
+    bl_idname = "style_engine.refine_image_remove_subject"
+    bl_label = "Remove Subject"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    subject_index: bpy.props.IntProperty(default=0)
+
+    def execute(self, context):
+        props = context.scene.style_engine_props
+        if 0 <= self.subject_index < len(props.refine_subjects):
+            props.refine_subjects.remove(self.subject_index)
+        return {'FINISHED'}
+
+
+class WM_OT_RefineImageAddFeature(bpy.types.Operator):
+    """Add a feature to a subject"""
+    bl_idname = "style_engine.refine_image_add_feature"
+    bl_label = "Add Feature"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    subject_index: bpy.props.IntProperty(default=0)
+
+    def execute(self, context):
+        props = context.scene.style_engine_props
+        if 0 <= self.subject_index < len(props.refine_subjects):
+            props.refine_subjects[self.subject_index].features.add()
+        return {'FINISHED'}
+
+
+class WM_OT_RefineImageRemoveFeature(bpy.types.Operator):
+    """Remove a feature from a subject"""
+    bl_idname = "style_engine.refine_image_remove_feature"
+    bl_label = "Remove Feature"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    subject_index: bpy.props.IntProperty(default=0)
+    feature_index: bpy.props.IntProperty(default=0)
+
+    def execute(self, context):
+        props = context.scene.style_engine_props
+        si, fi = self.subject_index, self.feature_index
+        if 0 <= si < len(props.refine_subjects):
+            subj = props.refine_subjects[si]
+            if 0 <= fi < len(subj.features):
+                subj.features.remove(fi)
+        return {'FINISHED'}
+
+
+class WM_OT_RefineImageAddTag(bpy.types.Operator):
+    """Add a thematic tag"""
+    bl_idname = "style_engine.refine_image_add_tag"
+    bl_label = "Add Tag"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        context.scene.style_engine_props.refine_tags.add()
+        return {'FINISHED'}
+
+
+class WM_OT_RefineImageRemoveTag(bpy.types.Operator):
+    """Remove a thematic tag"""
+    bl_idname = "style_engine.refine_image_remove_tag"
+    bl_label = "Remove Tag"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    tag_index: bpy.props.IntProperty(default=0)
+
+    def execute(self, context):
+        props = context.scene.style_engine_props
+        if 0 <= self.tag_index < len(props.refine_tags):
+            props.refine_tags.remove(self.tag_index)
+        return {'FINISHED'}
+
+
+def _get_blender_scene_metadata(context, image_filename: str) -> dict:
+    """
+    Collect ground-truth metadata from Blender and return it as a plain dict.
+
+    Uses scene.camera — the scene-level active camera set in Scene Properties
+    (or via Ctrl+Numpad0). This is NOT the currently selected object; it is
+    whatever camera Blender would use if you hit F12.
+
+    Mandatory keys (always present):
+        filename, dimensions, aspect_ratio
+
+    Conditional keys (only when scene.camera is set):
+        focal_length_mm
+        depth_of_field  → sub-dict: enabled, aperture_fstop,
+                          focus_distance_m (null when focus_object is set),
+                          focus_object (null when using distance)
+    """
+    import json as _json
+    from math import gcd
+
+    scene  = context.scene
+    render = scene.render
+    w, h   = render.resolution_x, render.resolution_y
+
+    g  = gcd(w, h)
+    ar = f"{w // g}:{h // g}"
+
+    # Use the .blend filename (without extension) as a meaningful project identifier.
+    # The image on disk is always "current_ai.png", which carries no useful context.
+    blend_name = Path(bpy.data.filepath).stem if bpy.data.is_saved else "unsaved"
+
+    meta = {
+        "filename":     blend_name,
+        "dimensions":   f"{w}x{h}",
+        "aspect_ratio": ar,
+    }
+
+    # scene.camera is the scene-level active camera — never the selected object
+    cam_obj = scene.camera
+    if cam_obj and cam_obj.type == 'CAMERA':
+        cam = cam_obj.data
+        meta["focal_length_mm"] = round(cam.lens, 1)
+
+        dof = cam.dof
+        if dof.use_dof:
+            meta["depth_of_field"] = {
+                "enabled":          True,
+                "aperture_fstop":   round(dof.aperture_fstop, 2),
+                "focus_distance_m": round(dof.focus_distance, 3) if dof.focus_object is None else None,
+                "focus_object":     dof.focus_object.name if dof.focus_object else None,
+            }
+        else:
+            meta["depth_of_field"] = {"enabled": False}
+
+    return meta
+
+
+def _build_agent_json_task_prompt(meta: dict) -> str:
+    """
+    Build the task STRING that is injected into node "10" (Griptape Run: Image Description)
+    before the workflow is queued.
+
+    The agent receives a *partially pre-filled* JSON skeleton whose metadata section
+    is already populated with exact values from Blender.  The agent's only job is
+    to observe the image and fill in the remaining visual fields — it must never
+    change or re-derive the metadata keys.
+    """
+    import json as _json
+
+    # Build the metadata sub-object exactly as it must appear in the output
+    metadata_obj = {
+        "filename":     meta["filename"],
+        "dimensions":   meta["dimensions"],
+        "aspect_ratio": meta["aspect_ratio"],
+    }
+    if "focal_length_mm" in meta:
+        metadata_obj["focal_length_mm"] = meta["focal_length_mm"]
+    if "depth_of_field" in meta:
+        metadata_obj["depth_of_field"] = meta["depth_of_field"]
+
+    metadata_json = _json.dumps(metadata_obj, indent=4)
+
+    # Indent each line of the sub-object so it sits correctly inside the skeleton
+    indented = "\n".join("    " + line for line in metadata_json.splitlines())
+
+    task = (
+        "Analyze the provided image and return a single valid JSON object.\n\n"
+        "The metadata section below is ALREADY FILLED IN with exact values from "
+        "Blender — copy it into your output unchanged. Do not infer, round, or "
+        "replace any of these values. Focal length and depth_of_field are present "
+        "only when a camera was active; if they appear here, include them verbatim.\n\n"
+        "Pre-filled metadata (copy verbatim):\n"
+        "```json\n"
+        "{\n"
+        f"  \"metadata\": {indented.strip()},\n"
+        "  \"visual_style\":   { ... fill from image ... },\n"
+        "  \"composition\":    { ... fill from image ... },\n"
+        "  \"subject_matter\": [ ... fill from image ... ],\n"
+        "  \"thematic_tags\":  [ ... fill from image ... ]\n"
+        "}\n"
+        "```\n\n"
+        "Return only the completed JSON wrapped in ```json ... ``` fences."
+    )
+    return task
+
+
+class WM_OT_RefineImageAnalyzeJSON(bpy.types.Operator):
+    """Run AgentJSON on the current AI image and populate the Refine Image fields"""
+    bl_idname = "style_engine.refine_image_analyze_json"
+    bl_label = "Analyze Image → JSON"
+    bl_description = "Use the AgentJSON workflow to dissect current_ai.png into structured fields"
+    bl_options = {'REGISTER'}
+
+    def execute(self, context):
+        import json, re
+        from pathlib import Path
+        from . import runcomfy_deployment, workspace_setup
+
+        if not runcomfy_deployment.is_server_mode():
+            self.report({'ERROR'}, "Analyze requires Server mode (GCS)")
+            return {'CANCELLED'}
+
+        image_path = workspace_setup.find_current_ai(context)
+        print(f"[RefineJSON] Looking for current_ai.png → {image_path}")
+        if image_path is None:
+            canonical = workspace_setup.get_temp_directory(context) / "current_ai.png"
+            self.report(
+                {'ERROR'},
+                f"current_ai.png not found anywhere — generate an image first "
+                f"(expected: {canonical})"
+            )
+            print(
+                f"[RefineJSON] ❌ Not found in canonical or fallback locations. "
+                f"Canonical: {canonical}  |  .blend: {bpy.data.filepath!r}"
+            )
+            return {'CANCELLED'}
+
+        try:
+            addon_dir = Path(__file__).parent
+            workflow_file = addon_dir / "workflows" / "Text" / "AgentJSON.json"
+            if not workflow_file.exists():
+                self.report({'ERROR'}, "AgentJSON.json workflow not found")
+                return {'CANCELLED'}
+
+            with open(workflow_file, 'r') as f:
+                workflow = json.load(f)
+
+            server_client = runcomfy_deployment.get_server_client()
+            upload_response = server_client.upload_image(str(image_path), overwrite=True)
+            uploaded_filename = upload_response.get("name", "")
+            if not uploaded_filename:
+                self.report({'ERROR'}, "Failed to upload image to server")
+                return {'CANCELLED'}
+
+            workflow["11"]["inputs"]["image"] = uploaded_filename
+            print(f"[RefineJSON] Patched node 11 → {uploaded_filename}")
+
+            # ── Pre-load the agent task (node 10) with real Blender metadata ──
+            # scene.camera = scene-level active camera, NOT the selected object.
+            meta       = _get_blender_scene_metadata(context, uploaded_filename)
+            task_prompt = _build_agent_json_task_prompt(meta)
+            task_node   = "10"
+            if task_node in workflow:
+                workflow[task_node]["inputs"]["STRING"] = task_prompt
+                print(f"[RefineJSON] Pre-loaded task prompt with metadata: {meta}")
+            else:
+                print("[RefineJSON] ⚠ Node '10' not found — metadata not pre-loaded")
+
+            response = server_client.queue_prompt(workflow)
+            prompt_id = response['prompt_id']
+
+            from . import runcomfy_polling, progress_bar
+            progress_bar.set_current_workflow(workflow)
+
+            def on_json_complete(success, result=None, error=None, workflow_type=None):
+                if not success:
+                    print(f"[RefineJSON] ❌ Failed: {error}")
+                    return
+                try:
+                    outputs = result.get('outputs', {})
+                    json_text = _extract_text_from_griptape_output(outputs)
+                    if not json_text:
+                        print(f"[RefineJSON] ❌ No text output. Keys: {list(outputs.keys())}")
+                        return
+                    # Strip markdown code fences
+                    json_text = re.sub(r'^```(?:json)?\s*', '', json_text.strip())
+                    json_text = re.sub(r'\s*```$', '', json_text.strip())
+                    props = bpy.context.scene.style_engine_props
+                    _populate_refine_from_json(props, json_text)
+                    print("[RefineJSON] ✓ Refine Image fields populated from JSON output")
+                except Exception as e:
+                    print(f"[RefineJSON] ❌ Callback error: {e}")
+                    import traceback; traceback.print_exc()
+
+            runcomfy_polling.RunComfyPoller.start_polling(
+                deployment_id='server',
+                request_id=prompt_id,
+                callback=on_json_complete,
+                workflow_type='text'
+            )
+
+            self.report({'INFO'}, "Analyzing image… fields will populate when done")
+            return {'FINISHED'}
+
+        except Exception as e:
+            self.report({'ERROR'}, f"Failed: {str(e)}")
+            import traceback; traceback.print_exc()
+            return {'CANCELLED'}
+
+
+class WM_OT_RefineImagePasteJSON(bpy.types.Operator):
+    """Parse JSON from the clipboard and fill in all Refine Image fields"""
+    bl_idname = "style_engine.refine_image_paste_json"
+    bl_label = "Paste JSON"
+    bl_description = "Read JSON from the system clipboard and populate all Refine Image fields"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        import re
+        try:
+            text = context.window_manager.clipboard.strip()
+        except Exception:
+            self.report({'ERROR'}, "Could not read clipboard")
+            return {'CANCELLED'}
+
+        text = re.sub(r'^```(?:json)?\s*', '', text)
+        text = re.sub(r'\s*```$', '', text.strip())
+
+        try:
+            _populate_refine_from_json(context.scene.style_engine_props, text)
+            self.report({'INFO'}, "Refine Image fields populated from clipboard JSON")
+            return {'FINISHED'}
+        except Exception as e:
+            self.report({'ERROR'}, f"JSON parse error: {e}")
+            return {'CANCELLED'}
+
+
+class WM_OT_RefineImageSubmit(bpy.types.Operator):
+    """Refine the current AI image using the structured JSON form as the prompt"""
+    bl_idname = "style_engine.refine_image_submit"
+    bl_label = "Refine Image"
+    bl_description = (
+        "Runs the same Refine Image workflow as the main button. "
+        "If 'Use structured editing' is checked the JSON form is written to STYLEENGINE_Prompt "
+        "before refining so the agent receives the structured modification instruction."
+    )
+    bl_options = {'REGISTER'}
+
+    @classmethod
+    def poll(cls, context):
+        from pathlib import Path
+        try:
+            from . import workspace_setup
+            td = workspace_setup.get_temp_directory(context)
+            return (td / "current_ai.png").exists()
+        except Exception:
+            return False
+
+    def execute(self, context):
+        props = context.scene.style_engine_props
+        from . import workspace_setup
+
+        if props.use_structured_editing:
+            json_body = _build_refine_json(props)
+            instruction = "Edit this image based on the following JSON modifications:\n" + json_body
+
+            # Write instruction into STYLEENGINE_Prompt so generate_ai_image_cloud picks it up
+            text_block = bpy.data.texts.get("STYLEENGINE_Prompt")
+            if not text_block:
+                text_block = bpy.data.texts.new("STYLEENGINE_Prompt")
+
+            workspace_setup.save_prompt_snapshot(context, prefix="before_structured_refine")
+            text_block.clear()
+            text_block.write(instruction)
+            print(f"[RefineImage] Wrote structured instruction to STYLEENGINE_Prompt "
+                  f"({len(instruction)} chars)")
+
+        try:
+            workspace_setup.generate_ai_image_cloud(context, refine_mode=True)
+            self.report({'INFO'}, "Refine Image started with structured JSON instruction")
+        except Exception as e:
+            self.report({'ERROR'}, f"Refine failed: {e}")
+            import traceback; traceback.print_exc()
+            return {'CANCELLED'}
+
+        return {'FINISHED'}
+
+
+# ----------------------------------------------------------------
 # 4. REGISTRATION
 # ----------------------------------------------------------------
 classes = (
     ObjectGroup,
+    RefineFeatureItem,
+    RefineSubjectItem,
+    RefineTagItem,
     StyleEngineProperties,
     WM_OT_RerollSeed,
     WM_OT_AlignAICameraToView,
@@ -9123,6 +9218,15 @@ classes = (
     WM_OT_GenerateImageDescriptionFromViewport,
     WM_OT_GenerateMeshMultiview,
     WM_OT_GenerateTexturedMeshMultiview,
+    WM_OT_RefineImageAddSubject,
+    WM_OT_RefineImageRemoveSubject,
+    WM_OT_RefineImageAddFeature,
+    WM_OT_RefineImageRemoveFeature,
+    WM_OT_RefineImageAddTag,
+    WM_OT_RefineImageRemoveTag,
+    WM_OT_RefineImageAnalyzeJSON,
+    WM_OT_RefineImagePasteJSON,
+    WM_OT_RefineImageSubmit,
     VIEW3D_PT_StyleEngine,
 )
 

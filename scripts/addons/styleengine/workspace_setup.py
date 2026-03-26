@@ -328,11 +328,82 @@ def load_generation_to_current(context, generation_path):
         shutil.copy2(generation_path, current_ai_path)
         refresh_ai_image()
         print(f"[Style Engine] 📷 Loaded generation: {generation_path.name}")
-        return True
-
     except Exception as e:
         print(f"[Style Engine] ❌ Failed to load generation: {e}")
         return False
+
+    # ── Restore linked prompt sidecar (.txt) ─────────────────────────────────
+    # Each generation image has a companion .txt file (same stem) saved at
+    # generation time.  Restore it so the text editor always matches the image.
+    sidecar = generation_path.with_suffix(".txt")
+    if sidecar.exists():
+        try:
+            text_block = bpy.data.texts.get("STYLEENGINE_Prompt")
+            if not text_block:
+                text_block = bpy.data.texts.new("STYLEENGINE_Prompt")
+            with open(sidecar, 'r', encoding='utf-8') as f:
+                content = f.read()
+            text_block.clear()
+            text_block.write(content)
+            print(f"[Style Engine] 📖 Restored prompt from sidecar: {sidecar.name}")
+        except Exception as e:
+            print(f"[Style Engine] ⚠ Could not restore prompt sidecar: {e}")
+    else:
+        print(f"[Style Engine] ℹ No .txt sidecar for {generation_path.name} (pre-dates linked history)")
+    # ─────────────────────────────────────────────────────────────────────────
+
+    # ── Restore linked JSON sidecar (.json) ───────────────────────────────────
+    # Each generation also has a companion .json file capturing the full Refine
+    # Image form state at generation time.  Restore it so the panel fields stay
+    # in sync with the image shown in the viewport.
+    json_sidecar = generation_path.with_suffix(".json")
+    if json_sidecar.exists():
+        try:
+            import json as _json
+            with open(json_sidecar, 'r', encoding='utf-8') as f:
+                data = _json.load(f)
+            p = context.scene.style_engine_props
+
+            meta = data.get("metadata", {})
+            p.refine_meta_filename   = meta.get("filename", "")
+            p.refine_meta_dimensions = meta.get("dimensions", "")
+            p.refine_meta_aspect     = meta.get("aspect_ratio", "")
+
+            vs = data.get("visual_style", {})
+            p.refine_style_art_style = vs.get("art_style", "")
+            p.refine_style_medium    = vs.get("medium", "")
+            p.refine_style_lighting  = vs.get("lighting_condition", "")
+
+            comp = data.get("composition", {})
+            p.refine_comp_perspective = comp.get("perspective", "")
+            p.refine_comp_focal_point = comp.get("focal_point", "")
+
+            p.refine_subjects.clear()
+            for subj_data in data.get("subject_matter", []):
+                subj = p.refine_subjects.add()
+                subj.label    = subj_data.get("label", "object")
+                subj.style    = subj_data.get("style", "")
+                subj.scale    = subj_data.get("scale", "")
+                subj.color    = subj_data.get("color", "")
+                subj.material = subj_data.get("material", "")
+                subj.show_expanded = False
+                for feat_str in subj_data.get("features", []):
+                    feat = subj.features.add()
+                    feat.value = feat_str
+
+            p.refine_tags.clear()
+            for tag_str in data.get("thematic_tags", []):
+                tag = p.refine_tags.add()
+                tag.value = tag_str
+
+            print(f"[Style Engine] 🔬 Restored JSON form from sidecar: {json_sidecar.name}")
+        except Exception as e:
+            print(f"[Style Engine] ⚠ Could not restore JSON sidecar: {e}")
+    else:
+        print(f"[Style Engine] ℹ No .json sidecar for {generation_path.name} (pre-dates linked history)")
+    # ─────────────────────────────────────────────────────────────────────────
+
+    return True
 
 
 # ================================================================
@@ -643,6 +714,82 @@ def save_generation_to_library(context, source_image_path, backend='unknown'):
         print(f"[Style Engine] ❌ Failed to save generation: {e}")
         return None
 
+    # ── Prompt sidecar (.txt) ────────────────────────────────────────────────
+    # Save the current STYLEENGINE_Prompt alongside the image so that
+    # navigating back to this generation via the Generation Browser will also
+    # restore the exact prompt that was active at generation time.
+    sidecar_path = dest_path.with_suffix(".txt")
+    try:
+        text_block = bpy.data.texts.get("STYLEENGINE_Prompt")
+        if text_block:
+            prompt_content = text_block.as_string().strip()
+            if prompt_content:
+                with open(sidecar_path, 'w', encoding='utf-8') as f:
+                    f.write(prompt_content)
+                print(f"[Style Engine] 📝 Saved prompt sidecar: {sidecar_path.name}")
+            else:
+                print("[Style Engine] ⚠ Prompt empty — no .txt sidecar saved for this generation")
+        else:
+            print("[Style Engine] ⚠ STYLEENGINE_Prompt not found — no .txt sidecar saved")
+    except Exception as e:
+        print(f"[Style Engine] ⚠ Could not save prompt sidecar: {e}")
+    # ─────────────────────────────────────────────────────────────────────────
+
+    # ── Refine Image JSON sidecar (.json) ────────────────────────────────────
+    # Serialise every field of the Refine Image panel form so it can be
+    # restored verbatim when the user navigates back to this generation.
+    json_sidecar_path = dest_path.with_suffix(".json")
+    try:
+        import json as _json
+        p = context.scene.style_engine_props
+        subjects = []
+        for subj in p.refine_subjects:
+            features = [f.value for f in subj.features if f.value.strip()]
+            subjects.append({
+                "label":    subj.label,
+                "style":    subj.style,
+                "scale":    subj.scale,
+                "color":    subj.color,
+                "material": subj.material,
+                "features": features,
+            })
+        tags = [t.value for t in p.refine_tags if t.value.strip()]
+        refine_data = {
+            "metadata": {
+                "filename":    p.refine_meta_filename,
+                "dimensions":  p.refine_meta_dimensions,
+                "aspect_ratio": p.refine_meta_aspect,
+            },
+            "visual_style": {
+                "art_style":         p.refine_style_art_style,
+                "medium":            p.refine_style_medium,
+                "lighting_condition": p.refine_style_lighting,
+            },
+            "composition": {
+                "perspective": p.refine_comp_perspective,
+                "focal_point": p.refine_comp_focal_point,
+            },
+            "subject_matter": subjects,
+            "thematic_tags":  tags,
+        }
+        has_content = any([
+            p.refine_meta_filename,
+            p.refine_style_art_style,
+            p.refine_style_medium,
+            p.refine_comp_perspective,
+            subjects,
+            tags,
+        ])
+        if has_content:
+            with open(json_sidecar_path, 'w', encoding='utf-8') as f:
+                _json.dump(refine_data, f, indent=2, ensure_ascii=False)
+            print(f"[Style Engine] 🔬 Saved JSON sidecar: {json_sidecar_path.name}")
+        else:
+            print("[Style Engine] ⚠ Refine Image form empty — no .json sidecar saved")
+    except Exception as e:
+        print(f"[Style Engine] ⚠ Could not save JSON sidecar: {e}")
+    # ─────────────────────────────────────────────────────────────────────────
+
     # Note: current_ai.png is NOT duplicated here.
     # The download callback always writes directly to temp_dir/current_ai.png,
     # which is the single canonical path that Blender's datablock tracks.
@@ -681,11 +828,31 @@ def get_temp_directory(context=None):
     3. Fall back to system temp directory
     """
     global _session_temp_dir
-    
-    # If already determined, reuse it (prevents save-time path changes)
+
+    # If already locked, verify it still belongs to the current .blend file.
+    # A mismatch means the user opened a different file without triggering load_post
+    # (e.g. command-line, drag-and-drop edge cases).  Reset and migrate below.
     if _session_temp_dir is not None:
-        return _session_temp_dir
-    
+        if bpy.data.is_saved:
+            current_project_lib = get_project_library(context)
+            if current_project_lib:
+                expected_temp = current_project_lib / "temp"
+                if _session_temp_dir != expected_temp:
+                    print(
+                        f"[Style Engine] ⚠ Temp dir mismatch — resetting "
+                        f"({_session_temp_dir} → {expected_temp})"
+                    )
+                    old_dir = _session_temp_dir
+                    _session_temp_dir = None
+                    # Migrate working files to the correct project location
+                    try:
+                        _migrate_working_files(old_dir, expected_temp)
+                        _migrate_working_files(_get_system_temp_dir(), expected_temp)
+                    except Exception:
+                        pass
+        if _session_temp_dir is not None:
+            return _session_temp_dir
+
     # Determine temp directory (priority order)
     temp_dir = None
     
@@ -720,14 +887,134 @@ def get_temp_directory(context=None):
 
 def reset_temp_directory():
     """
-    Reset temp directory lock (called when setting up new workspace).
-    Allows the path to be re-determined based on current .blend save state.
+    Reset temp directory lock (called when setting up new workspace or loading a new file).
+    Allows the path to be re-determined based on the current .blend save state.
     """
     global _session_temp_dir
     old_path = _session_temp_dir
     _session_temp_dir = None
     if old_path:
         print(f"[Style Engine] 🔓 Temp directory unlocked (was: {old_path})")
+
+
+# Working files that live in the temp directory and must follow it when the
+# project changes.  current_ai.png is the most critical — it is what all
+# "Analyze / Describe / Refine" operators look for.
+_WORKING_FILES = ["current_ai.png", "canny.png", "depth.png", "combined.jpg"]
+
+
+def _migrate_working_files(source_dir, dest_dir):
+    """
+    Copy _WORKING_FILES from source_dir to dest_dir, but only when the source
+    file is newer than (or absent from) the destination.  Safe to call even if
+    source_dir does not exist.
+    """
+    if not source_dir:
+        return
+    source_dir = Path(source_dir)
+    dest_dir   = Path(dest_dir)
+    if not source_dir.exists():
+        return
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    import os
+    moved = []
+    for fname in _WORKING_FILES:
+        src = source_dir / fname
+        dst = dest_dir   / fname
+        if not src.exists():
+            continue
+        try:
+            if not dst.exists() or os.path.getmtime(src) > os.path.getmtime(dst):
+                shutil.copy2(src, dst)
+                moved.append(fname)
+        except Exception as e:
+            print(f"[Style Engine] ⚠ Could not migrate {fname}: {e}")
+
+    if moved:
+        print(f"[Style Engine] 📦 Migrated {moved}  {source_dir} → {dest_dir}")
+
+
+def _get_system_temp_dir():
+    """Return the legacy system-temp fallback path (never raises)."""
+    import tempfile
+    return Path(tempfile.gettempdir()) / "blender_styleengine" / "temp"
+
+
+def find_current_ai(context):
+    """
+    Locate current_ai.png, trying the project temp first then all known fallbacks.
+    If the file is found in a fallback location it is automatically copied to the
+    canonical project temp so future lookups succeed.
+
+    Returns:
+        Path  — the resolved path where the file now exists
+        None  — file could not be found anywhere
+    """
+    canonical_dir = get_temp_directory(context)
+    canonical     = canonical_dir / "current_ai.png"
+
+    if canonical.exists():
+        return canonical
+
+    # Search fallback locations
+    candidates = [
+        _get_system_temp_dir() / "current_ai.png",
+    ]
+    # Also check the project library root (old migration put it there)
+    proj_lib = get_project_library(context)
+    if proj_lib:
+        candidates.append(proj_lib / "current_ai.png")
+
+    for candidate in candidates:
+        if candidate.exists():
+            print(f"[Style Engine] 📎 current_ai.png found at fallback: {candidate}")
+            try:
+                canonical_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(candidate, canonical)
+                print(f"[Style Engine] ✓ Copied to canonical path: {canonical}")
+            except Exception as e:
+                print(f"[Style Engine] ⚠ Could not copy to canonical path: {e}")
+                return candidate   # Return fallback path if copy fails
+            return canonical
+
+    return None
+
+
+def on_blend_file_loaded(dummy):
+    """
+    Handler called by bpy.app.handlers.load_post after every file load
+    (File > Open, File > Recent, drag-and-drop, etc.).
+
+    1. Saves the old temp-dir path before clearing the lock.
+    2. Resets the lock so get_temp_directory() re-evaluates for the new file.
+    3. Migrates working files (current_ai.png etc.) from the old location — and
+       from the system-temp fallback — to wherever the project now lives.
+       This is the critical step that prevents "current_ai.png not found" when
+       the session previously locked to system temp before the file was saved.
+    """
+    global _session_id, _session_temp_dir
+
+    old_temp = _session_temp_dir        # remember before resetting
+    reset_temp_directory()
+    _session_id = None
+
+    try:
+        new_temp = get_temp_directory(bpy.context)
+
+        # Migrate from wherever the old session wrote files
+        if old_temp and Path(old_temp) != new_temp:
+            _migrate_working_files(old_temp, new_temp)
+
+        # Always also check the system-temp fallback — covers the case where
+        # the session was locked there before the .blend file was first saved
+        sys_temp = _get_system_temp_dir()
+        if sys_temp != new_temp:
+            _migrate_working_files(sys_temp, new_temp)
+
+        print(f"[Style Engine] 🔄 File loaded — temp dir now: {new_temp}")
+    except Exception as e:
+        print(f"[Style Engine] ⚠ on_blend_file_loaded migration error: {e}")
 
 # Global variable to track last modification time
 _last_image_mtime = 0

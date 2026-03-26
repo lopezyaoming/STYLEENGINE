@@ -16,87 +16,55 @@
       "Download Ollama": null
     },
     "class_type": "Griptape Agent Config: Ollama Drivers",
-    "_meta": {
-      "title": "Griptape Agent Config: Ollama Drivers"
-    }
+    "_meta": { "title": "Griptape Agent Config: Ollama Drivers" }
   },
   "3": {
     "inputs": {
-      "STRING": "```json\n{\n  \"metadata\": {\n    \"filename\": \"snowman.jpg\",\n    \"dimensions\": \"640x480\",\n    \"aspect_ratio\": \"1:1\"\n  },\n  \"visual_style\": {\n    \"art_style\": \"Stylized 3D Render\",\n    \"medium\": \"Digital 3D Modeling\",\n    \"lighting_condition\": \"Soft, diffused ambient lighting with subtle specular highlights\"\n  },\n  \"subject_matter\": [\n    {\n      \"label\": \"snowman_main\",\n      \"style\": \"Cute and Stylized\",\n      \"scale\": \"Medium (Dominant Figure)\",\n      \"color\": \"Light Grey\",\n      \"material\": \"Clay (Smooth Texture)\",\n      \"features\": [\"Round body\", \"Small hat\", \"Orange carrot nose\", \"Stick arms\"]\n    },\n    {\n      \"label\": \"pine_tree_left\",\n      \"style\": \"Miniature Evergreen Tree\",\n      \"scale\": \"Small\",\n      \"color\": \"Dark Green\",\n      \"material\": \"Clay\",\n      \"features\": [\"Conical shape\", \"Needle-like branches\", \"Shaped foliage\"]\n    },\n    {\n      \"label\": \"pine_tree_right\",\n      \"style\": \"Miniature Evergreen Tree\",\n      \"scale\": \"Small\",\n      \"color\": \"Dark Green\",\n      \"material\": \"Clay\",\n      \"features\": [\"Conical shape\", \"Needle-like branches\", \"Shaped foliage\"]\n    }\n  ],\n  \"thematic_tags\": [\"Winter\", \"Snow\", \"Holiday\", \"Festive\", \"Cute\"]\n}\n```",
-      "INPUT": [
-        "10",
-        0
-      ]
+      "STRING": "```json\n{\n  \"metadata\": {\n    \"filename\": \"hero_shot.png\",\n    \"dimensions\": \"1920x1080\",\n    \"aspect_ratio\": \"16:9\",\n    \"focal_length_mm\": 50.0,\n    \"depth_of_field\": {\n      \"enabled\": true,\n      \"aperture_fstop\": 2.8,\n      \"focus_distance_m\": 4.5,\n      \"focus_object\": null\n    }\n  },\n  \"visual_style\": {\n    \"art_style\": \"Stylized 3D Render\",\n    \"medium\": \"Digital 3D Modeling\",\n    \"lighting_condition\": \"Soft, diffused ambient lighting with subtle specular highlights\"\n  },\n  \"composition\": {\n    \"perspective\": \"Eye-level, slight three-quarter angle\",\n    \"focal_point\": \"Central subject, rule-of-thirds offset\"\n  },\n  \"subject_matter\": [\n    {\n      \"label\": \"snowman_main\",\n      \"style\": \"Cute and Stylized\",\n      \"scale\": \"Medium (Dominant Figure)\",\n      \"color\": \"Light Grey\",\n      \"material\": \"Clay (Smooth Texture)\",\n      \"features\": [\"Round body\", \"Small hat\", \"Orange carrot nose\", \"Stick arms\"]\n    }\n  ],\n  \"thematic_tags\": [\"Winter\", \"Snow\", \"Holiday\", \"Festive\", \"Cute\"]\n}\n```",
+      "INPUT": ["10", 0]
     },
     "class_type": "Griptape Display: Text",
-    "_meta": {
-      "title": "Griptape Display: Text"
-    }
+    "_meta": { "title": "Griptape Display: Text" }
   },
   "4": {
     "inputs": {
-      "text": "System Prompt: Image Dissection Agent\nRole: You are a Machine Vision Specialist. Your task is to perform a granular, structural dissection of images into a standardized JSON format. You prioritize technical accuracy, material identification, and spatial relationships.\n\nOutput Requirements:\n\nFormat: Output only valid JSON. No conversational filler.\n\nObject Expansion: When multiple instances of the same object type exist, do not group them. Create unique entries using a directional suffix (e.g., _left, _right, _top, _foreground).\n\nAttribute Specificity: For every item in the subject_matter array, you must define: style, scale, color, material, and features.\n\nJSON Schema Template:\n\nJSON\n\n  \"metadata\":  \"filename\": \"string\", \"dimensions\": \"string\", \"aspect_ratio\": \"string\" ,\n  \"visual_style\":  \"art_style\": \"string\", \"medium\": \"string\", \"lighting_condition\": \"string\" ,\n  \"composition\":  \"perspective\": \"string\", \"focal_point\": \"string\" ,\n  \"subject_matter\": [\n    \n      \"label\": \"unique_identifier_suffix\",\n      \"style\": \"string\",\n      \"scale\": \"relative_to_scene\",\n      \"color\": \"hex_or_description\",\n      \"material\": \"string\",\n      \"features\": [\"list\", \"of\", \"notable_details\"]\n    \n  ],\n  \"thematic_tags\": [\"string\"]\n\nApplied Example (Using your uploaded image)\nIf I were the agent receiving this prompt for your image, here is how I would expand the subject matter specifically:\n\nJSON\n\n  \"metadata\": \n    \"filename\": \"industrial_dwelling.jpg\",\n    \"dimensions\": \"1024x1024\",\n    \"aspect_ratio\": \"1:1\"\n  ,\n  \"visual_style\": \n    \"art_style\": \"Stylized Steampunk / Dieselpunk\",\n    \"medium\": \"3D Digital Render\",\n    \"lighting_condition\": \"Internal warm luminescence against high-contrast external shadows\"\n  ,\n  \"subject_matter\": [\n    \n      \"label\": \"foundation_pipe_bottom\",\n      \"style\": \"Industrial Heavy-Duty\",\n      \"scale\": \"Massive (Primary Support)\",\n      \"color\": \"Oxidized Copper-Green\",\n      \"material\": \"Weathered Metal / Cast Iron\",\n      \"features\": [\"90-degree bend\", \"visible rivets\", \"rust streaks\"]\n    ,\n    \n      \"label\": \"window_upper_center\",\n      \"style\": \"Victorian Attic\",\n      \"scale\": \"Small\",\n      \"color\": \"Warm Amber Glow\",\n      \"material\": \"Glass and Wood Frame\",\n      \"features\": [\"Six-pane grid\", \"Internal light source\", \"Shutters\"]\n    ,\n    \n      \"label\": \"terrace_platform_left\",\n      \"style\": \"Makeshift Deck\",\n      \"scale\": \"Medium\",\n      \"color\": \"Dark Mahogany / Charcoal\",\n      \"material\": \"Plank Wood and Iron Railing\",\n      \"features\": [\"Streetlamp attachment\", \"Uneven planks\", \"Suspended by cables\"]\n    ,\n    \n      \"label\": \"exhaust_pipe_left\",\n      \"style\": \"Plumbing / Ventilation\",\n      \"scale\": \"Medium\",\n      \"color\": \"Dull Metallic Grey\",\n      \"material\": \"Galvanized Steel\",\n      \"features\": [\"U-bend shape\", \"Exposed joints\", \"Soot staining\"]\n    \n  ],\n  \"thematic_tags\": [\"Micro-living\", \"Post-industrial\", \"Solitary\", \"Hand-crafted\"]\n"
+      "text": "System Prompt: Image Dissection Agent\nRole: You are a Machine Vision Specialist. Your task is to perform a granular, structural dissection of images into a standardized JSON format.\n\n== CRITICAL RULE — METADATA ==\nYour task message already contains a pre-filled JSON skeleton whose \"metadata\" section was generated directly by Blender from the scene file:\n  • filename      — the actual image filename on the server\n  • dimensions    — render resolution (e.g. 1920x1080)\n  • aspect_ratio  — computed from the render resolution (e.g. 16:9)\n  • focal_length_mm — scene camera lens in mm  [ONLY present when a camera is set]\n  • depth_of_field  — aperture, focus distance/object  [ONLY present when DoF is enabled]\n\nRules:\n1. Copy the entire metadata object from the task message into your output UNCHANGED.\n2. Do NOT infer, estimate, round, or replace any metadata value.\n3. Do NOT add or remove metadata keys — if a key is absent it was intentionally omitted.\n4. Fill in all other JSON fields (visual_style, composition, subject_matter, thematic_tags) by observing the image.\n\n== Output Requirements ==\nFormat: Return only valid JSON enclosed in ```json ... ``` fences. No conversational filler.\nObject Expansion: Create unique subject_matter entries per instance using directional suffixes (_left, _right, _foreground, etc.).\nAttribute Specificity: Every subject_matter entry must define: label, style, scale, color, material, features.\n\n== Full Output Schema ==\n{\n  \"metadata\":     { ... copy verbatim from task message ... },\n  \"visual_style\": { \"art_style\": \"string\", \"medium\": \"string\", \"lighting_condition\": \"string\" },\n  \"composition\":  { \"perspective\": \"string\", \"focal_point\": \"string\" },\n  \"subject_matter\": [\n    { \"label\": \"unique_id\", \"style\": \"string\", \"scale\": \"relative\", \"color\": \"hex_or_desc\", \"material\": \"string\", \"features\": [\"...\"] }\n  ],\n  \"thematic_tags\": [\"string\"]\n}"
     },
     "class_type": "Text Multiline",
-    "_meta": {
-      "title": "Text Multiline"
-    }
+    "_meta": { "title": "Text Multiline" }
   },
   "7": {
     "inputs": {
       "STRING": "",
       "max_subtasks": 3,
-      "config": [
-        "1",
-        0
-      ],
-      "rulesets": [
-        "8",
-        0
-      ]
+      "config": ["1", 0],
+      "rulesets": ["8", 0]
     },
     "class_type": "Griptape Create: Agent",
-    "_meta": {
-      "title": "Griptape Create: Agent"
-    }
+    "_meta": { "title": "Griptape Create: Agent" }
   },
   "8": {
     "inputs": {
       "name": "My rules",
-      "rules": [
-        "4",
-        0
-      ]
+      "rules": ["4", 0]
     },
     "class_type": "Griptape Create: Rules",
-    "_meta": {
-      "title": "Griptape Create: Rules"
-    }
+    "_meta": { "title": "Griptape Create: Rules" }
   },
   "10": {
     "inputs": {
       "STRING": "",
-      "image": [
-        "11",
-        0
-      ],
-      "agent": [
-        "7",
-        1
-      ]
+      "image": ["11", 0],
+      "agent": ["7", 1]
     },
     "class_type": "Griptape Run: Image Description",
-    "_meta": {
-      "title": "Griptape Run: Image Description"
-    }
+    "_meta": { "title": "Griptape Run: Image Description" }
   },
   "11": {
     "inputs": {
       "image": "0_1-1.jpg"
     },
     "class_type": "LoadImage",
-    "_meta": {
-      "title": "Load Image"
-    }
+    "_meta": { "title": "Load Image" }
   }
 }

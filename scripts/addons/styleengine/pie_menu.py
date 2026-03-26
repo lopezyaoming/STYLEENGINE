@@ -1576,38 +1576,6 @@ class STYLEENGINE_MT_pie_agent(Menu):
                           text="Describe Viewport",
                           icon='VIEW_CAMERA')
 
-        col.separator()
-
-        # Prompt browser
-        col.label(text="Prompt Browser", icon='BOOKMARKS')
-
-        from . import workspace_setup
-        prompts = workspace_setup.get_prompt_list(context)
-
-        if prompts:
-            row = col.row(align=True)
-            row.scale_y = 1.3
-
-            at_oldest = (style_props.current_prompt_index == 0)
-            at_latest = (style_props.current_prompt_index == -1)
-
-            prev_row = row.row(align=True)
-            prev_row.enabled = not at_oldest
-            prev_row.operator("style_engine.prev_prompt",
-                              text="", icon='TRIA_LEFT')
-
-            if at_latest:
-                current_text = f"Latest ({len(prompts)})"
-            else:
-                current_text = f"{style_props.current_prompt_index + 1}/{len(prompts)}"
-            row.label(text=current_text)
-
-            next_row = row.row(align=True)
-            next_row.enabled = not at_latest
-            next_row.operator("style_engine.next_prompt",
-                              text="", icon='TRIA_RIGHT')
-        else:
-            col.label(text="No prompt history yet", icon='INFO')
 
 
 # ----------------------------------------------------------------
