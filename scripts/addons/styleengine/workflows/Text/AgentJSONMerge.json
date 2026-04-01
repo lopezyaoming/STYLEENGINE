@@ -1,0 +1,70 @@
+{
+  "1": {
+    "inputs": {
+      "base_url": "http://127.0.0.1",
+      "port": "11434",
+      "model": "gemma3:4b",
+      "max_attempts_on_fail": 2,
+      "temperature": 1,
+      "seed": 2048,
+      "use_native_tools": true,
+      "max_tokens": -1,
+      "min_p": 0.1,
+      "top_k": 40,
+      "keep_alive": 240,
+      "embedding_model": "",
+      "Download Ollama": null
+    },
+    "class_type": "Griptape Agent Config: Ollama Drivers",
+    "_meta": { "title": "Griptape Agent Config: Ollama Drivers" }
+  },
+  "3": {
+    "inputs": {
+      "STRING": "",
+      "INPUT": ["10", 0]
+    },
+    "class_type": "Griptape Display: Text",
+    "_meta": { "title": "Griptape Display: Text" }
+  },
+  "4": {
+    "inputs": {
+      "text": "You are an image analysis assistant. Look at the provided image and return an updated version of the existing scene JSON.\n\nMETADATA: Your task message contains a metadata block. Copy it EXACTLY into your output — do not change any values.\n\nMERGE RULES (existing_json is the base):\n1. Keep all existing subject_matter entries. Their labels are permanent IDs — never rename or delete them.\n2. For existing subjects visible in the image, you may update style, color, material, features to better match what you see. Never change the label.\n3. Add NEW entries only for foreground objects clearly visible in the image with no matching label yet.\n4. Update visual_style, composition, and thematic_tags freely from the image.\n\nSUBJECT MATTER RULES (for new entries):\n- If one subject dominates (a person, vehicle, creature, building, prop): decompose it into its individual visible parts. Each separately distinguishable part gets its own entry with a label that names exactly what that part is.\n- If the scene has several independent objects: each object gets its own entry.\n- Background/environment (sky, floor, road, grass, walls, scenery) → thematic_tags only, NOT subject_matter.\n- Labels: snake_case noun naming WHAT the item is, derived from what you actually see in the image.\n\nEach subject_matter entry MUST include ALL of these fields (never omit any):\n  label    — snake_case noun naming the item\n  style    — visual style or aesthetic (e.g. realistic, stylized, weathered, glossy)\n  scale    — relative size in the scene (tiny / small / medium / large / dominant)\n  color    — color description or hex\n  material — surface material or texture (e.g. steel, rubber, fabric, painted metal)\n  features — list of distinctive visual characteristics (minimum 2 items)\n\nOUTPUT: Return ONLY valid JSON inside ```json ... ``` fences."
+    },
+    "class_type": "Text Multiline",
+    "_meta": { "title": "Text Multiline" }
+  },
+  "7": {
+    "inputs": {
+      "STRING": "",
+      "max_subtasks": 1,
+      "config": ["1", 0],
+      "rulesets": ["8", 0]
+    },
+    "class_type": "Griptape Create: Agent",
+    "_meta": { "title": "Griptape Create: Agent" }
+  },
+  "8": {
+    "inputs": {
+      "name": "My rules",
+      "rules": ["4", 0]
+    },
+    "class_type": "Griptape Create: Rules",
+    "_meta": { "title": "Griptape Create: Rules" }
+  },
+  "10": {
+    "inputs": {
+      "STRING": "",
+      "image": ["11", 0],
+      "agent": ["7", 1]
+    },
+    "class_type": "Griptape Run: Image Description",
+    "_meta": { "title": "Griptape Run: Image Description" }
+  },
+  "11": {
+    "inputs": {
+      "image": "0_1-1.jpg"
+    },
+    "class_type": "LoadImage",
+    "_meta": { "title": "Load Image" }
+  }
+}

@@ -1582,6 +1582,86 @@ class STYLEENGINE_MT_pie_agent(Menu):
 # Registration
 # ----------------------------------------------------------------
 
+# ----------------------------------------------------------------
+# VIEW PIE  (Shift+V)
+# Generation Browser · Background Opacity · Enter/Exit Asset Mode
+# ----------------------------------------------------------------
+
+class STYLEENGINE_MT_pie_view(Menu):
+    """Style Engine View Pie — Shift+V"""
+    bl_label   = "Style Engine View"
+    bl_idname  = "STYLEENGINE_MT_pie_view"
+
+    def draw(self, context):
+        layout     = self.layout
+        pie        = layout.menu_pie()
+        style_props = context.scene.style_engine_props
+
+        # Slot 1 (WEST) — empty placeholder to push content rightward
+        pie.separator()
+
+        # Slot 2 (EAST/RIGHT) — all view controls
+        box = pie.box()
+        col = box.column(align=True)
+        col.scale_y = 1.1
+
+        # ── Asset Mode ───────────────────────────────────────────────────
+        col.label(text="Asset Mode", icon='OBJECT_DATA')
+
+        if style_props.asset_mode:
+            exit_row = col.row()
+            exit_row.scale_y = 2.0
+            exit_row.alert   = True
+            exit_row.operator("style_engine.exit_asset_mode",
+                              text="← Scene Mode",
+                              icon='SCENE_DATA')
+        else:
+            active_obj = context.active_object
+            can_enter  = (active_obj is not None and active_obj.type == 'MESH')
+            enter_row  = col.row()
+            enter_row.scale_y = 1.8
+            enter_row.enabled = can_enter
+            enter_row.operator("style_engine.enter_asset_mode",
+                               text="Enter Asset Mode",
+                               icon='OBJECT_DATA')
+            if not can_enter:
+                col.label(text="(select a mesh first)", icon='INFO')
+
+        col.separator()
+
+        # ── Generation Browser ───────────────────────────────────────────
+        col.label(text="Generation Browser", icon='TIME')
+        from . import workspace_setup
+        generations = workspace_setup.get_generation_list(context)
+        total = len(generations)
+        if total:
+            at_oldest = (style_props.current_generation_index == 0)
+            at_latest = (style_props.current_generation_index == -1)
+            nav_row   = col.row(align=True)
+            nav_row.scale_y = 1.4
+            prev_part = nav_row.row(align=True)
+            prev_part.enabled = not at_oldest
+            prev_part.operator("style_engine.prev_generation",
+                               text="", icon='TRIA_LEFT')
+            if at_latest:
+                nav_row.label(text=f"Latest ({total})")
+            else:
+                idx = style_props.current_generation_index % total
+                nav_row.label(text=f"{idx + 1} / {total}")
+            next_part = nav_row.row(align=True)
+            next_part.enabled = not at_latest
+            next_part.operator("style_engine.next_generation",
+                               text="", icon='TRIA_RIGHT')
+        else:
+            col.label(text="No generations yet", icon='INFO')
+
+        col.separator()
+
+        # ── Background Opacity ───────────────────────────────────────────
+        col.label(text="Background Opacity", icon='IMAGE_ALPHA')
+        col.prop(style_props, "background_opacity", text="", slider=True)
+
+
 classes = (
     WM_OT_ProjectTextureScene,
     WM_OT_UVTexture,
@@ -1601,6 +1681,7 @@ classes = (
     STYLEENGINE_MT_pie_3d,
     STYLEENGINE_MT_pie_refine,
     STYLEENGINE_MT_pie_agent,
+    STYLEENGINE_MT_pie_view,
 )
 
 addon_keymaps = []
@@ -1649,7 +1730,10 @@ def register():
     # Shift+W — Agent (Refine Prompt · Describe · Prompt Browser)
     _register_pie(kc, 'W', True, "STYLEENGINE_MT_pie_agent",   all_modes)
 
-    print("[Style Engine] ✅ Pie menus — Shift+Q / Shift+W / Shift+E / Shift+R / Shift+T")
+    # Shift+V — View (Generation Browser · Opacity · Asset Mode entry/exit)
+    _register_pie(kc, 'V', True, "STYLEENGINE_MT_pie_view",    all_modes)
+
+    print("[Style Engine] ✅ Pie menus — Shift+Q / Shift+V / Shift+W / Shift+E / Shift+R / Shift+T")
 
 
 def unregister():

@@ -1,0 +1,70 @@
+{
+  "1": {
+    "inputs": {
+      "base_url": "http://127.0.0.1",
+      "port": "11434",
+      "model": "gemma3:4b",
+      "max_attempts_on_fail": 2,
+      "temperature": 1,
+      "seed": 2048,
+      "use_native_tools": true,
+      "max_tokens": -1,
+      "min_p": 0.1,
+      "top_k": 40,
+      "keep_alive": 240,
+      "embedding_model": "",
+      "Download Ollama": null
+    },
+    "class_type": "Griptape Agent Config: Ollama Drivers",
+    "_meta": { "title": "Griptape Agent Config: Ollama Drivers" }
+  },
+  "3": {
+    "inputs": {
+      "STRING": "```json\n{\n  \"asset_metadata\": {\n    \"object_name\": \"runestone\",\n    \"material\": \"StoneWall_Rough\",\n    \"dimensions\": \"1024x1024\",\n    \"focal_length_mm\": 50.0\n  },\n  \"overall_style\": {\n    \"art_direction\": \"Stylized Game Asset\",\n    \"medium\": \"3D Render — Neutral Studio\",\n    \"lighting\": \"Soft diffuse, single key light, no cast shadows\"\n  },\n  \"silhouette\": {\n    \"shape_language\": \"Irregular, organic polygon with craggy edges\",\n    \"outline_quality\": \"Detailed, no aliasing\",\n    \"symmetry\": \"Asymmetric\"\n  },\n  \"surface_analysis\": [\n    {\n      \"region\": \"top_face\",\n      \"texture_type\": \"Rough stone\",\n      \"color_dominant\": \"#7a6e5f\",\n      \"color_secondary\": \"#4e463b\",\n      \"normal_detail\": \"Large irregular bumps\",\n      \"roughness\": \"High\",\n      \"specularity\": \"None\",\n      \"features\": [\"Mossy patches\", \"Chipped edges\", \"Lichen spots\"]\n    },\n    {\n      \"region\": \"side_face_left\",\n      \"texture_type\": \"Rough stone\",\n      \"color_dominant\": \"#6b6055\",\n      \"color_secondary\": \"#3e3830\",\n      \"normal_detail\": \"Horizontal stratification lines\",\n      \"roughness\": \"High\",\n      \"specularity\": \"None\",\n      \"features\": [\"Crack running diagonally\", \"Erosion pitting\"]\n    }\n  ],\n  \"proportions\": {\n    \"height_to_width_ratio\": \"1.4:1\",\n    \"mass_distribution\": \"Bottom-heavy\",\n    \"base_footprint\": \"Tapered flat base\"\n  },\n  \"condition\": {\n    \"wear_level\": \"Heavy\",\n    \"damage\": [\"Chip on upper-left corner\", \"Hairline crack on right side\"],\n    \"weathering\": \"Significant\"\n  },\n  \"thematic_tags\": [\"Stone\", \"Fantasy\", \"Medieval\", \"Outdoor\", \"RPG Asset\"]\n}\n```",
+      "INPUT": ["10", 0]
+    },
+    "class_type": "Griptape Display: Text",
+    "_meta": { "title": "Griptape Display: Text" }
+  },
+  "4": {
+    "inputs": {
+      "text": "System Prompt: Asset Anatomy Analyst\nRole: You are a 3D Asset Anatomy Specialist. Your task is to perform a granular, part-by-part dissection of a single isolated 3D asset image and return a structured JSON object.\n\nThe asset is rendered on a neutral studio background (white or grey) with no scene context. Focus exclusively on the object itself.\n\n== CRITICAL RULE — METADATA ==\nYour task message already contains a pre-filled JSON skeleton whose \"asset_metadata\" section was generated directly by Blender:\n  • object_name   — the Blender mesh object name\n  • material      — slot-1 material name (if assigned)\n  • dimensions    — render resolution (e.g. 1024x1024)\n  • focal_length_mm — asset camera lens in mm\n\nRules:\n1. Copy the entire asset_metadata object from the task message into your output UNCHANGED.\n2. Do NOT infer, estimate, round, or replace any metadata value.\n3. Do NOT add or remove metadata keys — if a key is absent it was intentionally omitted.\n4. Fill in all other JSON fields (overall_style, silhouette, surface_analysis, proportions, condition, thematic_tags) by observing the image.\n\n== Output Requirements ==\nFormat: Return only valid JSON enclosed in ```json ... ``` fences. No conversational filler.\n\n== Full Output Schema ==\n{\n  \"asset_metadata\": { ... copy verbatim from task message ... },\n  \"overall_style\": {\n    \"art_direction\": \"string\",\n    \"medium\": \"string\",\n    \"lighting\": \"string\"\n  },\n  \"silhouette\": {\n    \"shape_language\": \"string (e.g. Organic, Angular, Cylindrical)\",\n    \"outline_quality\": \"string\",\n    \"symmetry\": \"Symmetric | Asymmetric | Radial\"\n  },\n  \"surface_analysis\": [\n    {\n      \"region\": \"unique region label (e.g. top_face, left_panel, grip)\",\n      \"texture_type\": \"string\",\n      \"color_dominant\": \"hex or descriptive\",\n      \"color_secondary\": \"hex or descriptive\",\n      \"normal_detail\": \"string (e.g. Fine wood grain, Deep scratches)\",\n      \"roughness\": \"None | Low | Medium | High\",\n      \"specularity\": \"None | Low | Medium | High\",\n      \"features\": [\"list of visible surface details\"]\n    }\n  ],\n  \"proportions\": {\n    \"height_to_width_ratio\": \"string\",\n    \"mass_distribution\": \"string (e.g. Top-heavy, Uniform, Bottom-heavy)\",\n    \"base_footprint\": \"string\"\n  },\n  \"condition\": {\n    \"wear_level\": \"None | Light | Medium | Heavy\",\n    \"damage\": [\"list of specific damage details or empty array\"],\n    \"weathering\": \"None | Slight | Moderate | Significant\"\n  },\n  \"thematic_tags\": [\"string\"]\n}"
+    },
+    "class_type": "Text Multiline",
+    "_meta": { "title": "Text Multiline" }
+  },
+  "7": {
+    "inputs": {
+      "STRING": "",
+      "max_subtasks": 3,
+      "config": ["1", 0],
+      "rulesets": ["8", 0]
+    },
+    "class_type": "Griptape Create: Agent",
+    "_meta": { "title": "Griptape Create: Agent" }
+  },
+  "8": {
+    "inputs": {
+      "name": "My rules",
+      "rules": ["4", 0]
+    },
+    "class_type": "Griptape Create: Rules",
+    "_meta": { "title": "Griptape Create: Rules" }
+  },
+  "10": {
+    "inputs": {
+      "STRING": "",
+      "image": ["11", 0],
+      "agent": ["7", 1]
+    },
+    "class_type": "Griptape Run: Image Description",
+    "_meta": { "title": "Griptape Run: Image Description" }
+  },
+  "11": {
+    "inputs": {
+      "image": "0_1-1.jpg"
+    },
+    "class_type": "LoadImage",
+    "_meta": { "title": "Load Image" }
+  }
+}

@@ -20,7 +20,7 @@
   },
   "3": {
     "inputs": {
-      "STRING": "```json\n{\n  \"metadata\": {\n    \"filename\": \"hero_shot.png\",\n    \"dimensions\": \"1920x1080\",\n    \"aspect_ratio\": \"16:9\",\n    \"focal_length_mm\": 50.0,\n    \"depth_of_field\": {\n      \"enabled\": true,\n      \"aperture_fstop\": 2.8,\n      \"focus_distance_m\": 4.5,\n      \"focus_object\": null\n    }\n  },\n  \"visual_style\": {\n    \"art_style\": \"Stylized 3D Render\",\n    \"medium\": \"Digital 3D Modeling\",\n    \"lighting_condition\": \"Soft, diffused ambient lighting with subtle specular highlights\"\n  },\n  \"composition\": {\n    \"perspective\": \"Eye-level, slight three-quarter angle\",\n    \"focal_point\": \"Central subject, rule-of-thirds offset\"\n  },\n  \"subject_matter\": [\n    {\n      \"label\": \"snowman_main\",\n      \"style\": \"Cute and Stylized\",\n      \"scale\": \"Medium (Dominant Figure)\",\n      \"color\": \"Light Grey\",\n      \"material\": \"Clay (Smooth Texture)\",\n      \"features\": [\"Round body\", \"Small hat\", \"Orange carrot nose\", \"Stick arms\"]\n    }\n  ],\n  \"thematic_tags\": [\"Winter\", \"Snow\", \"Holiday\", \"Festive\", \"Cute\"]\n}\n```",
+      "STRING": "",
       "INPUT": ["10", 0]
     },
     "class_type": "Griptape Display: Text",
@@ -28,7 +28,7 @@
   },
   "4": {
     "inputs": {
-      "text": "System Prompt: Image Dissection Agent\nRole: You are a Machine Vision Specialist. Your task is to perform a granular, structural dissection of images into a standardized JSON format.\n\n== CRITICAL RULE — METADATA ==\nYour task message already contains a pre-filled JSON skeleton whose \"metadata\" section was generated directly by Blender from the scene file:\n  • filename      — the actual image filename on the server\n  • dimensions    — render resolution (e.g. 1920x1080)\n  • aspect_ratio  — computed from the render resolution (e.g. 16:9)\n  • focal_length_mm — scene camera lens in mm  [ONLY present when a camera is set]\n  • depth_of_field  — aperture, focus distance/object  [ONLY present when DoF is enabled]\n\nRules:\n1. Copy the entire metadata object from the task message into your output UNCHANGED.\n2. Do NOT infer, estimate, round, or replace any metadata value.\n3. Do NOT add or remove metadata keys — if a key is absent it was intentionally omitted.\n4. Fill in all other JSON fields (visual_style, composition, subject_matter, thematic_tags) by observing the image.\n\n== Output Requirements ==\nFormat: Return only valid JSON enclosed in ```json ... ``` fences. No conversational filler.\nObject Expansion: Create unique subject_matter entries per instance using directional suffixes (_left, _right, _foreground, etc.).\nAttribute Specificity: Every subject_matter entry must define: label, style, scale, color, material, features.\n\n== Full Output Schema ==\n{\n  \"metadata\":     { ... copy verbatim from task message ... },\n  \"visual_style\": { \"art_style\": \"string\", \"medium\": \"string\", \"lighting_condition\": \"string\" },\n  \"composition\":  { \"perspective\": \"string\", \"focal_point\": \"string\" },\n  \"subject_matter\": [\n    { \"label\": \"unique_id\", \"style\": \"string\", \"scale\": \"relative\", \"color\": \"hex_or_desc\", \"material\": \"string\", \"features\": [\"...\"] }\n  ],\n  \"thematic_tags\": [\"string\"]\n}"
+      "text": "You are an image analysis assistant. Look at the provided image carefully and output a precise JSON description of what you see.\n\nMETADATA: Your task message contains a metadata block. Copy it EXACTLY into your output — do not change any values.\n\nSUBJECT MATTER RULES:\n- Identify every distinct visible object in the foreground.\n- If one subject dominates (a person, vehicle, creature, building, prop): decompose it into its individual visible parts. Each separately distinguishable part gets its own entry with a label that names exactly what that part is.\n- If the scene has several independent objects: each object gets its own entry.\n- Background/environment (sky, floor, road, grass, walls, scenery) → put in thematic_tags, NOT subject_matter.\n- Labels: snake_case noun that names WHAT the item is, derived from what you actually see in the image.\n\nEach subject_matter entry MUST include ALL of these fields (never omit any):\n  label    — snake_case noun naming the item\n  style    — visual style or aesthetic (e.g. realistic, stylized, weathered, glossy)\n  scale    — relative size in the scene (tiny / small / medium / large / dominant)\n  color    — color description or hex\n  material — surface material or texture (e.g. steel, rubber, fabric, painted metal)\n  features — list of distinctive visual characteristics (minimum 2 items)\n\nOUTPUT: Return ONLY valid JSON inside ```json ... ``` fences."
     },
     "class_type": "Text Multiline",
     "_meta": { "title": "Text Multiline" }
@@ -36,7 +36,7 @@
   "7": {
     "inputs": {
       "STRING": "",
-      "max_subtasks": 3,
+      "max_subtasks": 1,
       "config": ["1", 0],
       "rulesets": ["8", 0]
     },

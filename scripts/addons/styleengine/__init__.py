@@ -86,6 +86,7 @@ try:
     from . import heavypoly_integration
     from . import pie_menu
     from . import trellis_client
+    from . import asset_mode
 except (ImportError, ValueError) as e:
     # Fallback for strict import systems (macOS during installation)
     print(f"[Style Engine] Using fallback imports (macOS compatibility mode)")
@@ -195,7 +196,8 @@ except (ImportError, ValueError) as e:
     heavypoly_integration = load_module("heavypoly_integration")
     pie_menu = load_module("pie_menu")
     trellis_client = load_module("trellis_client")
-    
+    asset_mode = load_module("asset_mode")
+
     print(f"[Style Engine] All modules loaded successfully!")
 
 # List of modules to register
@@ -203,9 +205,10 @@ modules = [
     prefs,
     workspace_setup,
     ui_panel,
-    progress_bar,  # Progress bridge polling system
+    asset_mode,       # Asset Mode / Scene Mode system
+    progress_bar,     # Progress bridge polling system
     heavypoly_integration,  # HeavyPoly Z pie injection (paratrooper mode!)
-    pie_menu,  # Main Style Engine pie menu (Shift+E)
+    pie_menu,         # Main Style Engine pie menus
 ]
 
 def register():

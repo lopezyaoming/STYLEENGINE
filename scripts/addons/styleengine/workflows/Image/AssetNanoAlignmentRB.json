@@ -1,0 +1,108 @@
+{
+  "50": {
+    "inputs": {
+      "model_name": "gemini-3-pro-image-preview",
+      "prompt": [
+        "68",
+        0
+      ],
+      "image_count": 1,
+      "use_search": true,
+      "aspect_ratio": "1:1",
+      "image_size": "1K",
+      "temperature": 0,
+      "image_1": [
+        "71",
+        0
+      ]
+    },
+    "class_type": "NanoBananaAIO",
+    "_meta": {
+      "title": "Nano Banana AIO"
+    }
+  },
+  "63": {
+    "inputs": {
+      "text": "From the current scene, extract the following asset:"
+    },
+    "class_type": "Text Multiline",
+    "_meta": {
+      "title": "EXTRACTION 1"
+    }
+  },
+  "64": {
+    "inputs": {
+      "filename_prefix": "ComfyUI",
+      "images": [
+        "67",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "67": {
+    "inputs": {
+      "torchscript_jit": "default",
+      "image": [
+        "50",
+        0
+      ]
+    },
+    "class_type": "InspyrenetRembg",
+    "_meta": {
+      "title": "Inspyrenet Rembg"
+    }
+  },
+  "68": {
+    "inputs": {
+      "delimiter": "",
+      "clean_whitespace": "false",
+      "text_a": [
+        "63",
+        0
+      ],
+      "text_b": [
+        "69",
+        0
+      ],
+      "text_c": [
+        "70",
+        0
+      ]
+    },
+    "class_type": "Text Concatenate",
+    "_meta": {
+      "title": "Text Concatenate"
+    }
+  },
+  "69": {
+    "inputs": {
+      "text": "picnic_table"
+    },
+    "class_type": "Text Multiline",
+    "_meta": {
+      "title": "ASSET_NAME"
+    }
+  },
+  "70": {
+    "inputs": {
+      "text": ". This is the PRIMARY FOREGROUND SUBJECT — treat it as the sole object of a product shot, never as scene background. Render it on a pure black (#000000) background with a subtle rim light or soft specular highlight along its silhouette edges so every boundary of the object is clearly distinguishable from the background. Add a faint cast shadow on the ground plane directly beneath or behind it to anchor the object and define its lower edge. Capture the whole object fully within the frame with clear visible edges on all sides. Preserve every specific detail, surface texture, distinctive markings and characteristic feature of the object exactly as it appears in the source image — do not invent, generalise or substitute. Retain the medium, style and color palette of the original scene."
+    },
+    "class_type": "Text Multiline",
+    "_meta": {
+      "title": "EXTRACTION 2"
+    }
+  },
+  "71": {
+    "inputs": {
+      "image": "blank.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  }
+}

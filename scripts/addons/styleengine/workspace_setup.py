@@ -553,13 +553,11 @@ def get_models_directory(context):
         ensure_project_library(context)
         return project_lib / "Models"
     
-    # Fall back to session-based temp
+    # Fall back to a stable global path (no session ID) so asset directories
+    # remain reachable across addon reloads even when the .blend is unsaved.
     import tempfile
-    session_id = get_session_id()
-    temp_base = Path(tempfile.gettempdir()) / "blender_styleengine" / "sessions"
-    models_dir = temp_base / session_id / "Models"
+    models_dir = Path(tempfile.gettempdir()) / "blender_styleengine" / "Models"
     models_dir.mkdir(parents=True, exist_ok=True)
-    
     return models_dir
 
 
@@ -582,6 +580,610 @@ def get_model_list(context):
     models.sort()
     
     return models
+
+
+# ================================================================
+#    Asset Mode Directory System
+# ================================================================
+
+def get_asset_directory(context, object_name):
+    """
+    Return the root directory for a specific asset's data.
+
+    Structure: <project_lib>/Models/<object_name>/
+    Falls back to a session-temp path if the .blend file is unsaved.
+    """
+    models_dir = get_models_directory(context)
+    safe_name = "".join(c if c.isalnum() or c in "-_." else "_" for c in object_name)
+    asset_dir = models_dir / safe_name
+    return asset_dir
+
+
+def ensure_asset_directory(context, object_name, path_components=None):
+    """
+    Create the full directory tree for an asset.
+
+    <project_lib>/Models/<object_name>/
+        ├── temp/       - current_ai.png and working images
+        ├── Images/     - timestamped Gemini renders (PNG + sidecars)
+        ├── 3D/         - timestamped mesh files (GLB + sidecars)
+        └── Text/       - prompt history (kept for completeness)
+
+    If *path_components* is provided it is used instead of *object_name* to
+    resolve a nested path, e.g. ["facade", "window"].
+    """
+    if path_components:
+        asset_dir = get_nested_asset_directory(context, path_components)
+    else:
+        asset_dir = get_asset_directory(context, object_name)
+    for subdir in ("temp", "Images", "3D", "Text"):
+        (asset_dir / subdir).mkdir(parents=True, exist_ok=True)
+    return asset_dir
+
+
+def get_asset_temp_directory(context, object_name, path_components=None):
+    """Return the temp/ subdirectory for an asset (holds current_ai.png).
+
+    If *path_components* is provided it overrides *object_name* for nested assets.
+    """
+    if path_components:
+        asset_dir = get_nested_asset_directory(context, path_components)
+        for subdir in ("temp", "Images", "3D", "Text"):
+            (asset_dir / subdir).mkdir(parents=True, exist_ok=True)
+    else:
+        asset_dir = ensure_asset_directory(context, object_name)
+    return asset_dir / "temp"
+
+
+def _safe_label(label):
+    """Sanitise an asset label so it is safe to use as a directory name."""
+    return "".join(c if c.isalnum() or c in "-_." else "_" for c in label)
+
+
+def get_nested_asset_directory(context, path_components):
+    """Resolve the directory for an asset given its full ancestry chain.
+
+    Examples:
+        ["facade"]           → Models/facade/
+        ["facade", "window"] → Models/facade/Nested/window/
+        ["facade", "window", "pane"] → Models/facade/Nested/window/Nested/pane/
+    """
+    models_dir = get_models_directory(context)
+    path = models_dir / _safe_label(path_components[0])
+    for label in path_components[1:]:
+        path = path / "Nested" / _safe_label(label)
+    return path
+
+
+def ensure_nested_asset_directory(context, path_components):
+    """Create the full directory tree for a (potentially nested) asset."""
+    asset_dir = get_nested_asset_directory(context, path_components)
+    for subdir in ("temp", "Images", "3D", "Text"):
+        (asset_dir / subdir).mkdir(parents=True, exist_ok=True)
+    return asset_dir
+
+
+def get_asset_path_components(props):
+    """Return the full ancestry chain including the current asset.
+
+    Scene mode         → []
+    Depth 1 (facade)   → ["facade"]
+    Depth 2 (window)   → ["facade", "window"]
+    """
+    try:
+        stack   = json.loads(getattr(props, 'asset_mode_stack', '[]') or '[]')
+        parents = [entry["asset_name"] for entry in stack]
+    except Exception:
+        parents = []
+    name = getattr(props, 'current_asset_name', '')
+    return parents + [name] if name else parents
+
+
+def get_asset_3d_generation_list(context, object_name):
+    """
+    Return a sorted list of 3D mesh files saved for the given asset.
+
+    Returns:
+        list[Path]: .glb paths sorted chronologically (oldest → newest)
+    """
+    asset_dir = get_asset_directory(context, object_name)
+    gen_3d_dir = asset_dir / "3D"
+    if not gen_3d_dir.exists():
+        return []
+    meshes = list(gen_3d_dir.glob("*.glb")) + list(gen_3d_dir.glob("*.obj"))
+    meshes.sort()
+    return meshes
+
+
+# ================================================================
+#    Asset History Manifest
+# ================================================================
+
+def read_asset_history(context, asset_label):
+    """
+    Load the asset_history.json manifest for *asset_label*.
+
+    Returns a dict of the form::
+
+        {
+            "active_index": 1,
+            "iterations": [
+                {"index": 0, "object_name": "windmill",
+                 "mesh_file": null, "image_file": null},
+                {"index": 1, "object_name": "windmill.001",
+                 "mesh_file": "3D/20260320_001.glb",
+                 "image_file": "Images/20260320_001.png"},
+            ]
+        }
+
+    Returns a fresh empty manifest if the file is absent or unreadable.
+    """
+    asset_dir = get_asset_directory(context, asset_label)
+    hist_path = asset_dir / "asset_history.json"
+    if hist_path.exists():
+        try:
+            with open(hist_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"[Asset History] ⚠ Could not read {hist_path.name}: {e}")
+    return {"active_index": 0, "iterations": []}
+
+
+def write_asset_history(context, asset_label, history):
+    """Persist the history manifest to disk (atomic write via temp file)."""
+    asset_dir = ensure_asset_directory(context, asset_label)
+    hist_path = asset_dir / "asset_history.json"
+    tmp_path  = hist_path.with_suffix(".json.tmp")
+    try:
+        with open(tmp_path, 'w', encoding='utf-8') as f:
+            json.dump(history, f, indent=2, ensure_ascii=False)
+        tmp_path.replace(hist_path)
+    except Exception as e:
+        print(f"[Asset History] ⚠ Could not write history: {e}")
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
+def save_asset_subjects_json(context, asset_label, subjects_json_str,
+                             path_components=None):
+    """Persist the serialized subjects JSON for this asset to disk.
+
+    File: Models/<asset_label>/asset_subjects.json  (or nested equivalent)
+    *path_components* overrides the directory for nested assets.
+    """
+    asset_dir = ensure_asset_directory(context, asset_label,
+                                       path_components=path_components)
+    subjects_path = asset_dir / "asset_subjects.json"
+    tmp_path = subjects_path.with_suffix(".json.tmp")
+    try:
+        with open(tmp_path, 'w', encoding='utf-8') as f:
+            f.write(subjects_json_str)
+        tmp_path.replace(subjects_path)
+        print(f"[Asset JSON] Saved subjects for '{asset_label}' → {subjects_path.name}")
+    except Exception as e:
+        print(f"[Asset JSON] ⚠ Could not save subjects: {e}")
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
+def load_asset_subjects_json(context, asset_label, path_components=None):
+    """Return the saved subjects JSON string for this asset, or None if absent.
+
+    *path_components* overrides the directory for nested assets.
+    """
+    if path_components:
+        asset_dir = get_nested_asset_directory(context, path_components)
+    else:
+        asset_dir = get_asset_directory(context, asset_label)
+    subjects_path = asset_dir / "asset_subjects.json"
+    if subjects_path.exists():
+        try:
+            return subjects_path.read_text(encoding='utf-8')
+        except Exception as e:
+            print(f"[Asset JSON] ⚠ Could not read subjects: {e}")
+    return None
+
+
+def save_asset_iteration_subjects_json(context, asset_label, iteration_index,
+                                       subjects_json_str):
+    """Save a subjects JSON snapshot alongside a specific history iteration.
+
+    File: Models/<asset_label>/iter_<N>_subjects.json
+    This is used to restore the JSON panel when browsing iteration history.
+    """
+    asset_dir = ensure_asset_directory(context, asset_label)
+    iter_path = asset_dir / f"iter_{iteration_index:04d}_subjects.json"
+    try:
+        iter_path.write_text(subjects_json_str, encoding='utf-8')
+        print(f"[Asset JSON] Saved iteration subjects → {iter_path.name}")
+    except Exception as e:
+        print(f"[Asset JSON] ⚠ Could not save iteration subjects: {e}")
+
+
+def load_asset_iteration_subjects_json(context, asset_label, iteration_index):
+    """Return the subjects JSON snapshot for a specific iteration, or None."""
+    asset_dir = get_asset_directory(context, asset_label)
+    iter_path = asset_dir / f"iter_{iteration_index:04d}_subjects.json"
+    if iter_path.exists():
+        try:
+            return iter_path.read_text(encoding='utf-8')
+        except Exception as e:
+            print(f"[Asset JSON] ⚠ Could not read iteration subjects: {e}")
+    return None
+
+
+def append_asset_history_iteration(context, asset_label, object_name,
+                                   mesh_path=None, image_path=None):
+    """
+    Add a new iteration entry to the manifest and set it as active.
+
+    *mesh_path* and *image_path* are absolute Paths (or None).  They are stored
+    as paths relative to the asset directory so the manifest is portable.
+
+    Returns the new active_index (int).
+    """
+    history   = read_asset_history(context, asset_label)
+    asset_dir = get_asset_directory(context, asset_label)
+
+    def _rel(p):
+        if p is None:
+            return None
+        try:
+            return str(Path(p).relative_to(asset_dir))
+        except Exception:
+            return str(p)
+
+    new_index = len(history["iterations"])
+    history["iterations"].append({
+        "index":       new_index,
+        "object_name": object_name,
+        "mesh_file":   _rel(mesh_path),
+        "image_file":  _rel(image_path),
+    })
+    history["active_index"] = new_index
+    write_asset_history(context, asset_label, history)
+
+    # Snapshot the current subjects JSON alongside this iteration so that
+    # browsing back to it restores the panel state that existed when this
+    # mesh was generated.
+    try:
+        from . import ui_panel as _up
+        _props = context.scene.style_engine_props
+        _json_str = _up._build_refine_json(_props)
+        save_asset_iteration_subjects_json(context, asset_label, new_index, _json_str)
+    except Exception as _je:
+        print(f"[Asset History] ⚠ Could not snapshot subjects for iter {new_index}: {_je}")
+
+    print(f"[Asset History] ✚ Iteration {new_index}: '{object_name}' "
+          f"mesh={_rel(mesh_path)} image={_rel(image_path)}")
+    return new_index
+
+
+def update_asset_history_image(context, asset_label, image_path):
+    """
+    Fill in the image_file for the currently active iteration.
+    Called after an asset image download completes.
+    """
+    history   = read_asset_history(context, asset_label)
+    asset_dir = get_asset_directory(context, asset_label)
+    active    = history.get("active_index", 0)
+    iters     = history.get("iterations", [])
+
+    def _rel(p):
+        try:
+            return str(Path(p).relative_to(asset_dir))
+        except Exception:
+            return str(p)
+
+    if 0 <= active < len(iters):
+        iters[active]["image_file"] = _rel(image_path)
+        write_asset_history(context, asset_label, history)
+        print(f"[Asset History] 🖼 Updated image for iteration {active}: {_rel(image_path)}")
+    else:
+        print(f"[Asset History] ⚠ No iteration {active} to update image for")
+
+
+def get_asset_iteration_count(context, asset_label):
+    """Return the number of saved iterations for the given asset label."""
+    return len(read_asset_history(context, asset_label).get("iterations", []))
+
+
+def save_asset_mesh_to_3d(context, asset_label, source_glb):
+    """
+    Save *source_glb* to Models/[asset_label]/3D/ with a timestamped name.
+    Mirrors save_mesh_to_library but scoped to the per-asset directory.
+
+    Returns the destination Path, or None on failure.
+    """
+    source_path = Path(source_glb)
+    if not source_path.exists():
+        print(f"[Asset History] ⚠ Source GLB not found: {source_path}")
+        return None
+
+    asset_dir  = ensure_asset_directory(context, asset_label)
+    dir_3d     = asset_dir / "3D"
+    dir_3d.mkdir(parents=True, exist_ok=True)
+
+    ts  = datetime.now().strftime("%Y%m%d_%H%M%S")
+    ms  = datetime.now().microsecond // 1000
+    dst = dir_3d / f"{ts}_{ms:03d}.glb"
+    try:
+        shutil.copy2(source_path, dst)
+        print(f"[Asset History] 🧊 Saved asset mesh: {dst.name}")
+        return dst
+    except Exception as e:
+        print(f"[Asset History] ❌ Failed to save asset mesh: {e}")
+        return None
+
+
+def switch_asset_iteration(context, asset_label, new_index):
+    """
+    Switch the visible mesh to the iteration at *new_index*, update
+    linked_object_name / asset_object_links, copy the iteration's image
+    to asset temp/current_ai.png, and refresh the camera background.
+
+    Returns True on success.
+    """
+    history = read_asset_history(context, asset_label)
+    iters   = history.get("iterations", [])
+    if not (0 <= new_index < len(iters)):
+        print(f"[Asset History] ⚠ Index {new_index} out of range ({len(iters)} iterations)")
+        return False
+
+    old_index = history.get("active_index", 0)
+    old_entry = iters[old_index] if 0 <= old_index < len(iters) else None
+    new_entry = iters[new_index]
+
+    asset_dir = get_asset_directory(context, asset_label)
+
+    # Hide old mesh, show new mesh
+    if old_entry and old_entry["object_name"] != new_entry["object_name"]:
+        old_obj = bpy.data.objects.get(old_entry["object_name"])
+        if old_obj:
+            old_obj.hide_viewport = True
+            old_obj.hide_render   = True
+
+    new_obj = bpy.data.objects.get(new_entry["object_name"])
+    if new_obj:
+        new_obj.hide_viewport = False
+        new_obj.hide_render   = False
+        try:
+            bpy.context.view_layer.objects.active = new_obj
+        except Exception:
+            pass
+
+    # Update Blender property links
+    try:
+        props = bpy.context.scene.style_engine_props
+        # Update the subject that owns this asset
+        si = props.asset_subject_index
+        if 0 <= si < len(props.refine_subjects):
+            subj = props.refine_subjects[si]
+            subj.linked_object_name = new_entry["object_name"]
+        try:
+            lm = json.loads(props.asset_object_links or "{}")
+        except Exception:
+            lm = {}
+        lm[asset_label] = new_entry["object_name"]
+        props.asset_object_links = json.dumps(lm)
+        props.asset_current_3d_index = new_index
+    except Exception as _e:
+        print(f"[Asset History] ⚠ Could not update props: {_e}")
+
+    # Update asset camera background image
+    img_rel  = new_entry.get("image_file")
+    img_path = (asset_dir / img_rel) if img_rel else None
+    asset_temp = get_asset_temp_directory(context, asset_label)
+    current_ai = asset_temp / "current_ai.png"
+    if img_path and img_path.exists():
+        try:
+            shutil.copy2(img_path, current_ai)
+        except Exception as _e:
+            print(f"[Asset History] ⚠ Could not copy image: {_e}")
+    else:
+        print(f"[Asset History] ℹ No image for iteration {new_index}")
+
+    refresh_asset_camera_image(asset_label)
+
+    # Restore the subjects JSON that was snapshotted when this iteration was created
+    try:
+        _iter_json = load_asset_iteration_subjects_json(context, asset_label, new_index)
+        if _iter_json:
+            from . import ui_panel as _up
+            _props = bpy.context.scene.style_engine_props
+            _up._populate_refine_from_json(_props, _iter_json)
+            print(f"[Asset History] Restored subjects JSON for iteration {new_index}")
+        else:
+            # Fall back to the asset's persistent subjects file if no iteration snapshot
+            _asset_json = load_asset_subjects_json(context, asset_label)
+            if _asset_json:
+                from . import ui_panel as _up
+                _props = bpy.context.scene.style_engine_props
+                _up._populate_refine_from_json(_props, _asset_json)
+                print(f"[Asset History] Restored asset subjects JSON (no iter snapshot)")
+    except Exception as _je:
+        print(f"[Asset History] ⚠ Could not restore subjects JSON: {_je}")
+
+    # Persist the new active_index
+    history["active_index"] = new_index
+    write_asset_history(context, asset_label, history)
+
+    print(f"[Asset History] ◀▶ Switched to iteration {new_index}: '{new_entry['object_name']}'")
+    return True
+
+
+def save_asset_image_to_library(context, object_name, source_image_path):
+    """
+    Save a Gemini/AI image generated while in Asset Mode to the asset's
+    Images/ folder (same sidecar pattern as save_generation_to_library).
+
+    Returns:
+        Path or None: Path to saved image, or None on failure.
+    """
+    asset_dir = ensure_asset_directory(context, object_name)
+    images_dir = asset_dir / "Images"
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    ms = datetime.now().microsecond // 1000
+    try:
+        w = context.scene.render.resolution_x
+        h = context.scene.render.resolution_y
+    except Exception:
+        w, h = 1024, 1024
+    filename = f"{timestamp}_{ms:03d}_asset_{w}x{h}.png"
+    dest_path = images_dir / filename
+
+    try:
+        shutil.copy2(source_image_path, dest_path)
+        print(f"[Asset Mode] 💾 Saved asset image: {filename}")
+    except Exception as e:
+        print(f"[Asset Mode] ❌ Failed to save asset image: {e}")
+        return None
+
+    # Prompt sidecar (.txt)
+    try:
+        text_block = bpy.data.texts.get("STYLEENGINE_Prompt")
+        if text_block:
+            content = text_block.as_string().strip()
+            if content:
+                with open(dest_path.with_suffix(".txt"), 'w', encoding='utf-8') as f:
+                    f.write(content)
+    except Exception as e:
+        print(f"[Asset Mode] ⚠ Could not save prompt sidecar: {e}")
+
+    # JSON form sidecar (.json)
+    try:
+        import json as _json
+        p = context.scene.style_engine_props
+        subjects = []
+        for subj in p.refine_subjects:
+            features = [feat.value for feat in subj.features if feat.value.strip()]
+            subjects.append({
+                "label": subj.label, "style": subj.style,
+                "scale": subj.scale, "color": subj.color,
+                "material": subj.material, "features": features,
+            })
+        tags = [t.value for t in p.refine_tags if t.value.strip()]
+        refine_data = {
+            "metadata": {
+                "filename": p.refine_meta_filename,
+                "dimensions": p.refine_meta_dimensions,
+                "aspect_ratio": p.refine_meta_aspect,
+            },
+            "visual_style": {
+                "art_style": p.refine_style_art_style,
+                "medium": p.refine_style_medium,
+                "lighting_condition": p.refine_style_lighting,
+            },
+            "composition": {
+                "perspective": p.refine_comp_perspective,
+                "focal_point": p.refine_comp_focal_point,
+            },
+            "subject_matter": subjects,
+            "thematic_tags": tags,
+        }
+        has_content = any([
+            p.refine_meta_filename, p.refine_style_art_style,
+            p.refine_style_medium, p.refine_comp_perspective,
+            subjects, tags,
+        ])
+        if has_content:
+            with open(dest_path.with_suffix(".json"), 'w', encoding='utf-8') as f:
+                _json.dump(refine_data, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"[Asset Mode] ⚠ Could not save JSON sidecar: {e}")
+
+    return dest_path
+
+
+def load_asset_generation_to_current(context, object_name, generation_path):
+    """
+    Load a specific asset 3D-generation's associated image into the asset's
+    current_ai.png and restore the prompt + JSON sidecars.
+
+    Isolation remains intact — does NOT unhide scene objects.
+
+    Returns:
+        bool: True if successful.
+    """
+    if not generation_path.exists():
+        print(f"[Asset Mode] ⚠ Generation not found: {generation_path}")
+        return False
+
+    asset_temp = get_asset_temp_directory(context, object_name)
+    asset_temp.mkdir(parents=True, exist_ok=True)
+    current_ai_path = asset_temp / "current_ai.png"
+
+    # Load image sidecar (same stem, .png extension in Images/)
+    img_sidecar = generation_path.with_suffix(".png")
+    if img_sidecar.exists():
+        try:
+            shutil.copy2(img_sidecar, current_ai_path)
+            refresh_ai_image()
+            print(f"[Asset Mode] 📷 Loaded asset image: {img_sidecar.name}")
+        except Exception as e:
+            print(f"[Asset Mode] ❌ Failed to load asset image: {e}")
+    else:
+        print(f"[Asset Mode] ℹ No image sidecar for {generation_path.name}")
+
+    # Prompt sidecar (.txt)
+    txt_sidecar = generation_path.with_suffix(".txt")
+    if txt_sidecar.exists():
+        try:
+            text_block = bpy.data.texts.get("STYLEENGINE_Prompt")
+            if not text_block:
+                text_block = bpy.data.texts.new("STYLEENGINE_Prompt")
+            with open(txt_sidecar, 'r', encoding='utf-8') as f:
+                text_block.clear()
+                text_block.write(f.read())
+            print(f"[Asset Mode] 📖 Restored prompt from sidecar")
+        except Exception as e:
+            print(f"[Asset Mode] ⚠ Could not restore prompt sidecar: {e}")
+
+    # JSON form sidecar (.json)
+    json_sidecar = generation_path.with_suffix(".json")
+    if json_sidecar.exists():
+        try:
+            import json as _json
+            with open(json_sidecar, 'r', encoding='utf-8') as f:
+                data = _json.load(f)
+            p = context.scene.style_engine_props
+            meta = data.get("metadata", {})
+            p.refine_meta_filename   = meta.get("filename", "")
+            p.refine_meta_dimensions = meta.get("dimensions", "")
+            p.refine_meta_aspect     = meta.get("aspect_ratio", "")
+            vs = data.get("visual_style", {})
+            p.refine_style_art_style = vs.get("art_style", "")
+            p.refine_style_medium    = vs.get("medium", "")
+            p.refine_style_lighting  = vs.get("lighting_condition", "")
+            comp = data.get("composition", {})
+            p.refine_comp_perspective = comp.get("perspective", "")
+            p.refine_comp_focal_point = comp.get("focal_point", "")
+            p.refine_subjects.clear()
+            for sd in data.get("subject_matter", []):
+                subj = p.refine_subjects.add()
+                subj.label = sd.get("label", "object")
+                subj.style = sd.get("style", "")
+                subj.scale = sd.get("scale", "")
+                subj.color = sd.get("color", "")
+                subj.material = sd.get("material", "")
+                subj.show_expanded = False
+                for feat_str in sd.get("features", []):
+                    feat = subj.features.add()
+                    feat.value = feat_str
+            p.refine_tags.clear()
+            for tag_str in data.get("thematic_tags", []):
+                tag = p.refine_tags.add()
+                tag.value = tag_str
+            print(f"[Asset Mode] 🔬 Restored JSON form from sidecar")
+        except Exception as e:
+            print(f"[Asset Mode] ⚠ Could not restore JSON sidecar: {e}")
+
+    return True
 
 
 def spawn_model_from_library(context, model_path):
@@ -631,33 +1233,35 @@ def spawn_model_from_library(context, model_path):
 
 def save_mesh_to_library(context, source_mesh_path, mesh_type='mesh'):
     """
-    Save a generated 3D mesh to the project library Models folder.
-    
-    Args:
-        context: Blender context
-        source_mesh_path: Path to the downloaded .glb file
-        mesh_type: Type identifier ('mesh', 'textured', 'uv_textured')
-    
-    Returns:
-        Path: Path to the saved mesh file, or None if failed
+    Save a generated 3D mesh to the project library.
+
+    In Asset Mode the mesh is saved to the asset's own 3D/ directory
+    (Models/[asset_label]/3D/) instead of the global Models/ folder.
+    Returns the destination Path, or None on failure.
     """
     source_path = Path(source_mesh_path)
-    
+
     if not source_path.exists():
         print(f"[Style Engine] ⚠️ Mesh file not found: {source_path}")
         return None
-    
-    # Get Models directory
+
+    # Redirect to per-asset directory when in Asset Mode
+    try:
+        _props = bpy.context.scene.style_engine_props
+        if _props.asset_mode and _props.current_asset_name:
+            return save_asset_mesh_to_3d(context, _props.current_asset_name, source_path)
+    except Exception:
+        pass
+
+    # Global fallback
     models_dir = get_models_directory(context)
     models_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Generate timestamped filename
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    timestamp    = datetime.now().strftime("%Y%m%d_%H%M%S")
     microseconds = datetime.now().microsecond // 1000
-    filename = f"{timestamp}_{microseconds:03d}_{mesh_type}.glb"
-    
-    dest_path = models_dir / filename
-    
+    filename     = f"{timestamp}_{microseconds:03d}_{mesh_type}.glb"
+    dest_path    = models_dir / filename
+
     try:
         shutil.copy2(source_path, dest_path)
         print(f"[Style Engine] 🧊 Saved mesh: {filename}")
@@ -685,6 +1289,17 @@ def save_generation_to_library(context, source_image_path, backend='unknown'):
     Returns:
         Path: Path to the saved generation file
     """
+    # In Asset Mode, redirect saves to the asset's own Images/ folder so
+    # the scene library stays clean and unaffected by asset iterations.
+    try:
+        _props = context.scene.style_engine_props
+        if getattr(_props, 'asset_mode', False):
+            asset_name = getattr(_props, 'current_asset_name', '')
+            if asset_name:
+                return save_asset_image_to_library(context, asset_name, source_image_path)
+    except Exception as _e:
+        print(f"[Style Engine] ⚠ Asset mode redirect check failed: {_e}")
+
     # Check if .blend was saved since last generation (trigger migration)
     if bpy.data.is_saved and not _session_migrated:
         migrate_session_to_project(context)
@@ -815,6 +1430,30 @@ def save_generation_to_library(context, source_image_path, backend='unknown'):
 # ================================================================
 #    Legacy Temp Directory System (Maintained for Compatibility)
 # ================================================================
+
+def get_active_ai_output_path(context=None):
+    """
+    Return the path where the CURRENT generation's output image should be written.
+
+    In Asset Mode  → <project>/Models/<asset_name>/temp/current_ai.png
+    Otherwise      → <scene_temp>/current_ai.png  (the global canonical path)
+
+    Using this instead of get_temp_directory()/"current_ai.png" directly in the
+    download callbacks ensures Asset Mode renders never touch the global image.
+    """
+    try:
+        ctx   = context or bpy.context
+        props = ctx.scene.style_engine_props
+        if getattr(props, 'asset_mode', False):
+            components = get_asset_path_components(props)
+            if components:
+                asset_temp = get_nested_asset_directory(ctx, components) / "temp"
+                asset_temp.mkdir(parents=True, exist_ok=True)
+                return asset_temp / "current_ai.png"
+    except Exception as _e:
+        print(f"[Style Engine] ⚠ get_active_ai_output_path fallback: {_e}")
+    return get_temp_directory(context) / "current_ai.png"
+
 
 def get_temp_directory(context=None):
     """
@@ -1016,6 +1655,20 @@ def on_blend_file_loaded(dummy):
     except Exception as e:
         print(f"[Style Engine] ⚠ on_blend_file_loaded migration error: {e}")
 
+    # Ensure all asset cameras in this .blend are hidden from the viewport.
+    # Cameras created before the hide_viewport fix will be corrected here.
+    try:
+        hidden = 0
+        for obj in bpy.data.objects:
+            if obj.type == 'CAMERA' and obj.name.startswith("asset_camera_"):
+                if not obj.hide_viewport:
+                    obj.hide_viewport = True
+                    hidden += 1
+        if hidden:
+            print(f"[Style Engine] 🔒 Hidden {hidden} pre-existing asset camera(s) from viewport")
+    except Exception as _ce:
+        print(f"[Style Engine] ⚠ Could not hide asset cameras on load: {_ce}")
+
 # Global variable to track last modification time
 _last_image_mtime = 0
 
@@ -1140,7 +1793,7 @@ def write_session_json(context):
             ],
             "routing": {
                 "temp_dir": str(get_temp_directory(context)).replace("\\", "/") + "/",
-                "preview_out": str(get_temp_directory(context) / "current_ai.png").replace("\\", "/"),
+                "preview_out": str(get_active_ai_output_path(context)).replace("\\", "/"),
                 "passes_dir": str(get_temp_directory(context) / "passes").replace("\\", "/") + "/",
                 "commits_dir": props.output_path.replace("\\", "/") + "/",
                 "comfy_path": comfy_path.replace("\\", "/") if comfy_path else ""
@@ -1203,6 +1856,129 @@ def compress_image_for_upload(image_path, max_side=1920):
         return Path(image_path)
 
 
+def _asset_datablock_name(object_name):
+    """Unique Blender image-datablock name for an asset's camera background.
+    Keeps it distinct from the scene's 'current_ai.png' to prevent Blender
+    auto-suffixing it '.001'."""
+    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in object_name)
+    return f"current_ai_{safe}"
+
+
+def create_asset_placeholder_image(context, object_name):
+    """
+    Create a fresh 1024×1024 black PNG at <asset_temp>/current_ai.png and
+    load it as a named Blender image datablock.
+
+    Called once when entering Asset Mode so the asset camera background slot
+    always has a real on-disk file, exactly mirroring what the ai_camera
+    setup does for the global current_ai.png.
+
+    Returns the Path to the created file.
+    """
+    asset_temp = get_asset_temp_directory(context, object_name)
+    asset_temp.mkdir(parents=True, exist_ok=True)
+    img_path  = asset_temp / "current_ai.png"
+    db_name   = _asset_datablock_name(object_name)
+
+    # Remove stale datablock (name conflict or wrong filepath)
+    if db_name in bpy.data.images:
+        existing = bpy.data.images[db_name]
+        try:
+            bpy.data.images.remove(existing)
+        except Exception:
+            pass
+
+    # Create fresh 1024×1024 black image and save to disk
+    img = bpy.data.images.new(db_name, width=1024, height=1024)
+    img.pixels = [0.0, 0.0, 0.0, 1.0] * (1024 * 1024)
+    img.filepath_raw = str(img_path)
+    img.file_format  = 'PNG'
+    img.save()
+
+    print(f"[Asset Mode] 🖤 Created asset placeholder: {img_path}")
+    return img_path
+
+
+def setup_asset_camera_background(context, object_name, cam_obj):
+    """
+    Set up (or refresh) the background image on an asset camera.
+
+    Uses a unique datablock name (<current_ai_{safe_name}>) so the asset image
+    never clashes with the scene's 'current_ai.png' datablock and Blender
+    never auto-renames it '.001'.
+
+    Expects create_asset_placeholder_image() to have been called first (during
+    EnterAssetMode) so the file always exists on disk at entry time.
+    """
+    asset_temp = get_asset_temp_directory(context, object_name)
+    asset_temp.mkdir(parents=True, exist_ok=True)
+    img_path  = asset_temp / "current_ai.png"
+    canonical = str(img_path)
+    db_name   = _asset_datablock_name(object_name)
+
+    cam_data = cam_obj.data
+    cam_data.show_background_images = True
+    cam_data.passepartout_alpha      = 1.0
+
+    if len(cam_data.background_images) > 0:
+        bg = cam_data.background_images[0]
+    else:
+        bg = cam_data.background_images.new()
+
+    # If the slot already holds this asset's datablock, just reload it.
+    if bg.image is not None and bg.image.name == db_name:
+        bg.image.filepath_raw = canonical
+        bg.image.reload()
+        bg.image.update()
+        img = bg.image
+    elif db_name in bpy.data.images:
+        img = bpy.data.images[db_name]
+        img.filepath_raw = canonical
+        img.reload()
+        img.update()
+        bg.image = img
+    else:
+        # First call after entering asset mode — file was just created by
+        # create_asset_placeholder_image(), load it with the unique name.
+        if img_path.exists():
+            img = bpy.data.images.load(canonical, check_existing=False)
+            img.name = db_name
+        else:
+            # Fallback: create placeholder in-memory if file somehow missing
+            img = bpy.data.images.new(db_name, width=1024, height=1024)
+            img.pixels = [0.0, 0.0, 0.0, 1.0] * (1024 * 1024)
+            img.filepath_raw = canonical
+            img.file_format  = 'PNG'
+            img.save()
+        bg.image = img
+
+    bg.alpha         = 1.0
+    bg.display_depth = 'FRONT'
+    bg.frame_method  = 'STRETCH'
+    print(f"[Asset Mode] ✓ Asset camera background set: {db_name} → {img_path.name}")
+
+
+def refresh_asset_camera_image(object_name):
+    """
+    Reload the asset camera background from the asset's own temp/current_ai.png.
+
+    The download callbacks write directly to the asset temp via
+    get_active_ai_output_path, so no copy from global temp is needed here.
+    """
+    try:
+        ctx      = bpy.context
+        safe     = "".join(c if c.isalnum() or c in "-_" else "_" for c in object_name)
+        cam_name = f"asset_camera_{safe}"
+        cam_obj  = bpy.data.objects.get(cam_name)
+        if cam_obj:
+            setup_asset_camera_background(ctx, object_name, cam_obj)
+        else:
+            print(f"[Asset Mode] ⚠ Asset camera '{cam_name}' not found in scene")
+
+    except Exception as e:
+        print(f"[Asset Mode] ❌ refresh_asset_camera_image failed: {e}")
+
+
 def _reattach_camera_background(img):
     """
     Attach a Blender image datablock to the ai_camera background slot.
@@ -1231,13 +2007,27 @@ def refresh_ai_image():
     Reload current_ai.png in Blender's image datablock so the camera background
     shows the latest generation.
 
+    In Asset Mode this function delegates entirely to refresh_asset_camera_image()
+    so the global 'current_ai.png' datablock is NEVER touched by asset renders.
+
     Robust against:
     - filepath_raw drifting after a temp-dir move (re-asserts the canonical path)
     - datablock being lost after Undo or manual deletion (re-creates and re-attaches)
     - GPU texture not invalidating (calls img.update() after reload)
     """
     try:
-        # Always read from the locked temp_dir — this is the one canonical location
+        # ── Asset Mode: update only the asset camera, leave global image alone ──
+        try:
+            props = bpy.context.scene.style_engine_props
+            if getattr(props, 'asset_mode', False):
+                asset_name = getattr(props, 'current_asset_name', '')
+                if asset_name:
+                    refresh_asset_camera_image(asset_name)
+                return  # global current_ai.png must not be touched
+        except Exception as _ae:
+            print(f"[Asset Mode] ⚠ asset camera refresh skipped: {_ae}")
+
+        # ── Scene Mode: update the global current_ai.png datablock ──────────
         temp_dir = get_temp_directory(bpy.context)
         img_path = temp_dir / "current_ai.png"
 
@@ -2676,6 +3466,18 @@ def sync_ai_camera_from_scene(context):
     """
     import bpy as _bpy
 
+    # ── Asset Mode guard ────────────────────────────────────────────────────
+    # In Asset Mode the scene camera is managed exclusively by EnterAssetMode /
+    # ExitAssetMode.  Overriding it here would silently undo the camera switch.
+    try:
+        if getattr(context.scene.style_engine_props, 'asset_mode', False):
+            print(f"[Gemini] ⏭ sync_ai_camera_from_scene skipped — Asset Mode active "
+                  f"(scene.camera = {context.scene.camera.name if context.scene.camera else 'None'})")
+            return False
+    except Exception:
+        pass
+    # ────────────────────────────────────────────────────────────────────────
+
     # Find a source camera (active scene camera that is NOT ai_camera)
     source_camera = None
     if context.scene.camera and context.scene.camera.name != 'ai_camera' and context.scene.camera.type == 'CAMERA':
@@ -2762,29 +3564,20 @@ def render_from_camera_safe(scene, camera, prefs):
     Render from specific camera without permanently changing scene.camera.
     This is SURGICAL - only affects the render operation itself.
     """
-    if prefs.debug_mode:
-        print(f"[Style Engine] Rendering from camera: {camera.name}")
-        print(f"[Style Engine] Current scene camera: {scene.camera.name if scene.camera else 'None'}")
-    
-    # Save original camera
     original_camera = scene.camera
-    
+    print(f"[Render] render_from_camera_safe: render_cam='{camera.name}'  "
+          f"scene.camera before='{original_camera.name if original_camera else 'None'}'")
+
     try:
         # Temporarily set camera ONLY for this render
         scene.camera = camera
-        
-        if prefs.debug_mode:
-            print(f"[Style Engine] → Switched to: {camera.name} (temporary)")
-        
-        # Render
         bpy.ops.render.render(write_still=True, use_viewport=False)
-        
+
     finally:
         # IMMEDIATELY restore original camera (even if render failed)
         scene.camera = original_camera
-        
-        if prefs.debug_mode:
-            print(f"[Style Engine] → Restored to: {original_camera.name if original_camera else 'None'}")
+        print(f"[Render] render_from_camera_safe: scene.camera restored → "
+              f"'{original_camera.name if original_camera else 'None'}'")
 
 
 def render_passes(context):
@@ -2806,14 +3599,28 @@ def render_passes(context):
     
     prefs = context.preferences.addons['styleengine'].preferences
     camera_name = prefs.camera_name_override
-    
-    # Find the ai_camera
-    if camera_name not in bpy.data.objects:
-        print(f"[Style Engine] ERROR: {camera_name} not found! Run 'Setup Workspace' first.")
-        raise RuntimeError(f"{camera_name} not found. Please run 'Setup Workspace' first.")
-    
-    ai_camera = bpy.data.objects[camera_name]
     scene = context.scene
+
+    # In Asset Mode render from the dedicated asset camera so the isolated
+    # object (not the full scene) is what gets sent to Gemini as the input.
+    _asset_props = getattr(scene, 'style_engine_props', None)
+    _in_asset_mode = getattr(_asset_props, 'asset_mode', False)
+    if _in_asset_mode:
+        _asset_name = getattr(_asset_props, 'current_asset_name', '')
+        _safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in _asset_name)
+        _asset_cam_name = f"asset_camera_{_safe}"
+        ai_camera = bpy.data.objects.get(_asset_cam_name)
+        if ai_camera is None:
+            print(f"[Asset Mode] ⚠ Asset camera '{_asset_cam_name}' not found — falling back to {camera_name}")
+            ai_camera = bpy.data.objects.get(camera_name)
+        else:
+            print(f"[Asset Mode] 🎥 Rendering from asset camera: {_asset_cam_name}")
+    else:
+        # Find the ai_camera
+        if camera_name not in bpy.data.objects:
+            print(f"[Style Engine] ERROR: {camera_name} not found! Run 'Setup Workspace' first.")
+            raise RuntimeError(f"{camera_name} not found. Please run 'Setup Workspace' first.")
+        ai_camera = bpy.data.objects[camera_name]
     
     # Store original settings (but NOT camera - we'll handle that surgically)
     original_engine = scene.render.engine
@@ -2945,6 +3752,172 @@ def render_passes(context):
 # CLOUD GENERATION (RunComfy)
 # ----------------------------------------------------------------
 
+
+def queue_asset_isolation_workflow(context, object_name):
+    """
+    Queue AssetNanoAlignmentRB.json to extract a single asset from the current
+    scene's current_ai.png.
+
+    Flow:
+      1. Upload the SCENE's current_ai.png to the server (NOT the asset placeholder).
+      2. Patch node 69 (ASSET_NAME) with object_name.
+      3. Patch node 71 (Load Image) with the uploaded filename.
+      4. Queue and start polling; the download callback writes the result to the
+         asset's own temp/current_ai.png because asset_mode is True at fire-time.
+    """
+    import time as _time
+    from . import runcomfy_deployment, runcomfy_polling, runcomfy_server_client
+
+    # ── Server client ────────────────────────────────────────────────────────
+    try:
+        server_client = runcomfy_deployment.get_server_client()
+    except Exception as e:
+        print(f"[Asset Mode] ⚠ Could not get server client: {e}")
+        return
+
+    # ── Guard: don't stack generations ──────────────────────────────────────
+    if runcomfy_polling.RunComfyPoller.active_requests:
+        print("[Asset Mode] Generation already in progress — skipping isolation render")
+        return
+
+    # ── Source current_ai.png ────────────────────────────────────────────────
+    # At depth 1 use the global scene temp image.
+    # At depth 2+ use the PARENT asset's current_ai so the nested asset is
+    # extracted from its parent's render, not the full scene.
+    try:
+        _nprops = context.scene.style_engine_props
+        _depth  = getattr(_nprops, 'asset_mode_depth', 0)
+        if _depth > 1:
+            _parent_components = get_asset_path_components(_nprops)[:-1]
+            scene_current_ai = (get_nested_asset_directory(context, _parent_components)
+                                / "temp" / "current_ai.png")
+            print(f"[Asset Mode] Nested depth {_depth} — using parent image: {scene_current_ai}")
+        else:
+            scene_current_ai = get_temp_directory(context) / "current_ai.png"
+    except Exception as _se:
+        scene_current_ai = get_temp_directory(context) / "current_ai.png"
+        print(f"[Asset Mode] ⚠ Could not resolve source image for depth: {_se}")
+
+    if not scene_current_ai.exists():
+        print(f"[Asset Mode] ⚠ Source current_ai.png not found at {scene_current_ai} — cannot isolate asset")
+        return
+
+    # ── Upload scene image ───────────────────────────────────────────────────
+    print(f"[Asset Mode] Uploading scene current_ai.png for isolation …")
+    try:
+        upload_start = _time.time()
+        upload_response = server_client.upload_image(str(scene_current_ai))
+        uploaded_filename = upload_response['name']
+        print(f"[Asset Mode] ✓ Uploaded: {uploaded_filename} ({_time.time() - upload_start:.2f}s)")
+    except Exception as e:
+        print(f"[Asset Mode] ⚠ Upload failed: {e}")
+        return
+
+    # ── Load & patch workflow ────────────────────────────────────────────────
+    addon_dir = Path(__file__).parent
+    wf_path = addon_dir / "workflows" / "Image" / "AssetNanoAlignmentRB.json"
+    if not wf_path.exists():
+        print(f"[Asset Mode] ⚠ AssetNanoAlignmentRB.json not found at {wf_path}")
+        return
+
+    with open(wf_path, 'r') as f:
+        workflow_json = json.load(f)
+
+    # Architectural/background keyword sets used to detect planar subjects that
+    # benefit from an isometric camera angle rather than a perspective product shot.
+    _ARCH_LABEL_KEYWORDS = {
+        "facade", "wall", "floor", "ceiling", "pavement", "sidewalk", "road",
+        "street", "building", "elevation", "structure", "roof", "ground",
+        "terrain", "brick", "concrete", "tile", "slab", "panel", "surface",
+    }
+    _ARCH_MATERIAL_KEYWORDS = {
+        "concrete", "brick", "stone", "asphalt", "plaster", "mortar",
+        "cement", "stucco", "tile", "wood_panel", "cladding",
+    }
+    _ARCH_FEATURE_KEYWORDS = {
+        "facade", "wall", "building", "elevation", "structural", "background",
+    }
+
+    # Node 69: asset descriptor — plain name plus any subject properties that are known,
+    # so Gemini understands the specific look of the object to extract.
+    descriptor    = object_name
+    is_arch       = False   # will flip to True for architectural/planar subjects
+    try:
+        _props = context.scene.style_engine_props
+        _si    = _props.asset_subject_index
+        if 0 <= _si < len(_props.refine_subjects):
+            _subj = _props.refine_subjects[_si]
+            _parts = []
+            if _subj.style:    _parts.append(_subj.style)
+            if _subj.material: _parts.append(_subj.material)
+            if _subj.color:    _parts.append(_subj.color)
+            if _subj.scale:    _parts.append(f"{_subj.scale} scale")
+            if _parts:
+                descriptor = f"{object_name} ({', '.join(_parts)})"
+
+            # Architectural detection — check label, material, and features
+            _label_words = set(object_name.lower().replace("_", " ").split())
+            if _label_words & _ARCH_LABEL_KEYWORDS:
+                is_arch = True
+            elif _subj.material and any(
+                    k in _subj.material.lower() for k in _ARCH_MATERIAL_KEYWORDS):
+                is_arch = True
+            elif any(any(k in f.value.lower() for k in _ARCH_FEATURE_KEYWORDS)
+                     for f in _subj.features):
+                is_arch = True
+    except Exception as _de:
+        print(f"[Asset Mode] Could not build subject descriptor: {_de}")
+
+    workflow_json["69"]["inputs"]["text"] = descriptor
+
+    # Node 63: extraction prefix — add isometric instruction for architectural subjects
+    if is_arch:
+        workflow_json["63"]["inputs"]["text"] = (
+            "From the current scene, extract the following architectural asset "
+            "and render it in a clean isometric three-quarter view so all major "
+            "surfaces are visible:"
+        )
+        print(f"[Asset Mode] Architectural subject detected — isometric view requested")
+    # else: leave node 63 at its default "From the current scene, extract..." text
+
+    print(f"[Asset Mode] Node 69 descriptor: '{descriptor}' (arch={is_arch})")
+
+    # Node 71: scene image input
+    workflow_json["71"]["inputs"]["image"] = uploaded_filename
+
+    # Node 50: always 1K, 1:1 for assets
+    workflow_json["50"]["inputs"]["image_size"] = "1K"
+    workflow_json["50"]["inputs"]["aspect_ratio"] = "1:1"
+
+    print(f"[Asset Mode] Patched AssetNanoAlignmentRB — asset='{descriptor}' image='{uploaded_filename}'")
+
+    # ── Queue ────────────────────────────────────────────────────────────────
+    from . import progress_bar
+    try:
+        queue_response = server_client.queue_prompt(workflow_json)
+        prompt_id = queue_response.get('prompt_id')
+        progress_bar.set_current_workflow(workflow_json)
+        print(f"[Asset Mode] 🎨 Isolation queued (ID: {prompt_id[:8]}…)")
+    except Exception as e:
+        print(f"[Asset Mode] ⚠ queue_prompt failed: {e}")
+        return
+
+    # ── Poll ─────────────────────────────────────────────────────────────────
+    runcomfy_polling.RunComfyPoller.start_polling(
+        deployment_id='server',
+        request_id=prompt_id,
+        callback=lambda success, result=None, error=None, workflow_type=None:
+            on_generation_complete_server(
+                context, success, result, error,
+                workflow_type or 'gemini', server_client
+            ),
+        workflow_type='gemini',
+    )
+    print("[Asset Mode] 🎨 Isolation render started!")
+
+
+# ----------------------------------------------------------------
+
 def generate_ai_image_cloud(context, refine_mode=False):
     """
     Cloud generation using RunComfy API.
@@ -3023,12 +3996,14 @@ def generate_ai_image_cloud(context, refine_mode=False):
     
     # 4. Encode combined image to base64
     # In refine mode we use current_ai.png; otherwise the just-rendered combined.jpg.
+    # In Asset Mode this resolves to the asset's own temp/current_ai.png so that
+    # refinement is based on the asset render rather than the scene image.
     if refine_mode:
-        combined_path = temp_dir / "current_ai.png"
+        combined_path = get_active_ai_output_path(context)
         if not combined_path.exists():
             print(f"[Style Engine] Refine mode: current_ai.png not found at {combined_path}")
             return
-        print(f"[Style Engine] Refine mode: using current_ai.png as conditioning input")
+        print(f"[Style Engine] Refine mode: using {combined_path} as conditioning input")
     else:
         combined_path = temp_dir / "combined.jpg"
         if not combined_path.exists():
@@ -4011,11 +4986,18 @@ def on_generation_complete_server(context, success, result, error, workflow_type
             else:
                 # Any non-preview image is the main AI output
                 save_name = 'current_ai.png'
-            
+
+            # In Asset Mode redirect the main output away from global temp so
+            # the scene's current_ai.png is never overwritten by asset renders.
+            if save_name == 'current_ai.png':
+                save_path = str(get_active_ai_output_path(context))
+            else:
+                save_path = str(temp_dir / save_name)
+
             downloads_to_perform.append({
                 'filename': filename,
                 'save_name': save_name,
-                'save_path': str(temp_dir / save_name),
+                'save_path': save_path,
                 'subfolder': subfolder,
                 'image_type': image_type
             })
@@ -4100,14 +5082,17 @@ def on_generation_complete_server(context, success, result, error, workflow_type
         # Update camera background if main image was downloaded
         if main_image_downloaded:
             # Defer all ID-data writes to the next safe main-loop tick.
-            # - 'context' captured by closure may be stale/restricted by the time
-            #   the timer fires, so we use bpy.context inside the callback instead.
-            # - _current_ai_path is a plain Path value (safe to close over).
-            _current_ai_path = temp_dir / "current_ai.png"
+            # _current_ai_path is re-evaluated inside the callback (not closed
+            # over) so it correctly resolves to asset temp when in asset mode.
 
             def _deferred_post_download():
                 try:
                     _ctx = bpy.context  # fresh, safe context at timer-fire time
+                    # Re-evaluate the correct output path at callback time so
+                    # asset mode is respected even when the download happened
+                    # on a background thread.
+                    _current_ai_path = get_active_ai_output_path(_ctx)
+
                     # Reset visualization to COMBINED (final image) after generation
                     _props = _ctx.scene.style_engine_props
                     if hasattr(_props, 'visualization_type'):
@@ -4211,15 +5196,15 @@ def on_generation_complete(context, success, result, error, workflow_type='sdxl'
         trigger_next_generation_cycle(context)
         return
     
-    # Download to temp (always)
-    temp_dir = get_temp_directory(context)
-    current_ai_path = temp_dir / "current_ai.png"
-    
+    # In Asset Mode write directly to the asset's temp so the global
+    # current_ai.png is never overwritten by asset renders.
+    current_ai_path = get_active_ai_output_path(context)
+
     print(f"[Style Engine] Downloading result from: {image_url[:50]}...")
-    
+
     if runcomfy_client.download_image_from_url(image_url, str(current_ai_path)):
         print("[Style Engine] ✅ Downloaded to temp")
-        
+
         # Save to project library with new system
         saved_path = save_generation_to_library(context, current_ai_path, backend='RunComfy')
         

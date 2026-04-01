@@ -203,6 +203,24 @@ class RefineSubjectItem(bpy.types.PropertyGroup):
     features: bpy.props.CollectionProperty(type=RefineFeatureItem)
     features_index: bpy.props.IntProperty(default=0)
     show_expanded: bpy.props.BoolProperty(default=True)
+    # Asset Mode link — the name of the Blender object this subject represents.
+    # Persists in the .blend file and is round-tripped through the JSON sidecar
+    # so the link survives even a full AI JSON rebuild.
+    linked_object_name: bpy.props.StringProperty(
+        name="Linked Object",
+        description="Blender object name bound to this subject for Asset Mode",
+        default="",
+    )
+    nested_subjects_json: bpy.props.StringProperty(
+        name="Nested Subjects",
+        description="JSON array of subjects applied from this asset's nested Asset Mode",
+        default="",
+    )
+    show_nested: bpy.props.BoolProperty(
+        name="Show Nested Parts",
+        description="Expand or collapse the nested subjects sub-list",
+        default=False,
+    )
 
 
 class RefineTagItem(bpy.types.PropertyGroup):
@@ -210,20 +228,143 @@ class RefineTagItem(bpy.types.PropertyGroup):
     value: bpy.props.StringProperty(name="Tag", default="")
 
 
+# ================================================================
+#    Scene ↔ JSON Sync Helpers
+# ================================================================
+
+# Blender-default mesh names that should NOT auto-register as subjects.
+_GENERIC_BASES = {
+    'cube', 'sphere', 'uvsphere', 'icosphere', 'cylinder', 'cone', 'torus',
+    'plane', 'circle', 'grid', 'suzanne', 'empty', 'camera', 'light',
+    'sun', 'point', 'spot', 'area', 'text', 'curve', 'nurbs',
+    'lattice', 'armature', 'object',
+}
+
+
+def _base_name_strip(name):
+    """Strip Blender's .001/.002 iteration suffix: 'windmill.002' → 'windmill'."""
+    parts = name.rsplit('.', 1)
+    return parts[0] if (len(parts) == 2 and parts[1].isdigit()) else name
+
+
+def _is_meaningful_mesh(obj):
+    """Return True when *obj* is a MESH with a non-generic user-assigned name."""
+    if obj.type != 'MESH':
+        return False
+    return _base_name_strip(obj.name).lower() not in _GENERIC_BASES
+
+
+def _bbox_scale_label(obj):
+    """Return a human-readable scale category derived from the object's world bounding box."""
+    try:
+        from mathutils import Vector
+        corners   = [obj.matrix_world @ Vector(c) for c in obj.bound_box]
+        xs        = [c.x for c in corners]
+        ys        = [c.y for c in corners]
+        zs        = [c.z for c in corners]
+        max_dim   = max(max(xs) - min(xs), max(ys) - min(ys), max(zs) - min(zs))
+        if max_dim < 0.15:  return "tiny"
+        if max_dim < 0.5:   return "small"
+        if max_dim < 1.5:   return "medium"
+        if max_dim < 4.0:   return "large"
+        return "massive"
+    except Exception:
+        return ""
+
+
+def sync_scene_objects_to_json(props, context):
+    """
+    Walk all meaningful MESH objects in the scene and ensure each has a
+    corresponding subject in *props.refine_subjects*.
+
+    Rules:
+    - Subject label = base name (strip .00X): 'windmill.001' → 'windmill'
+    - Skip objects already covered by any subject's linked_object_name
+    - Skip generic Blender default names (Cube, Plane, etc.)
+    - If a subject with the base label already exists: non-destructively
+      update scale and material only (never overwrite style/color/features)
+    - Otherwise create a new subject and populate scale + material
+    - Does NOT delete subjects for missing objects (user decides)
+
+    Returns the number of new subjects created.
+    """
+    scene = context.scene
+
+    # Build fast lookups
+    by_label  = {s.label: i for i, s in enumerate(props.refine_subjects)}
+    by_linked = {s.linked_object_name for s in props.refine_subjects
+                 if s.linked_object_name}
+
+    created = 0
+
+    for obj in scene.objects:
+        if not _is_meaningful_mesh(obj):
+            continue
+
+        # Already tracked under a linked_object_name — skip entirely
+        if obj.name in by_linked:
+            continue
+
+        base = _base_name_strip(obj.name)
+        mat  = (obj.material_slots[0].material.name
+                if obj.material_slots and obj.material_slots[0].material else "")
+        scale = _bbox_scale_label(obj)
+
+        if base in by_label:
+            # Non-destructive update of auto-fillable fields only
+            subj = props.refine_subjects[by_label[base]]
+            if scale and not subj.scale:
+                subj.scale = scale
+            if mat and not subj.material:
+                subj.material = mat
+        else:
+            # Create new subject
+            subj = props.refine_subjects.add()
+            subj.label             = base
+            subj.linked_object_name = obj.name
+            subj.scale             = scale
+            subj.material          = mat
+            subj.show_expanded     = False
+            by_label[base]  = len(props.refine_subjects) - 1
+            by_linked.add(obj.name)
+            created += 1
+            print(f"[Scene Sync] ➕ '{base}' (linked: '{obj.name}')")
+
+    if created:
+        print(f"[Scene Sync] Added {created} new subject(s)")
+    return created
+
+
+# ================================================================
+#    Refine Image JSON Serialization
+# ================================================================
+
 def _build_refine_json(props):
     """Serialize the Refine Image form into a JSON string."""
     import json as _json
     subjects = []
     for subj in props.refine_subjects:
         features = [f.value for f in subj.features if f.value.strip()]
-        subjects.append({
+        entry = {
             "label": subj.label,
             "style": subj.style,
             "scale": subj.scale,
             "color": subj.color,
             "material": subj.material,
             "features": features,
-        })
+        }
+        # Persist the Blender object link so it survives round-trips even when
+        # the AI regenerates the JSON.  Underscore prefix marks it as internal.
+        if subj.linked_object_name:
+            entry["_linked_object"] = subj.linked_object_name
+        # Round-trip nested subjects applied via Apply to Parent
+        if subj.nested_subjects_json:
+            try:
+                import json as _jn
+                entry["nested_subjects"] = _jn.loads(subj.nested_subjects_json)
+            except Exception:
+                pass
+        subjects.append(entry)
     tags = [t.value for t in props.refine_tags if t.value.strip()]
     data = {
         "metadata": {
@@ -266,6 +407,14 @@ def _populate_refine_from_json(props, json_str):
     props.refine_comp_focal_point = comp.get("focal_point", "")
 
     props.refine_subjects.clear()
+
+    # Load the persistent label→object_name map so we can re-stamp links even
+    # when the incoming JSON was regenerated by AI without _linked_object keys.
+    try:
+        _link_map = _json.loads(props.asset_object_links or "{}")
+    except Exception:
+        _link_map = {}
+
     for subj_data in data.get("subject_matter", []):
         subj = props.refine_subjects.add()
         subj.label = subj_data.get("label", "object")
@@ -277,11 +426,39 @@ def _populate_refine_from_json(props, json_str):
         for feat_str in subj_data.get("features", []):
             feat = subj.features.add()
             feat.value = feat_str
+        # Restore link: JSON value takes priority; fall back to persistent map.
+        linked = subj_data.get("_linked_object", "") or _link_map.get(subj.label, "")
+        if linked:
+            subj.linked_object_name = linked
+            # Keep the persistent map in sync in case the JSON carried a newer value.
+            _link_map[subj.label] = linked
+        # Restore nested subjects applied via Apply to Parent
+        _nested_raw = subj_data.get("nested_subjects")
+        if _nested_raw:
+            try:
+                import json as _jn
+                subj.nested_subjects_json = _jn.dumps(_nested_raw)
+            except Exception:
+                pass
+
+    # Write back any updates accumulated above.
+    try:
+        props.asset_object_links = _json.dumps(_link_map)
+    except Exception:
+        pass
 
     props.refine_tags.clear()
     for tag_str in data.get("thematic_tags", []):
         tag = props.refine_tags.add()
         tag.value = tag_str
+
+    # After rebuilding subjects from JSON, sync any meaningful scene objects
+    # that aren't already represented.  This catches objects that exist in
+    # the scene but weren't included in the AI-generated JSON.
+    try:
+        sync_scene_objects_to_json(props, bpy.context)
+    except Exception as _se:
+        print(f"[Scene Sync] ⚠ Post-JSON sync skipped: {_se}")
 
 
 def _get_gemini_instruction_items():
@@ -572,6 +749,82 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
     # Refine Image — Thematic tags (dynamic collection)
     refine_tags: bpy.props.CollectionProperty(type=RefineTagItem)
     refine_tags_index: bpy.props.IntProperty(default=0)
+
+    # ── Asset Mode ─────────────────────────────────────────────────────────
+    # Index of the refine_subjects slot that owns the currently active asset.
+    # -1 means "none active".  Persists across mode switches so re-entry via
+    # Shift+V always finds the right subject without any name matching.
+    asset_subject_index: bpy.props.IntProperty(
+        name="Active Asset Subject Index",
+        description="refine_subjects index for the asset currently in Asset Mode (-1 = none)",
+        default=-1,
+    )
+    # Permanent {label → object_name} map stored as a compact JSON string.
+    # Updated every time a link is established.  Used by _populate_refine_from_json
+    # to re-apply links after an AI JSON rebuild that stripped _linked_object keys.
+    asset_object_links: bpy.props.StringProperty(
+        name="Asset Object Links",
+        description="JSON map {subject_label: blender_object_name} — survives JSON rebuilds",
+        default="{}",
+    )
+    asset_mode: bpy.props.BoolProperty(
+        name="Asset Mode",
+        description="Whether the addon is currently in Asset Mode (editing a single asset)",
+        default=False,
+    )
+    current_asset_name: bpy.props.StringProperty(
+        name="Current Asset",
+        description="Name of the active asset object in Asset Mode",
+        default="",
+    )
+    asset_stored_visibility: bpy.props.StringProperty(
+        name="Stored Visibility",
+        description="JSON-encoded object visibility state saved before entering Asset Mode",
+        default="",
+    )
+    asset_prev_camera: bpy.props.StringProperty(
+        name="Previous Camera",
+        description="Name of the scene camera to restore when exiting Asset Mode",
+        default="",
+    )
+    asset_current_3d_index: bpy.props.IntProperty(
+        name="Asset 3D History Index",
+        description="Current index in the asset 3D generation history browser",
+        default=0,
+        min=0,
+    )
+    asset_prev_resolution_x: bpy.props.IntProperty(
+        name="Previous Resolution X",
+        description="Render resolution X saved before entering Asset Mode",
+        default=1024,
+    )
+    asset_prev_resolution_y: bpy.props.IntProperty(
+        name="Previous Resolution Y",
+        description="Render resolution Y saved before entering Asset Mode",
+        default=1024,
+    )
+    asset_prev_prompt: bpy.props.StringProperty(
+        name="Previous Prompt Snapshot",
+        description="Scene-mode STYLEENGINE_Prompt content saved before entering Asset Mode",
+        default="",
+    )
+    asset_prev_subjects: bpy.props.StringProperty(
+        name="Previous Subjects Snapshot",
+        description="Scene-mode subjects JSON saved before entering Asset Mode",
+        default="",
+    )
+    asset_mode_stack: bpy.props.StringProperty(
+        name="Asset Mode Stack",
+        description="JSON array of parent-level state snapshots for nested Asset Mode",
+        default="[]",
+    )
+    asset_mode_depth: bpy.props.IntProperty(
+        name="Asset Mode Depth",
+        description="0 = Scene Mode, 1 = first Asset Mode, 2+ = nested",
+        default=0,
+        min=0,
+    )
+    # ───────────────────────────────────────────────────────────────────────
 
     show_influence: bpy.props.BoolProperty(
         name="Show Influence",
@@ -3474,11 +3727,11 @@ class WM_OT_TrellisGenerate(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        # Only requires current_ai.png — mesh is optional (used for scale matching only)
+        # Only requires current_ai.png — mesh is optional (used for scale matching only).
+        # In Asset Mode the path resolves to the asset's own temp folder.
         try:
             from . import workspace_setup
-            td = workspace_setup.get_temp_directory(context)
-            return (td / "current_ai.png").exists()
+            return workspace_setup.get_active_ai_output_path(context).exists()
         except Exception:
             return True  # fail-open: let execute() surface the real error
 
@@ -3493,9 +3746,11 @@ class WM_OT_TrellisGenerate(bpy.types.Operator):
             self.report({'ERROR'}, "Server URL not configured in preferences")
             return {'CANCELLED'}
 
-        props    = context.scene.style_engine_props
-        temp_dir = workspace_setup.get_temp_directory(context)
-        src_img  = temp_dir / "current_ai.png"
+        props   = context.scene.style_engine_props
+        # In Asset Mode this returns the asset's own temp/current_ai.png so that
+        # Trellis generates from the isolated asset image, not the full scene image.
+        src_img  = workspace_setup.get_active_ai_output_path(context)
+        temp_dir = src_img.parent  # scratch dir for rembg intermediate + download
 
         if not src_img.exists():
             self.report({'ERROR'}, "No AI image found — generate an image first")
@@ -3694,12 +3949,19 @@ class WM_OT_TrellisGenerate(bpy.types.Operator):
                                 ))
 
                                 # Scale + translate to match proxy (optional)
-                                mesh_name = f"Trellis_{job_id[:8]}"
+                                # In Asset Mode: suggest the asset label as the desired
+                                # mesh name — Blender auto-appends .001/.002 so all
+                                # iterations share the same base name as the subject label.
+                                _am_props = bpy.context.scene.style_engine_props
+                                _am_name  = (_am_props.current_asset_name
+                                             if _am_props.asset_mode else "")
+                                desired_name = _am_name if _am_name else f"Trellis_{job_id[:8]}"
+
                                 if captured['proxy_max_dim'] is not None:
                                     scale_factor = captured['proxy_max_dim'] / imp_max_dim
                                     proxy_center = captured['proxy_center']
                                     for i, mo in enumerate(mesh_objs):
-                                        mo.name     = mesh_name if i == 0 else f"{mesh_name}_{i}"
+                                        mo.name     = desired_name if i == 0 else f"{desired_name}_{i}"
                                         mo.scale    = mo.scale * scale_factor
                                         mo.location = (mo.location
                                                        + (proxy_center - imp_center * scale_factor))
@@ -3712,14 +3974,74 @@ class WM_OT_TrellisGenerate(bpy.types.Operator):
                                         proxy.hide_set(True)
                                 else:
                                     for i, mo in enumerate(mesh_objs):
-                                        mo.name = mesh_name if i == 0 else f"{mesh_name}_{i}"
+                                        mo.name = desired_name if i == 0 else f"{desired_name}_{i}"
                                     print(f"[TRELLIS] No proxy — imported at native scale")
 
+                                # actual_name is what Blender settled on after auto-renaming
+                                actual_name = mesh_objs[0].name if mesh_objs else desired_name
+
+                                # Parent all mesh parts to the asset Empty anchor so the
+                                # entire asset hierarchy lives under one outliner root.
+                                if _am_name:
+                                    _anchor = bpy.data.objects.get(_am_name)
+                                    if _anchor and _anchor.type == 'EMPTY':
+                                        for mo in mesh_objs:
+                                            mo.parent = _anchor
+                                            mo.matrix_parent_inverse = (
+                                                _anchor.matrix_world.inverted())
+                                        print(f"[TRELLIS] Parented {len(mesh_objs)} obj(s) "
+                                              f"to Empty '{_am_name}'")
+
                                 from . import workspace_setup as ws
-                                ws.save_mesh_to_library(bpy.context, dl_path,
-                                                        mesh_type='textured')
+                                # save_mesh_to_library redirects to asset 3D/ dir in asset mode
+                                saved_glb = ws.save_mesh_to_library(bpy.context, dl_path,
+                                                                     mesh_type='textured')
+
+                                # Asset Mode: append history + update subject link
+                                if _am_name:
+                                    import json as _j
+                                    # Copy current temp/current_ai.png as this iteration's image
+                                    _asset_temp = ws.get_asset_temp_directory(
+                                        bpy.context, _am_name)
+                                    _iter_img   = None
+                                    _src_ai     = _asset_temp / "current_ai.png"
+                                    if _src_ai.exists() and saved_glb:
+                                        from pathlib import Path as _P
+                                        _asset_dir = ws.get_asset_directory(
+                                            bpy.context, _am_name)
+                                        _img_dir   = _asset_dir / "Images"
+                                        _img_dir.mkdir(parents=True, exist_ok=True)
+                                        from datetime import datetime as _dt
+                                        _ts  = _dt.now().strftime("%Y%m%d_%H%M%S")
+                                        _ms  = _dt.now().microsecond // 1000
+                                        _iter_img = _img_dir / f"{_ts}_{_ms:03d}_iter.png"
+                                        try:
+                                            import shutil as _sh
+                                            _sh.copy2(_src_ai, _iter_img)
+                                        except Exception:
+                                            _iter_img = None
+
+                                    ws.append_asset_history_iteration(
+                                        bpy.context, _am_name, actual_name,
+                                        mesh_path=saved_glb, image_path=_iter_img)
+
+                                    # Update subject link so Shift+V re-entry hits Tier 2
+                                    _si = _am_props.asset_subject_index
+                                    if 0 <= _si < len(_am_props.refine_subjects):
+                                        _subj = _am_props.refine_subjects[_si]
+                                        _subj.linked_object_name = actual_name
+                                        try:
+                                            _lm = _j.loads(_am_props.asset_object_links or "{}")
+                                        except Exception:
+                                            _lm = {}
+                                        _lm[_subj.label] = actual_name
+                                        _am_props.asset_object_links = _j.dumps(_lm)
+                                        _am_props.current_asset_name = _am_name  # keep label
+                                        print(f"[TRELLIS] 🔗 Asset link → '{actual_name}' "
+                                              f"(subject[{_si}] '{_subj.label}')")
+
                                 print(f"[TRELLIS] ============================================")
-                                print(f"[TRELLIS] TRELLIS2 3D COMPLETE: {mesh_name}")
+                                print(f"[TRELLIS] TRELLIS2 3D COMPLETE: {actual_name}")
                                 print(f"[TRELLIS] ============================================")
 
                             except RuntimeError as e:
@@ -3788,8 +4110,10 @@ class WM_OT_TrellisRetexture(bpy.types.Operator):
 
         obj      = context.active_object
         props    = context.scene.style_engine_props
-        temp_dir = workspace_setup.get_temp_directory(context)
-        src_img  = temp_dir / "current_ai.png"
+        # In Asset Mode this resolves to the asset's own temp/current_ai.png so
+        # retexture uses the isolated asset image, not the full scene image.
+        src_img  = workspace_setup.get_active_ai_output_path(context)
+        temp_dir = src_img.parent  # scratch dir for GLB export + download
 
         if not src_img.exists():
             self.report({'ERROR'}, "No AI image found — generate or upload an image first")
@@ -3978,12 +4302,30 @@ class WM_OT_TrellisRetexture(bpy.types.Operator):
                                 ))
                                 scale_factor = captured['proxy_max_dim'] / imp_max_dim
                                 proxy_center = captured['proxy_center']
-                                mesh_name    = f"Trellis_RT_{job_id[:8]}"
+                                _am_props_rt = bpy.context.scene.style_engine_props
+                                _am_name_rt  = (_am_props_rt.current_asset_name
+                                                if _am_props_rt.asset_mode else "")
+                                # Use asset label as desired name; Blender handles .001/.002
+                                desired_rt   = _am_name_rt if _am_name_rt else f"Trellis_RT_{job_id[:8]}"
+
                                 for i, mo in enumerate(mesh_objs):
-                                    mo.name    = mesh_name if i == 0 else f"{mesh_name}_{i}"
+                                    mo.name    = desired_rt if i == 0 else f"{desired_rt}_{i}"
                                     mo.scale   = mo.scale * scale_factor
                                     mo.location = (mo.location
                                                    + (proxy_center - imp_center * scale_factor))
+
+                                actual_name_rt = mesh_objs[0].name if mesh_objs else desired_rt
+
+                                # Parent all mesh parts to the asset Empty anchor
+                                if _am_name_rt:
+                                    _anchor_rt = bpy.data.objects.get(_am_name_rt)
+                                    if _anchor_rt and _anchor_rt.type == 'EMPTY':
+                                        for mo in mesh_objs:
+                                            mo.parent = _anchor_rt
+                                            mo.matrix_parent_inverse = (
+                                                _anchor_rt.matrix_world.inverted())
+                                        print(f"[TRELLIS] RT: Parented {len(mesh_objs)} obj(s) "
+                                              f"to Empty '{_am_name_rt}'")
 
                                 # Hide proxy
                                 proxy = bpy.data.objects.get(captured['proxy_name'])
@@ -3991,9 +4333,50 @@ class WM_OT_TrellisRetexture(bpy.types.Operator):
                                     proxy.hide_set(True)
 
                                 from . import workspace_setup as ws
-                                ws.save_mesh_to_library(bpy.context, dl_path,
-                                                        mesh_type='uv_textured')
-                                print(f"[TRELLIS] Retexture complete: {mesh_name}")
+                                saved_glb_rt = ws.save_mesh_to_library(bpy.context, dl_path,
+                                                                        mesh_type='uv_textured')
+
+                                # Asset Mode: append history + update subject link
+                                if _am_name_rt:
+                                    import json as _j
+                                    _asset_temp_rt = ws.get_asset_temp_directory(
+                                        bpy.context, _am_name_rt)
+                                    _iter_img_rt   = None
+                                    _src_ai_rt     = _asset_temp_rt / "current_ai.png"
+                                    if _src_ai_rt.exists() and saved_glb_rt:
+                                        _asset_dir_rt = ws.get_asset_directory(
+                                            bpy.context, _am_name_rt)
+                                        _img_dir_rt   = _asset_dir_rt / "Images"
+                                        _img_dir_rt.mkdir(parents=True, exist_ok=True)
+                                        from datetime import datetime as _dt
+                                        _ts_rt = _dt.now().strftime("%Y%m%d_%H%M%S")
+                                        _ms_rt = _dt.now().microsecond // 1000
+                                        _iter_img_rt = _img_dir_rt / f"{_ts_rt}_{_ms_rt:03d}_iter.png"
+                                        try:
+                                            import shutil as _sh
+                                            _sh.copy2(_src_ai_rt, _iter_img_rt)
+                                        except Exception:
+                                            _iter_img_rt = None
+
+                                    ws.append_asset_history_iteration(
+                                        bpy.context, _am_name_rt, actual_name_rt,
+                                        mesh_path=saved_glb_rt, image_path=_iter_img_rt)
+
+                                    _si_rt = _am_props_rt.asset_subject_index
+                                    if 0 <= _si_rt < len(_am_props_rt.refine_subjects):
+                                        _subj_rt = _am_props_rt.refine_subjects[_si_rt]
+                                        _subj_rt.linked_object_name = actual_name_rt
+                                        try:
+                                            _lm = _j.loads(_am_props_rt.asset_object_links or "{}")
+                                        except Exception:
+                                            _lm = {}
+                                        _lm[_subj_rt.label] = actual_name_rt
+                                        _am_props_rt.asset_object_links = _j.dumps(_lm)
+                                        _am_props_rt.current_asset_name = _am_name_rt
+                                        print(f"[TRELLIS] 🔗 RT asset link → '{actual_name_rt}' "
+                                              f"(subject[{_si_rt}] '{_subj_rt.label}')")
+
+                                print(f"[TRELLIS] Retexture complete: {actual_name_rt}")
 
                             except RuntimeError as e:
                                 if ("drawing/rendering" in str(e)
@@ -6900,6 +7283,14 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
     bl_region_type = 'UI'
     bl_category = 'Style Engine'
 
+    @classmethod
+    def poll(cls, context):
+        # Hide this panel while Asset Mode is active — VIEW3D_PT_AssetMode takes over.
+        try:
+            return not context.scene.style_engine_props.asset_mode
+        except Exception:
+            return True
+
     def draw(self, context):
         layout = self.layout
         style_props = context.scene.style_engine_props
@@ -6958,6 +7349,16 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
             row = status_box.row(align=True)
             row.scale_y = 0.8
             row.label(text=f"Queue: {queue}", icon='LINENUMBERS_ON')
+
+        self.draw_body(context)
+
+    def draw_body(self, context):
+        """Draw all panel categories (View → Texture).
+
+        Extracted so that VIEW3D_PT_AssetMode can delegate here and produce
+        a pixel-perfect 1:1 replica without duplicating the progress bar."""
+        layout = self.layout
+        style_props = context.scene.style_engine_props
 
         # ================================================================
         # VIEW CATEGORY (Collapsible) — Q · visibility
@@ -7372,6 +7773,7 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                 subj_box = ri_box.box()
                 subj_hdr = subj_box.row()
                 subj_hdr.label(text="Subjects", icon='OBJECT_DATA')
+                subj_hdr.operator("style_engine.sync_scene_objects",       text="", icon='FILE_REFRESH')
                 subj_hdr.operator("style_engine.refine_image_add_subject", text="", icon='ADD')
 
                 for si, subj in enumerate(style_props.refine_subjects):
@@ -7380,8 +7782,30 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                     exp_icon = 'TRIA_DOWN' if subj.show_expanded else 'TRIA_RIGHT'
                     s_hdr.prop(subj, "show_expanded", text="", icon=exp_icon, emboss=False)
                     s_hdr.prop(subj, "label", text="")
+                    # Edit Asset — enter Asset Mode for this subject's object
+                    edit_op = s_hdr.operator("style_engine.edit_asset",
+                                             text="", icon='OUTLINER_OB_MESH')
+                    edit_op.subject_index = si
                     rem_subj_op = s_hdr.operator("style_engine.refine_image_remove_subject", text="", icon='X')
                     rem_subj_op.subject_index = si
+
+                    # ◀ N/M ▶ iteration strip — only shown when > 1 iteration exists
+                    try:
+                        from . import workspace_setup as _ws_iter
+                        _hist = _ws_iter.read_asset_history(context, subj.label)
+                        _iter_count = len(_hist.get("iterations", []))
+                        if _iter_count > 1:
+                            iter_row = s_box.row(align=True)
+                            _active  = _hist.get("active_index", 0)
+                            prev_it  = iter_row.operator("style_engine.subject_iter_prev",
+                                                          text="", icon='TRIA_LEFT')
+                            prev_it.subject_index = si
+                            iter_row.label(text=f"{_active + 1} / {_iter_count}")
+                            next_it  = iter_row.operator("style_engine.subject_iter_next",
+                                                          text="", icon='TRIA_RIGHT')
+                            next_it.subject_index = si
+                    except Exception:
+                        pass
 
                     if subj.show_expanded:
                         s_col = s_box.column(align=True)
@@ -7401,6 +7825,29 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                             rem_feat_op = feat_row.operator("style_engine.refine_image_remove_feature", text="", icon='X')
                             rem_feat_op.subject_index = si
                             rem_feat_op.feature_index = fi
+
+                        # Nested subjects sub-list (read-only, applied via Apply to Parent)
+                        if subj.nested_subjects_json:
+                            try:
+                                import json as _jns
+                                _nested = _jns.loads(subj.nested_subjects_json)
+                                if _nested:
+                                    _nh = s_box.row(align=True)
+                                    _ni = 'TRIA_DOWN' if subj.show_nested else 'TRIA_RIGHT'
+                                    _nh.prop(subj, "show_nested", text="", icon=_ni, emboss=False)
+                                    _nh.label(text=f"Nested parts ({len(_nested)})",
+                                              icon='OUTLINER_OB_GROUP_INSTANCE')
+                                    if subj.show_nested:
+                                        for _ne in _nested:
+                                            _nr = s_box.row(align=True)
+                                            _nr.label(text=f"  {_ne.get('label', '?')}",
+                                                      icon='DOT')
+                                            _dp = [v for v in [_ne.get('color'),
+                                                                _ne.get('style')] if v]
+                                            if _dp:
+                                                _nr.label(text=" / ".join(_dp))
+                            except Exception:
+                                pass
 
                 # ── Thematic Tags ──────────────────────────────────────────
                 tags_box = ri_box.box()
@@ -8793,6 +9240,73 @@ class WM_OT_GenerateTexturedMeshMultiview(bpy.types.Operator):
 # Refine Image JSON Editor — Operators
 # ----------------------------------------------------------------
 
+class WM_OT_SyncSceneObjects(bpy.types.Operator):
+    """Scan scene for meaningful mesh objects and register them as JSON subjects"""
+    bl_idname  = "style_engine.sync_scene_objects"
+    bl_label   = "Sync Scene Objects"
+    bl_description = ("Scan the scene for named mesh objects and add any "
+                      "missing ones as subjects in the Refine Image JSON")
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        props   = context.scene.style_engine_props
+        created = sync_scene_objects_to_json(props, context)
+        if created:
+            self.report({'INFO'}, f"Sync: added {created} new subject(s)")
+        else:
+            self.report({'INFO'}, "Sync: all objects already registered")
+        return {'FINISHED'}
+
+
+class STYLEENGINE_OT_SubjectIterPrev(bpy.types.Operator):
+    """Show the previous iteration of this asset"""
+    bl_idname  = "style_engine.subject_iter_prev"
+    bl_label   = "Previous Iteration"
+    bl_options = {'REGISTER'}
+
+    subject_index: bpy.props.IntProperty(default=0)
+
+    def execute(self, context):
+        from . import workspace_setup as ws
+        props = context.scene.style_engine_props
+        try:
+            subj  = props.refine_subjects[self.subject_index]
+        except IndexError:
+            return {'CANCELLED'}
+        history = ws.read_asset_history(context, subj.label)
+        active  = history.get("active_index", 0)
+        if active <= 0:
+            self.report({'INFO'}, "Already at first iteration")
+            return {'CANCELLED'}
+        ws.switch_asset_iteration(context, subj.label, active - 1)
+        return {'FINISHED'}
+
+
+class STYLEENGINE_OT_SubjectIterNext(bpy.types.Operator):
+    """Show the next iteration of this asset"""
+    bl_idname  = "style_engine.subject_iter_next"
+    bl_label   = "Next Iteration"
+    bl_options = {'REGISTER'}
+
+    subject_index: bpy.props.IntProperty(default=0)
+
+    def execute(self, context):
+        from . import workspace_setup as ws
+        props = context.scene.style_engine_props
+        try:
+            subj  = props.refine_subjects[self.subject_index]
+        except IndexError:
+            return {'CANCELLED'}
+        history = ws.read_asset_history(context, subj.label)
+        active  = history.get("active_index", 0)
+        total   = len(history.get("iterations", []))
+        if active >= total - 1:
+            self.report({'INFO'}, "Already at latest iteration")
+            return {'CANCELLED'}
+        ws.switch_asset_iteration(context, subj.label, active + 1)
+        return {'FINISHED'}
+
+
 class WM_OT_RefineImageAddSubject(bpy.types.Operator):
     """Add a new subject to the Refine Image subject list"""
     bl_idname = "style_engine.refine_image_add_subject"
@@ -8967,25 +9481,258 @@ def _build_agent_json_task_prompt(meta: dict) -> str:
     # Indent each line of the sub-object so it sits correctly inside the skeleton
     indented = "\n".join("    " + line for line in metadata_json.splitlines())
 
+    # Build a fully valid JSON skeleton with metadata pre-filled and all
+    # other fields empty — the model copies metadata unchanged and fills the rest.
+    skeleton = _json.dumps({
+        "metadata":     metadata_obj,
+        "visual_style": {"art_style": "", "medium": "", "lighting_condition": ""},
+        "composition":  {"perspective": "", "focal_point": ""},
+        "subject_matter": [],
+        "thematic_tags":  [],
+    }, indent=2)
+
     task = (
-        "Analyze the provided image and return a single valid JSON object.\n\n"
-        "The metadata section below is ALREADY FILLED IN with exact values from "
-        "Blender — copy it into your output unchanged. Do not infer, round, or "
-        "replace any of these values. Focal length and depth_of_field are present "
-        "only when a camera was active; if they appear here, include them verbatim.\n\n"
-        "Pre-filled metadata (copy verbatim):\n"
+        "Look at the image carefully. Identify and name every distinct visible "
+        "object, component, and part you can see.\n\n"
+        "Fill in the JSON below based on what you observe. "
+        "The metadata block is already correct — copy it unchanged. "
+        "Populate subject_matter with every foreground element you can identify, "
+        "and thematic_tags with scene/context keywords.\n\n"
         "```json\n"
-        "{\n"
-        f"  \"metadata\": {indented.strip()},\n"
-        "  \"visual_style\":   { ... fill from image ... },\n"
-        "  \"composition\":    { ... fill from image ... },\n"
-        "  \"subject_matter\": [ ... fill from image ... ],\n"
-        "  \"thematic_tags\":  [ ... fill from image ... ]\n"
-        "}\n"
-        "```\n\n"
-        "Return only the completed JSON wrapped in ```json ... ``` fences."
+        f"{skeleton}\n"
+        "```"
     )
     return task
+
+
+def _build_agent_json_task_prompt_merge(meta: dict, props) -> str:
+    """
+    Build the task STRING for AgentJSONMerge.json.
+
+    Extends _build_agent_json_task_prompt by embedding the full current JSON
+    (serialised from props) as `existing_json` so the agent can merge rather
+    than replace.  The agent's merge rules are defined in the workflow's node 4
+    system prompt.
+    """
+    import json as _json
+
+    # Metadata sub-object (verbatim Blender values)
+    metadata_obj = {
+        "filename":     meta["filename"],
+        "dimensions":   meta["dimensions"],
+        "aspect_ratio": meta["aspect_ratio"],
+    }
+    if "focal_length_mm" in meta:
+        metadata_obj["focal_length_mm"] = meta["focal_length_mm"]
+    if "depth_of_field" in meta:
+        metadata_obj["depth_of_field"] = meta["depth_of_field"]
+
+    metadata_json = _json.dumps(metadata_obj, indent=4)
+    indented_meta = "\n".join("    " + line for line in metadata_json.splitlines())
+
+    # Serialise the current JSON so the agent can see existing subjects
+    try:
+        current_json_str = _build_refine_json(props)
+    except Exception:
+        current_json_str = "{}"
+
+    task = (
+        "Look at the image. Then return an updated version of the existing JSON below.\n\n"
+        f"Metadata (copy verbatim): {_json.dumps(metadata_obj)}\n\n"
+        "Existing JSON to update:\n"
+        "```json\n"
+        f"{current_json_str}\n"
+        "```\n\n"
+        "Keep all existing subject labels unchanged. Update their style/color/material/features "
+        "from the image if you can see them. Add new entries for any visible foreground "
+        "objects not already listed. Update visual_style, composition, thematic_tags freely.\n\n"
+        "Return only the complete updated JSON in ```json ... ``` fences."
+    )
+    return task
+
+
+def _merge_refine_from_json(props, json_text):
+    """
+    Merge an AI-returned JSON into the existing Refine Image form state.
+
+    Unlike _populate_refine_from_json (which hard-clears everything), this
+    function:
+      - Replaces metadata, visual_style, composition, thematic_tags from the
+        incoming JSON (AI analysis is authoritative for these).
+      - For subject_matter: matches by label, updates style/scale/color/material/
+        features on existing subjects, appends genuinely new ones, but NEVER
+        deletes existing subjects and NEVER overwrites linked_object_name.
+      - Calls sync_scene_objects_to_json at the end (same as populate).
+    """
+    import json as _json
+
+    data = _json.loads(json_text)
+
+    # -- Top-level non-subject fields: replace freely --
+    meta = data.get("metadata", {})
+    if meta.get("filename"):
+        props.refine_meta_filename   = meta.get("filename", "")
+    if meta.get("dimensions"):
+        props.refine_meta_dimensions = meta.get("dimensions", "")
+    if meta.get("aspect_ratio"):
+        props.refine_meta_aspect     = meta.get("aspect_ratio", "")
+
+    vs = data.get("visual_style", {})
+    if vs:
+        props.refine_style_art_style = vs.get("art_style",          props.refine_style_art_style)
+        props.refine_style_medium    = vs.get("medium",             props.refine_style_medium)
+        props.refine_style_lighting  = vs.get("lighting_condition", props.refine_style_lighting)
+
+    comp = data.get("composition", {})
+    if comp:
+        props.refine_comp_perspective = comp.get("perspective",  props.refine_comp_perspective)
+        props.refine_comp_focal_point = comp.get("focal_point",  props.refine_comp_focal_point)
+
+    incoming_tags = data.get("thematic_tags", [])
+    if incoming_tags:
+        props.refine_tags.clear()
+        for tag_str in incoming_tags:
+            tag = props.refine_tags.add()
+            tag.value = tag_str
+
+    # -- Subject matter: merge by label --
+    # Build fast lookup of existing subjects
+    by_label = {s.label: i for i, s in enumerate(props.refine_subjects)}
+
+    for subj_data in data.get("subject_matter", []):
+        label = subj_data.get("label", "").strip()
+        if not label:
+            continue
+
+        if label in by_label:
+            # Update visual fields only — never touch linked_object_name
+            existing = props.refine_subjects[by_label[label]]
+            if subj_data.get("style"):
+                existing.style    = subj_data["style"]
+            if subj_data.get("scale"):
+                existing.scale    = subj_data["scale"]
+            if subj_data.get("color"):
+                existing.color    = subj_data["color"]
+            if subj_data.get("material"):
+                existing.material = subj_data["material"]
+            # Merge features: replace if AI returned a non-empty list
+            incoming_feats = subj_data.get("features", [])
+            if incoming_feats:
+                existing.features.clear()
+                for feat_str in incoming_feats:
+                    feat = existing.features.add()
+                    feat.value = feat_str
+        else:
+            # New subject — append and restore any persisted link
+            try:
+                _link_map = _json.loads(props.asset_object_links or "{}")
+            except Exception:
+                _link_map = {}
+
+            subj = props.refine_subjects.add()
+            subj.label         = label
+            subj.style         = subj_data.get("style",    "")
+            subj.scale         = subj_data.get("scale",    "")
+            subj.color         = subj_data.get("color",    "")
+            subj.material      = subj_data.get("material", "")
+            subj.show_expanded = False
+            for feat_str in subj_data.get("features", []):
+                feat = subj.features.add()
+                feat.value = feat_str
+            linked = subj_data.get("_linked_object", "") or _link_map.get(label, "")
+            if linked:
+                subj.linked_object_name = linked
+            by_label[label] = len(props.refine_subjects) - 1
+            print(f"[RefineJSON Merge] ➕ New subject '{label}'")
+
+    # Sync any scene objects not yet in the list
+    try:
+        sync_scene_objects_to_json(props, bpy.context)
+    except Exception as _se:
+        print(f"[RefineJSON Merge] ⚠ Post-merge sync skipped: {_se}")
+
+
+class STYLEENGINE_OT_ApplyToParent(bpy.types.Operator):
+    """Inject the current asset's subjects into the matching parent subject entry"""
+    bl_idname  = "style_engine.apply_to_parent"
+    bl_label   = "Apply to Parent"
+    bl_description = ("Push this asset's subjects into its parent subject entry "
+                      "as nested_subjects — one level only, applied progressively")
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        props = context.scene.style_engine_props
+        return (getattr(props, 'asset_mode', False)
+                and bool(getattr(props, 'asset_prev_subjects', '')))
+
+    def execute(self, context):
+        import json
+        from . import workspace_setup as ws
+        props       = context.scene.style_engine_props
+        child_label = props.current_asset_name
+
+        # 1. Build nested_subjects list from the current asset's subjects
+        nested = []
+        for subj in props.refine_subjects:
+            entry = {
+                "label":    subj.label,
+                "style":    subj.style,
+                "scale":    subj.scale,
+                "color":    subj.color,
+                "material": subj.material,
+                "features": [f.value for f in subj.features if f.value.strip()],
+            }
+            if subj.nested_subjects_json:
+                try:
+                    entry["nested_subjects"] = json.loads(subj.nested_subjects_json)
+                except Exception:
+                    pass
+            nested.append(entry)
+
+        # 2. Load parent subjects from the snapshot (always the immediate parent)
+        if not props.asset_prev_subjects:
+            self.report({'ERROR'}, "No parent subjects snapshot found")
+            return {'CANCELLED'}
+        try:
+            parent_data = json.loads(props.asset_prev_subjects)
+        except Exception as _je:
+            self.report({'ERROR'}, f"Could not parse parent subjects: {_je}")
+            return {'CANCELLED'}
+
+        # 3. Find the matching subject in the parent and inject nested_subjects
+        updated = False
+        for se in parent_data.get("subject_matter", []):
+            if se.get("label") == child_label:
+                se["nested_subjects"] = nested
+                updated = True
+                break
+        if not updated:
+            self.report({'WARNING'},
+                        f"Subject '{child_label}' not found in parent — "
+                        f"check the subject label matches the asset name")
+            return {'CANCELLED'}
+
+        updated_str = json.dumps(parent_data, indent=2)
+
+        # 4. Update the snapshot so ExitAssetMode restores the enriched version
+        props.asset_prev_subjects = updated_str
+
+        # 5. Persist to disk when the parent is itself an asset (stack non-empty)
+        _stack = json.loads(props.asset_mode_stack or "[]")
+        if _stack:
+            _parent_name       = _stack[-1]["asset_name"]
+            _parent_components = [e["asset_name"] for e in _stack]
+            _pc_arg = _parent_components if len(_parent_components) > 1 else None
+            ws.save_asset_subjects_json(context, _parent_name, updated_str,
+                                        path_components=_pc_arg)
+            print(f"[ApplyToParent] Saved to disk: {_parent_name} "
+                  f"(path={_parent_components})")
+        # If stack is empty, the parent is the scene — only asset_prev_subjects
+        # matters; it gets restored into the live subjects on ExitAssetMode.
+
+        self.report({'INFO'}, f"Applied '{child_label}' subjects to parent")
+        return {'FINISHED'}
 
 
 class WM_OT_RefineImageAnalyzeJSON(bpy.types.Operator):
@@ -9004,64 +9751,115 @@ class WM_OT_RefineImageAnalyzeJSON(bpy.types.Operator):
             self.report({'ERROR'}, "Analyze requires Server mode (GCS)")
             return {'CANCELLED'}
 
-        image_path = workspace_setup.find_current_ai(context)
+        # Use get_active_ai_output_path so that in Asset Mode the asset's own
+        # current_ai.png is analysed rather than the global scene image.
+        image_path = workspace_setup.get_active_ai_output_path(context)
+        if not image_path.exists():
+            # Fall back to find_current_ai for its migration/fallback logic
+            image_path = workspace_setup.find_current_ai(context)
         print(f"[RefineJSON] Looking for current_ai.png → {image_path}")
-        if image_path is None:
-            canonical = workspace_setup.get_temp_directory(context) / "current_ai.png"
+        if image_path is None or not image_path.exists():
+            canonical = workspace_setup.get_active_ai_output_path(context)
             self.report(
                 {'ERROR'},
-                f"current_ai.png not found anywhere — generate an image first "
+                f"current_ai.png not found — generate an image first "
                 f"(expected: {canonical})"
             )
             print(
-                f"[RefineJSON] ❌ Not found in canonical or fallback locations. "
-                f"Canonical: {canonical}  |  .blend: {bpy.data.filepath!r}"
+                f"[RefineJSON] ❌ Not found. Expected: {canonical}  |  "
+                f".blend: {bpy.data.filepath!r}"
             )
             return {'CANCELLED'}
 
         try:
-            addon_dir = Path(__file__).parent
-            workflow_file = addon_dir / "workflows" / "Text" / "AgentJSON.json"
+            addon_dir  = Path(__file__).parent
+            props      = context.scene.style_engine_props
+
+            # ── Choose workflow and populate strategy based on existing state ──
+            # If subjects already exist we use the merge workflow so the AI can
+            # update existing entries without wiping manually set links or edits.
+            has_subjects = len(props.refine_subjects) > 0
+            if has_subjects:
+                wf_name   = "AgentJSONMerge.json"
+                mode_label = "merge"
+            else:
+                wf_name   = "AgentJSON.json"
+                mode_label = "fresh"
+
+            workflow_file = addon_dir / "workflows" / "Text" / wf_name
             if not workflow_file.exists():
-                self.report({'ERROR'}, "AgentJSON.json workflow not found")
+                self.report({'ERROR'}, f"{wf_name} workflow not found")
                 return {'CANCELLED'}
+
+            print(f"[RefineJSON] Using {wf_name} ({mode_label} mode, "
+                  f"{len(props.refine_subjects)} existing subjects)")
 
             with open(workflow_file, 'r') as f:
                 workflow = json.load(f)
 
             server_client = runcomfy_deployment.get_server_client()
-            upload_response = server_client.upload_image(str(image_path), overwrite=True)
+
+            # Upload with a unique timestamped name to prevent ComfyUI's
+            # LoadImage node from serving a cached copy of a previous run.
+            import time as _time
+            _ts = int(_time.time())
+            _unique_name = f"analyze_{_ts}.png"
+            _tmp_upload = image_path.parent / _unique_name
+
+            print(f"[RefineJSON] ── Image upload ──────────────────────────────")
+            print(f"[RefineJSON]   source : {image_path}")
+            print(f"[RefineJSON]   exists : {image_path.exists()}")
+            print(f"[RefineJSON]   size   : {image_path.stat().st_size if image_path.exists() else 'N/A'} bytes")
+            print(f"[RefineJSON]   upload : {_tmp_upload}")
+
+            try:
+                import shutil as _shutil
+                _shutil.copy2(str(image_path), str(_tmp_upload))
+                upload_response = server_client.upload_image(str(_tmp_upload), overwrite=True)
+            finally:
+                try:
+                    _tmp_upload.unlink()
+                except Exception:
+                    pass
+
             uploaded_filename = upload_response.get("name", "")
             if not uploaded_filename:
                 self.report({'ERROR'}, "Failed to upload image to server")
                 return {'CANCELLED'}
 
             workflow["11"]["inputs"]["image"] = uploaded_filename
-            print(f"[RefineJSON] Patched node 11 → {uploaded_filename}")
+            print(f"[RefineJSON]   server : {uploaded_filename}")
+            print(f"[RefineJSON] ────────────────────────────────────────────────")
 
-            # ── Pre-load the agent task (node 10) with real Blender metadata ──
-            # scene.camera = scene-level active camera, NOT the selected object.
-            meta       = _get_blender_scene_metadata(context, uploaded_filename)
-            task_prompt = _build_agent_json_task_prompt(meta)
-            task_node   = "10"
+            # ── Build and inject the task prompt (node 10) ────────────────────
+            meta = _get_blender_scene_metadata(context, uploaded_filename)
+            if has_subjects:
+                task_prompt = _build_agent_json_task_prompt_merge(meta, props)
+            else:
+                task_prompt = _build_agent_json_task_prompt(meta)
+
+            task_node = "10"
             if task_node in workflow:
                 workflow[task_node]["inputs"]["STRING"] = task_prompt
-                print(f"[RefineJSON] Pre-loaded task prompt with metadata: {meta}")
+                print(f"[RefineJSON] Pre-loaded task prompt ({mode_label}) with metadata: {meta}")
             else:
                 print("[RefineJSON] ⚠ Node '10' not found — metadata not pre-loaded")
 
-            response = server_client.queue_prompt(workflow)
+            response  = server_client.queue_prompt(workflow)
             prompt_id = response['prompt_id']
 
             from . import runcomfy_polling, progress_bar
             progress_bar.set_current_workflow(workflow)
+
+            # Capture mode for closure
+            _merge_mode = has_subjects
 
             def on_json_complete(success, result=None, error=None, workflow_type=None):
                 if not success:
                     print(f"[RefineJSON] ❌ Failed: {error}")
                     return
                 try:
-                    outputs = result.get('outputs', {})
+                    outputs   = result.get('outputs', {})
                     json_text = _extract_text_from_griptape_output(outputs)
                     if not json_text:
                         print(f"[RefineJSON] ❌ No text output. Keys: {list(outputs.keys())}")
@@ -9069,9 +9867,13 @@ class WM_OT_RefineImageAnalyzeJSON(bpy.types.Operator):
                     # Strip markdown code fences
                     json_text = re.sub(r'^```(?:json)?\s*', '', json_text.strip())
                     json_text = re.sub(r'\s*```$', '', json_text.strip())
-                    props = bpy.context.scene.style_engine_props
-                    _populate_refine_from_json(props, json_text)
-                    print("[RefineJSON] ✓ Refine Image fields populated from JSON output")
+                    _props = bpy.context.scene.style_engine_props
+                    if _merge_mode:
+                        _merge_refine_from_json(_props, json_text)
+                        print("[RefineJSON] ✓ Refine Image fields MERGED from JSON output")
+                    else:
+                        _populate_refine_from_json(_props, json_text)
+                        print("[RefineJSON] ✓ Refine Image fields populated (fresh) from JSON output")
                 except Exception as e:
                     print(f"[RefineJSON] ❌ Callback error: {e}")
                     import traceback; traceback.print_exc()
@@ -9083,7 +9885,7 @@ class WM_OT_RefineImageAnalyzeJSON(bpy.types.Operator):
                 workflow_type='text'
             )
 
-            self.report({'INFO'}, "Analyzing image… fields will populate when done")
+            self.report({'INFO'}, f"Analyzing image ({mode_label})… fields will populate when done")
             return {'FINISHED'}
 
         except Exception as e:
@@ -9159,14 +9961,26 @@ class WM_OT_RefineImageSubmit(bpy.types.Operator):
             print(f"[RefineImage] Wrote structured instruction to STYLEENGINE_Prompt "
                   f"({len(instruction)} chars)")
 
+        # Alignment and BG removal are always forced on for agent-driven
+        # refinement: alignment keeps the composition anchored, BG removal
+        # isolates the subject so the agent focuses on what matters.
+        _prev_alignment  = props.gemini_alignment
+        _prev_remove_bg  = props.gemini_remove_bg
+        props.gemini_alignment = True
+        props.gemini_remove_bg = True
+
         try:
             workspace_setup.generate_ai_image_cloud(context, refine_mode=True)
             self.report({'INFO'}, "Refine Image started with structured JSON instruction")
         except Exception as e:
+            props.gemini_alignment = _prev_alignment
+            props.gemini_remove_bg  = _prev_remove_bg
             self.report({'ERROR'}, f"Refine failed: {e}")
             import traceback; traceback.print_exc()
             return {'CANCELLED'}
 
+        props.gemini_alignment = _prev_alignment
+        props.gemini_remove_bg  = _prev_remove_bg
         return {'FINISHED'}
 
 
@@ -9218,6 +10032,9 @@ classes = (
     WM_OT_GenerateImageDescriptionFromViewport,
     WM_OT_GenerateMeshMultiview,
     WM_OT_GenerateTexturedMeshMultiview,
+    WM_OT_SyncSceneObjects,
+    STYLEENGINE_OT_SubjectIterPrev,
+    STYLEENGINE_OT_SubjectIterNext,
     WM_OT_RefineImageAddSubject,
     WM_OT_RefineImageRemoveSubject,
     WM_OT_RefineImageAddFeature,
@@ -9227,6 +10044,7 @@ classes = (
     WM_OT_RefineImageAnalyzeJSON,
     WM_OT_RefineImagePasteJSON,
     WM_OT_RefineImageSubmit,
+    STYLEENGINE_OT_ApplyToParent,
     VIEW3D_PT_StyleEngine,
 )
 
