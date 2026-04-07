@@ -189,7 +189,12 @@ class ObjectGroup(bpy.types.PropertyGroup):
 
 
 class RefineFeatureItem(bpy.types.PropertyGroup):
-    """A single feature string inside a subject_matter entry."""
+    """A single free-form feature/annotation string on a subject or component.
+
+    Features are not structured objects — they are plain-text creative notes
+    (e.g. 'butterfly emblem', 'battle-worn edges', 'engraved gold trim') that
+    give the AI extra context beyond the style/scale/color/material schema.
+    """
     value: bpy.props.StringProperty(name="Feature", default="")
 
 
@@ -200,9 +205,15 @@ class RefineSubjectItem(bpy.types.PropertyGroup):
     scale: bpy.props.StringProperty(name="Scale", default="")
     color: bpy.props.StringProperty(name="Color", default="")
     material: bpy.props.StringProperty(name="Material", default="")
+    show_expanded: bpy.props.BoolProperty(default=True)
+    # Free-form annotation strings — extra creative context beyond SSCM.
     features: bpy.props.CollectionProperty(type=RefineFeatureItem)
     features_index: bpy.props.IntProperty(default=0)
-    show_expanded: bpy.props.BoolProperty(default=True)
+    show_features: bpy.props.BoolProperty(
+        name="Show Features",
+        description="Expand or collapse the features list",
+        default=False,
+    )
     # Asset Mode link — the name of the Blender object this subject represents.
     # Persists in the .blend file and is round-tripped through the JSON sidecar
     # so the link survives even a full AI JSON rebuild.
@@ -211,14 +222,17 @@ class RefineSubjectItem(bpy.types.PropertyGroup):
         description="Blender object name bound to this subject for Asset Mode",
         default="",
     )
-    nested_subjects_json: bpy.props.StringProperty(
-        name="Nested Subjects",
-        description="JSON array of subjects applied from this asset's nested Asset Mode",
+    # Recursive components — the children of this subject when entering Asset Mode.
+    # Stored as a JSON array so the schema is infinitely nestable without Blender
+    # CollectionProperty recursion limits.
+    components_json: bpy.props.StringProperty(
+        name="Components",
+        description="JSON array of sub-components belonging to this subject",
         default="",
     )
-    show_nested: bpy.props.BoolProperty(
-        name="Show Nested Parts",
-        description="Expand or collapse the nested subjects sub-list",
+    show_components: bpy.props.BoolProperty(
+        name="Show Components",
+        description="Expand or collapse the components sub-list",
         default=False,
     )
 
@@ -311,9 +325,12 @@ def sync_scene_objects_to_json(props, context):
         scale = _bbox_scale_label(obj)
 
         if base in by_label:
-            # Non-destructive update of auto-fillable fields only
+            # Non-destructive update of auto-fillable fields only.
+            # scale is always overwritten from the bounding box — it is the
+            # authoritative source of truth for object size.  material is only
+            # filled in if not already set (user or AI value takes priority).
             subj = props.refine_subjects[by_label[base]]
-            if scale and not subj.scale:
+            if scale:
                 subj.scale = scale
             if mat and not subj.material:
                 subj.material = mat
@@ -344,29 +361,33 @@ def _build_refine_json(props):
     import json as _json
     subjects = []
     for subj in props.refine_subjects:
-        features = [f.value for f in subj.features if f.value.strip()]
         entry = {
             "label": subj.label,
             "style": subj.style,
             "scale": subj.scale,
             "color": subj.color,
             "material": subj.material,
-            "features": features,
         }
         # Persist the Blender object link so it survives round-trips even when
         # the AI regenerates the JSON.  Underscore prefix marks it as internal.
         if subj.linked_object_name:
             entry["_linked_object"] = subj.linked_object_name
-        # Round-trip nested subjects applied via Apply to Parent
-        if subj.nested_subjects_json:
+        # Free-form feature annotations (extra creative context for the AI).
+        _feats = [f.value for f in subj.features if f.value.strip()]
+        if _feats:
+            entry["features"] = _feats
+        # Round-trip components (recursive sub-subjects).
+        if subj.components_json:
             try:
                 import json as _jn
-                entry["nested_subjects"] = _jn.loads(subj.nested_subjects_json)
-            except Exception:
-                pass
+                entry["components"] = _jn.loads(subj.components_json)
+            except Exception as _npe:
+                print(f"[JSON] ⚠ components parse failed for '{subj.label}': {_npe}")
         subjects.append(entry)
     tags = [t.value for t in props.refine_tags if t.value.strip()]
+    _is_asset = getattr(props, "asset_mode", False)
     data = {
+        "mode": "asset" if _is_asset else "scene",
         "metadata": {
             "filename": props.refine_meta_filename,
             "dimensions": props.refine_meta_dimensions,
@@ -377,12 +398,98 @@ def _build_refine_json(props):
             "medium": props.refine_style_medium,
             "lighting_condition": props.refine_style_lighting,
         },
-        "composition": {
-            "perspective": props.refine_comp_perspective,
-            "focal_point": props.refine_comp_focal_point,
-        },
+        "composition": (
+            {
+                "camera_angle": props.refine_comp_perspective,
+                "framing":      props.refine_comp_focal_point,
+            } if _is_asset else {
+                "perspective":  props.refine_comp_perspective,
+                "focal_point":  props.refine_comp_focal_point,
+            }
+        ),
         "subject_matter": subjects,
         "thematic_tags": tags,
+    }
+    return _json.dumps(data, indent=2)
+
+
+def _build_refine_json_for_agent(props):
+    """Build the JSON instruction for 'Refine with Agent' in asset mode.
+
+    Unlike _build_refine_json (which stores components as a flat subject_matter
+    list for save/load purposes), this wraps the current asset as the single
+    top-level subject entry — with its identity fields from asset_subject_* —
+    and nests the components inside it.  This gives the AI the full picture:
+    it knows it is looking at 'dodo', colour=blue, material=feathers, and can
+    see any sub-components too.
+
+    In scene mode falls back to the standard _build_refine_json.
+    """
+    import json as _json
+
+    if not getattr(props, "asset_mode", False):
+        return _build_refine_json(props)
+
+    # Build the components list from refine_subjects (same as _build_refine_json)
+    components = []
+    for subj in props.refine_subjects:
+        entry = {
+            "label":    subj.label,
+            "style":    subj.style,
+            "scale":    subj.scale,
+            "color":    subj.color,
+            "material": subj.material,
+        }
+        if subj.linked_object_name:
+            entry["_linked_object"] = subj.linked_object_name
+        _feats = [f.value for f in subj.features if f.value.strip()]
+        if _feats:
+            entry["features"] = _feats
+        if subj.components_json:
+            try:
+                entry["components"] = _json.loads(subj.components_json)
+            except Exception:
+                pass
+        components.append(entry)
+
+    # Wrap the asset as the single subject with its identity and components.
+    # Asset-level features (notes that apply to the whole asset, not a specific
+    # component) are stored on the asset_entry itself.
+    asset_name = getattr(props, "current_asset_name", "") or "asset"
+    asset_entry = {
+        "label":    asset_name,
+        "style":    props.asset_subject_style,
+        "scale":    props.asset_subject_scale,
+        "color":    props.asset_subject_color,
+        "material": props.asset_subject_material,
+    }
+    _asset_feats = [f.value for f in props.asset_subject_features if f.value.strip()]
+    if _asset_feats:
+        asset_entry["features"] = _asset_feats
+    # Always include the components key so the AI knows where to put new parts,
+    # even when the list is empty.  An absent key causes models to invent their
+    # own nesting instead of using the canonical array.
+    asset_entry["components"] = components
+
+    tags = [t.value for t in props.refine_tags if t.value.strip()]
+    data = {
+        "mode": "asset",
+        "metadata": {
+            "filename":     props.refine_meta_filename,
+            "dimensions":   props.refine_meta_dimensions,
+            "aspect_ratio": props.refine_meta_aspect,
+        },
+        "visual_style": {
+            "art_style":         props.refine_style_art_style,
+            "medium":            props.refine_style_medium,
+            "lighting_condition": props.refine_style_lighting,
+        },
+        "composition": {
+            "camera_angle": props.refine_comp_perspective,
+            "framing":      props.refine_comp_focal_point,
+        },
+        "subject_matter": [asset_entry],
+        "thematic_tags":  tags,
     }
     return _json.dumps(data, indent=2)
 
@@ -403,8 +510,8 @@ def _populate_refine_from_json(props, json_str):
     props.refine_style_lighting = vs.get("lighting_condition", "")
 
     comp = data.get("composition", {})
-    props.refine_comp_perspective = comp.get("perspective", "")
-    props.refine_comp_focal_point = comp.get("focal_point", "")
+    props.refine_comp_perspective = comp.get("perspective", "") or comp.get("camera_angle", "")
+    props.refine_comp_focal_point = comp.get("focal_point",  "") or comp.get("framing", "")
 
     props.refine_subjects.clear()
 
@@ -423,23 +530,26 @@ def _populate_refine_from_json(props, json_str):
         subj.color = subj_data.get("color", "")
         subj.material = subj_data.get("material", "")
         subj.show_expanded = False
-        for feat_str in subj_data.get("features", []):
-            feat = subj.features.add()
-            feat.value = feat_str
         # Restore link: JSON value takes priority; fall back to persistent map.
         linked = subj_data.get("_linked_object", "") or _link_map.get(subj.label, "")
         if linked:
             subj.linked_object_name = linked
             # Keep the persistent map in sync in case the JSON carried a newer value.
             _link_map[subj.label] = linked
-        # Restore nested subjects applied via Apply to Parent
-        _nested_raw = subj_data.get("nested_subjects")
-        if _nested_raw:
+        # Restore free-form feature annotations.
+        subj.features.clear()
+        for feat_str in subj_data.get("features", []):
+            if isinstance(feat_str, str) and feat_str.strip():
+                fi = subj.features.add()
+                fi.value = feat_str
+        # Restore components — try new key first, fall back to old key for compat.
+        _comp_raw = subj_data.get("components") or subj_data.get("nested_subjects")
+        if _comp_raw:
             try:
                 import json as _jn
-                subj.nested_subjects_json = _jn.dumps(_nested_raw)
-            except Exception:
-                pass
+                subj.components_json = _jn.dumps(_comp_raw)
+            except Exception as _npe:
+                print(f"[JSON] ⚠ components restore failed for '{subj.label}': {_npe}")
 
     # Write back any updates accumulated above.
     try:
@@ -453,12 +563,13 @@ def _populate_refine_from_json(props, json_str):
         tag.value = tag_str
 
     # After rebuilding subjects from JSON, sync any meaningful scene objects
-    # that aren't already represented.  This catches objects that exist in
-    # the scene but weren't included in the AI-generated JSON.
-    try:
-        sync_scene_objects_to_json(props, bpy.context)
-    except Exception as _se:
-        print(f"[Scene Sync] ⚠ Post-JSON sync skipped: {_se}")
+    # that aren't already represented.  Skip in asset mode — scene objects must
+    # not pollute the asset's component list.
+    if not getattr(props, 'asset_mode', False):
+        try:
+            sync_scene_objects_to_json(props, bpy.context)
+        except Exception as _se:
+            print(f"[Scene Sync] ⚠ Post-JSON sync skipped: {_se}")
 
 
 def _get_gemini_instruction_items():
@@ -823,6 +934,39 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         description="0 = Scene Mode, 1 = first Asset Mode, 2+ = nested",
         default=0,
         min=0,
+    )
+    # Identity of the current asset as seen from its parent's subject entry.
+    # These map directly to the parent JSON's style/scale/color/material fields
+    # for the matching subject.  Edited in the Asset Mode identity box and
+    # written back to the parent snapshot on exit.
+    asset_subject_style: bpy.props.StringProperty(
+        name="Asset Style",
+        description="Visual style of this asset (as seen from parent)",
+        default="",
+    )
+    asset_subject_scale: bpy.props.StringProperty(
+        name="Asset Scale",
+        description="Scale of this asset (as seen from parent)",
+        default="",
+    )
+    asset_subject_color: bpy.props.StringProperty(
+        name="Asset Color",
+        description="Color of this asset (as seen from parent)",
+        default="",
+    )
+    asset_subject_material: bpy.props.StringProperty(
+        name="Asset Material",
+        description="Material of this asset (as seen from parent)",
+        default="",
+    )
+    # Free-form feature annotations that belong to THIS asset as seen from the
+    # parent.  Mirrors the per-subject RefineFeatureItem list but lives on the
+    # scene props so it persists across panel redraws in asset mode.
+    asset_subject_features: bpy.props.CollectionProperty(type=RefineFeatureItem)
+    show_asset_subject_features: bpy.props.BoolProperty(
+        name="Show Asset Features",
+        description="Expand or collapse the asset identity features list",
+        default=True,
     )
     # ───────────────────────────────────────────────────────────────────────
 
@@ -7272,6 +7416,35 @@ class WM_OT_TestCloudGeneration(bpy.types.Operator):
         return {'FINISHED'}
 
 
+def _draw_nested_subjects(layout, nested_list, depth=0):
+    """Recursively draw a components list with depth indentation (max depth 3).
+
+    Each level is indented by two spaces.  Entries show label + style/color on
+    one row; features (if any) are shown as compact italic labels beneath;
+    if the entry itself has components they are drawn at depth+1.
+    The caller is responsible for guarding with the show_components toggle.
+    """
+    if depth > 3 or not nested_list:
+        return
+    indent = "  " * depth
+    for entry in nested_list:
+        row = layout.row(align=True)
+        label = entry.get("label", "?")
+        detail = " / ".join(v for v in [entry.get("style"), entry.get("color")] if v)
+        row.label(text=f"{indent}{label}", icon='DOT')
+        if detail:
+            row.label(text=detail)
+        # Show features as a compact sub-row.
+        feats = entry.get("features")
+        if feats:
+            feat_row = layout.row(align=True)
+            feat_row.label(text=f"{indent}  ↳ {', '.join(feats)}", icon='SYNTAX_ON')
+        # Support both new 'components' key and legacy 'nested_subjects' fallback.
+        sub_components = entry.get("components") or entry.get("nested_subjects")
+        if sub_components:
+            _draw_nested_subjects(layout, sub_components, depth + 1)
+
+
 # ----------------------------------------------------------------
 # 3. UI PANEL
 # ----------------------------------------------------------------
@@ -7745,34 +7918,68 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
 
                 ri_box.separator()
 
-                # ── Metadata ───────────────────────────────────────────────
-                meta_box = ri_box.box()
-                meta_col = meta_box.column(align=True)
-                meta_row = meta_col.row()
-                meta_row.label(text="Metadata", icon='INFO')
-                meta_col.prop(style_props, "refine_meta_filename", text="Filename")
-                meta_col.prop(style_props, "refine_meta_dimensions", text="Dimensions")
-                meta_col.prop(style_props, "refine_meta_aspect", text="Aspect")
+                if style_props.asset_mode:
+                    # ── Asset Identity (asset mode only) ───────────────────
+                    # style/scale/color/material/features of THIS asset as
+                    # seen from the parent.  Edits propagate back on exit.
+                    id_box = ri_box.box()
+                    id_hdr = id_box.row()
+                    id_hdr.label(text=style_props.current_asset_name,
+                                 icon='OBJECT_DATA')
+                    id_col = id_box.column(align=True)
+                    id_col.prop(style_props, "asset_subject_style",    text="Style")
+                    id_col.prop(style_props, "asset_subject_scale",    text="Scale")
+                    id_col.prop(style_props, "asset_subject_color",    text="Color")
+                    id_col.prop(style_props, "asset_subject_material", text="Material")
+                    # ── Asset-level features ───────────────────────────────
+                    _af_hdr = id_box.row(align=True)
+                    _af_icon = ('TRIA_DOWN' if style_props.show_asset_subject_features
+                                else 'TRIA_RIGHT')
+                    _af_hdr.prop(style_props, "show_asset_subject_features",
+                                 text="", icon=_af_icon, emboss=False)
+                    _af_hdr.label(
+                        text=f"Features ({len(style_props.asset_subject_features)})",
+                        icon='SYNTAX_ON')
+                    _af_hdr.operator("style_engine.asset_subject_add_feature",
+                                     text="", icon='ADD')
+                    if style_props.show_asset_subject_features:
+                        for _afi, _af in enumerate(style_props.asset_subject_features):
+                            _afr = id_box.row(align=True)
+                            _afr.prop(_af, "value", text="")
+                            _rem_af = _afr.operator(
+                                "style_engine.asset_subject_remove_feature",
+                                text="", icon='X')
+                            _rem_af.feature_index = _afi
+                else:
+                    # ── Metadata (scene mode only) ──────────────────────────
+                    meta_box = ri_box.box()
+                    meta_col = meta_box.column(align=True)
+                    meta_row = meta_col.row()
+                    meta_row.label(text="Metadata", icon='INFO')
+                    meta_col.prop(style_props, "refine_meta_filename", text="Filename")
+                    meta_col.prop(style_props, "refine_meta_dimensions", text="Dimensions")
+                    meta_col.prop(style_props, "refine_meta_aspect", text="Aspect")
 
-                # ── Visual Style ───────────────────────────────────────────
-                vs_box = ri_box.box()
-                vs_col = vs_box.column(align=True)
-                vs_col.label(text="Visual Style", icon='BRUSH_DATA')
-                vs_col.prop(style_props, "refine_style_art_style", text="Art Style")
-                vs_col.prop(style_props, "refine_style_medium", text="Medium")
-                vs_col.prop(style_props, "refine_style_lighting", text="Lighting")
+                    # ── Visual Style (scene mode only) ──────────────────────
+                    vs_box = ri_box.box()
+                    vs_col = vs_box.column(align=True)
+                    vs_col.label(text="Visual Style", icon='BRUSH_DATA')
+                    vs_col.prop(style_props, "refine_style_art_style", text="Art Style")
+                    vs_col.prop(style_props, "refine_style_medium", text="Medium")
+                    vs_col.prop(style_props, "refine_style_lighting", text="Lighting")
 
-                # ── Composition ────────────────────────────────────────────
-                comp_box = ri_box.box()
-                comp_col = comp_box.column(align=True)
-                comp_col.label(text="Composition", icon='MESH_GRID')
-                comp_col.prop(style_props, "refine_comp_perspective", text="Perspective")
-                comp_col.prop(style_props, "refine_comp_focal_point", text="Focal Point")
+                    # ── Composition (scene mode only) ───────────────────────
+                    comp_box = ri_box.box()
+                    comp_col = comp_box.column(align=True)
+                    comp_col.label(text="Composition", icon='MESH_GRID')
+                    comp_col.prop(style_props, "refine_comp_perspective", text="Perspective")
+                    comp_col.prop(style_props, "refine_comp_focal_point", text="Focal Point")
 
-                # ── Subjects (dynamic list) ────────────────────────────────
+                # ── Subjects / Components (dynamic list) ───────────────────
                 subj_box = ri_box.box()
                 subj_hdr = subj_box.row()
-                subj_hdr.label(text="Subjects", icon='OBJECT_DATA')
+                _subj_label = "Components" if style_props.asset_mode else "Subjects"
+                subj_hdr.label(text=_subj_label, icon='MESH_DATA' if style_props.asset_mode else 'OBJECT_DATA')
                 subj_hdr.operator("style_engine.sync_scene_objects",       text="", icon='FILE_REFRESH')
                 subj_hdr.operator("style_engine.refine_image_add_subject", text="", icon='ADD')
 
@@ -7814,40 +8021,40 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                         s_col.prop(subj, "color", text="Color")
                         s_col.prop(subj, "material", text="Material")
 
-                        feat_hdr = s_box.row()
-                        feat_hdr.label(text="Features", icon='LINENUMBERS_ON')
-                        add_feat_op = feat_hdr.operator("style_engine.refine_image_add_feature", text="", icon='ADD')
-                        add_feat_op.subject_index = si
+                        # ── Features (free-form annotation strings) ────────────
+                        _feat_hdr = s_box.row(align=True)
+                        _feat_icon = 'TRIA_DOWN' if subj.show_features else 'TRIA_RIGHT'
+                        _feat_hdr.prop(subj, "show_features", text="", icon=_feat_icon, emboss=False)
+                        _feat_hdr.label(text=f"Features ({len(subj.features)})",
+                                        icon='SYNTAX_ON')
+                        _add_feat_op = _feat_hdr.operator(
+                            "style_engine.refine_image_add_feature", text="", icon='ADD')
+                        _add_feat_op.subject_index = si
+                        if subj.show_features:
+                            for _fi, _feat in enumerate(subj.features):
+                                _fr = s_box.row(align=True)
+                                _fr.prop(_feat, "value", text="")
+                                _rem_feat_op = _fr.operator(
+                                    "style_engine.refine_image_remove_feature",
+                                    text="", icon='X')
+                                _rem_feat_op.subject_index  = si
+                                _rem_feat_op.feature_index = _fi
 
-                        for fi, feat in enumerate(subj.features):
-                            feat_row = s_box.row(align=True)
-                            feat_row.prop(feat, "value", text="")
-                            rem_feat_op = feat_row.operator("style_engine.refine_image_remove_feature", text="", icon='X')
-                            rem_feat_op.subject_index = si
-                            rem_feat_op.feature_index = fi
-
-                        # Nested subjects sub-list (read-only, applied via Apply to Parent)
-                        if subj.nested_subjects_json:
+                        # Components sub-list (read-only; populated via Enter Asset Mode)
+                        if subj.components_json:
                             try:
                                 import json as _jns
-                                _nested = _jns.loads(subj.nested_subjects_json)
-                                if _nested:
-                                    _nh = s_box.row(align=True)
-                                    _ni = 'TRIA_DOWN' if subj.show_nested else 'TRIA_RIGHT'
-                                    _nh.prop(subj, "show_nested", text="", icon=_ni, emboss=False)
-                                    _nh.label(text=f"Nested parts ({len(_nested)})",
+                                _comps = _jns.loads(subj.components_json)
+                                if _comps:
+                                    _ch = s_box.row(align=True)
+                                    _ci = 'TRIA_DOWN' if subj.show_components else 'TRIA_RIGHT'
+                                    _ch.prop(subj, "show_components", text="", icon=_ci, emboss=False)
+                                    _ch.label(text=f"Components ({len(_comps)})",
                                               icon='OUTLINER_OB_GROUP_INSTANCE')
-                                    if subj.show_nested:
-                                        for _ne in _nested:
-                                            _nr = s_box.row(align=True)
-                                            _nr.label(text=f"  {_ne.get('label', '?')}",
-                                                      icon='DOT')
-                                            _dp = [v for v in [_ne.get('color'),
-                                                                _ne.get('style')] if v]
-                                            if _dp:
-                                                _nr.label(text=" / ".join(_dp))
-                            except Exception:
-                                pass
+                                    if subj.show_components:
+                                        _draw_nested_subjects(s_box, _comps, depth=0)
+                            except Exception as _cde:
+                                print(f"[JSON] ⚠ components draw failed for '{subj.label}': {_cde}")
 
                 # ── Thematic Tags ──────────────────────────────────────────
                 tags_box = ri_box.box()
@@ -9337,9 +9544,9 @@ class WM_OT_RefineImageRemoveSubject(bpy.types.Operator):
 
 
 class WM_OT_RefineImageAddFeature(bpy.types.Operator):
-    """Add a feature to a subject"""
+    """Add a free-form feature annotation to a subject or component"""
     bl_idname = "style_engine.refine_image_add_feature"
-    bl_label = "Add Feature"
+    bl_label  = "Add Feature"
     bl_options = {'REGISTER', 'UNDO'}
 
     subject_index: bpy.props.IntProperty(default=0)
@@ -9348,13 +9555,14 @@ class WM_OT_RefineImageAddFeature(bpy.types.Operator):
         props = context.scene.style_engine_props
         if 0 <= self.subject_index < len(props.refine_subjects):
             props.refine_subjects[self.subject_index].features.add()
+            props.refine_subjects[self.subject_index].show_features = True
         return {'FINISHED'}
 
 
 class WM_OT_RefineImageRemoveFeature(bpy.types.Operator):
-    """Remove a feature from a subject"""
+    """Remove a feature annotation from a subject or component"""
     bl_idname = "style_engine.refine_image_remove_feature"
-    bl_label = "Remove Feature"
+    bl_label  = "Remove Feature"
     bl_options = {'REGISTER', 'UNDO'}
 
     subject_index: bpy.props.IntProperty(default=0)
@@ -9362,11 +9570,38 @@ class WM_OT_RefineImageRemoveFeature(bpy.types.Operator):
 
     def execute(self, context):
         props = context.scene.style_engine_props
-        si, fi = self.subject_index, self.feature_index
-        if 0 <= si < len(props.refine_subjects):
-            subj = props.refine_subjects[si]
-            if 0 <= fi < len(subj.features):
-                subj.features.remove(fi)
+        if 0 <= self.subject_index < len(props.refine_subjects):
+            subj = props.refine_subjects[self.subject_index]
+            if 0 <= self.feature_index < len(subj.features):
+                subj.features.remove(self.feature_index)
+        return {'FINISHED'}
+
+
+class WM_OT_AssetSubjectAddFeature(bpy.types.Operator):
+    """Add a free-form feature annotation to the current asset's identity"""
+    bl_idname = "style_engine.asset_subject_add_feature"
+    bl_label  = "Add Asset Feature"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        props = context.scene.style_engine_props
+        props.asset_subject_features.add()
+        props.show_asset_subject_features = True
+        return {'FINISHED'}
+
+
+class WM_OT_AssetSubjectRemoveFeature(bpy.types.Operator):
+    """Remove a feature annotation from the current asset's identity"""
+    bl_idname = "style_engine.asset_subject_remove_feature"
+    bl_label  = "Remove Asset Feature"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    feature_index: bpy.props.IntProperty(default=0)
+
+    def execute(self, context):
+        props = context.scene.style_engine_props
+        if 0 <= self.feature_index < len(props.asset_subject_features):
+            props.asset_subject_features.remove(self.feature_index)
         return {'FINISHED'}
 
 
@@ -9453,7 +9688,44 @@ def _get_blender_scene_metadata(context, image_filename: str) -> dict:
     return meta
 
 
-def _build_agent_json_task_prompt(meta: dict) -> str:
+def _get_prompt_context_hint(props) -> str:
+    """
+    Build a short context sentence from available scene/asset state.
+
+    In asset mode: uses the asset name plus any inherited style/medium values.
+    In scene mode: reads the first ~150 characters of STYLEENGINE_Prompt.
+    Returns an empty string when no useful context is available.
+    """
+    import bpy as _bpy
+
+    asset_mode = getattr(props, "asset_mode", False)
+    asset_name = getattr(props, "current_asset_name", "").strip()
+
+    if asset_mode and asset_name:
+        style_parts = [props.refine_style_art_style, props.refine_style_medium]
+        style_str = ", ".join(p for p in style_parts if p and p.strip())
+        hint = f"This image shows '{asset_name}'"
+        if style_str:
+            hint += f" ({style_str})"
+        hint += "."
+        return hint
+
+    # Scene mode — read scene prompt
+    try:
+        tb = _bpy.data.texts.get("STYLEENGINE_Prompt")
+        if tb:
+            raw = tb.as_string().strip()
+            if raw:
+                truncated = raw[:150].rsplit(" ", 1)[0] if len(raw) > 150 else raw
+                return f"This image depicts: \"{truncated}\"."
+    except Exception:
+        pass
+
+    return ""
+
+
+def _build_agent_json_task_prompt(meta: dict, asset_mode: bool = False,
+                                  context_hint: str = "") -> str:
     """
     Build the task STRING that is injected into node "10" (Griptape Run: Image Description)
     before the workflow is queued.
@@ -9462,6 +9734,9 @@ def _build_agent_json_task_prompt(meta: dict) -> str:
     is already populated with exact values from Blender.  The agent's only job is
     to observe the image and fill in the remaining visual fields — it must never
     change or re-derive the metadata keys.
+
+    When asset_mode=True the instruction focuses on decomposing a single isolated
+    object into its visible components/parts rather than listing independent scene objects.
     """
     import json as _json
 
@@ -9476,36 +9751,66 @@ def _build_agent_json_task_prompt(meta: dict) -> str:
     if "depth_of_field" in meta:
         metadata_obj["depth_of_field"] = meta["depth_of_field"]
 
-    metadata_json = _json.dumps(metadata_obj, indent=4)
-
-    # Indent each line of the sub-object so it sits correctly inside the skeleton
-    indented = "\n".join("    " + line for line in metadata_json.splitlines())
+    # Composition keys differ between scene and asset context
+    comp_skeleton = (
+        {"camera_angle": "", "framing": ""}
+        if asset_mode else
+        {"perspective": "", "focal_point": ""}
+    )
 
     # Build a fully valid JSON skeleton with metadata pre-filled and all
     # other fields empty — the model copies metadata unchanged and fills the rest.
     skeleton = _json.dumps({
         "metadata":     metadata_obj,
         "visual_style": {"art_style": "", "medium": "", "lighting_condition": ""},
-        "composition":  {"perspective": "", "focal_point": ""},
+        "composition":  comp_skeleton,
         "subject_matter": [],
         "thematic_tags":  [],
     }, indent=2)
 
-    task = (
-        "Look at the image carefully. Identify and name every distinct visible "
-        "object, component, and part you can see.\n\n"
-        "Fill in the JSON below based on what you observe. "
-        "The metadata block is already correct — copy it unchanged. "
-        "Populate subject_matter with every foreground element you can identify, "
-        "and thematic_tags with scene/context keywords.\n\n"
-        "```json\n"
-        f"{skeleton}\n"
-        "```"
-    )
+    _hint_prefix = (context_hint + "\n\n") if context_hint else ""
+
+    if asset_mode:
+        task = (
+            f"{_hint_prefix}"
+            "Look at the single isolated object in this image carefully.\n\n"
+            "Identify and name every distinct visible COMPONENT or PART of this object. "
+            "Do NOT list background, environment, or context elements — only the parts "
+            "that physically belong to the object itself.\n\n"
+            "Fill in the JSON below based on what you observe. "
+            "The metadata block is already correct — copy it unchanged. "
+            "Populate subject_matter with each component/part of this single object "
+            "(e.g. for a character: helmet, breastplate, sword; for a vehicle: hood, wheel, exhaust). "
+            "For each entry, if you notice specific visible markings, emblems, decorations, or "
+            "distinctive surface details, list them as short strings in a `features` array "
+            "(e.g. [\"lion emblem\", \"engraved border\"]). Only include features you can clearly see.\n\n"
+            "Use thematic_tags for material and style keywords.\n\n"
+            "```json\n"
+            f"{skeleton}\n"
+            "```"
+        )
+    else:
+        task = (
+            f"{_hint_prefix}"
+            "Look at the image carefully. Identify and name every distinct visible "
+            "object, component, and part you can see.\n\n"
+            "Fill in the JSON below based on what you observe. "
+            "The metadata block is already correct — copy it unchanged. "
+            "Populate subject_matter with every foreground element you can identify. "
+            "For each entry, if you notice specific visible markings, emblems, decorations, or "
+            "distinctive surface details, list them as short strings in a `features` array "
+            "(e.g. [\"dragon emblem\", \"cracked surface\"]). Only include features you can clearly see.\n\n"
+            "Use thematic_tags with scene/context keywords.\n\n"
+            "```json\n"
+            f"{skeleton}\n"
+            "```"
+        )
     return task
 
 
-def _build_agent_json_task_prompt_merge(meta: dict, props) -> str:
+def _build_agent_json_task_prompt_merge(meta: dict, props,
+                                        asset_mode: bool = False,
+                                        context_hint: str = "") -> str:
     """
     Build the task STRING for AgentJSONMerge.json.
 
@@ -9513,6 +9818,9 @@ def _build_agent_json_task_prompt_merge(meta: dict, props) -> str:
     (serialised from props) as `existing_json` so the agent can merge rather
     than replace.  The agent's merge rules are defined in the workflow's node 4
     system prompt.
+
+    When asset_mode=True the instruction focuses on components/parts of a single
+    isolated object rather than independent scene objects.
     """
     import json as _json
 
@@ -9527,27 +9835,61 @@ def _build_agent_json_task_prompt_merge(meta: dict, props) -> str:
     if "depth_of_field" in meta:
         metadata_obj["depth_of_field"] = meta["depth_of_field"]
 
-    metadata_json = _json.dumps(metadata_obj, indent=4)
-    indented_meta = "\n".join("    " + line for line in metadata_json.splitlines())
-
-    # Serialise the current JSON so the agent can see existing subjects
+    # Serialise the current JSON so the agent can see existing subjects.
+    # In asset mode use the agent-facing structure (asset as single subject with
+    # components nested inside) so the model always sees "components": [] and
+    # knows exactly where to put new parts.
     try:
-        current_json_str = _build_refine_json(props)
+        if asset_mode:
+            current_json_str = _build_refine_json_for_agent(props)
+        else:
+            current_json_str = _build_refine_json(props)
     except Exception:
         current_json_str = "{}"
 
-    task = (
-        "Look at the image. Then return an updated version of the existing JSON below.\n\n"
-        f"Metadata (copy verbatim): {_json.dumps(metadata_obj)}\n\n"
-        "Existing JSON to update:\n"
-        "```json\n"
-        f"{current_json_str}\n"
-        "```\n\n"
-        "Keep all existing subject labels unchanged. Update their style/color/material/features "
-        "from the image if you can see them. Add new entries for any visible foreground "
-        "objects not already listed. Update visual_style, composition, thematic_tags freely.\n\n"
-        "Return only the complete updated JSON in ```json ... ``` fences."
-    )
+    _hint_prefix = (context_hint + "\n\n") if context_hint else ""
+
+    if asset_mode:
+        task = (
+            f"{_hint_prefix}"
+            "Look at the single isolated object in this image. Then return an updated "
+            "version of the existing JSON below.\n\n"
+            f"Metadata (copy verbatim): {_json.dumps(metadata_obj)}\n\n"
+            "Existing JSON to update:\n"
+            "```json\n"
+            f"{current_json_str}\n"
+            "```\n\n"
+            "COMPONENT RULES — strictly follow this structure:\n"
+            "- The subject_matter array contains exactly ONE entry (the asset itself).\n"
+            "- Its visible parts go inside the `components` array of that entry.\n"
+            "- Each component MUST have: label (snake_case noun), style, scale, color, material.\n"
+            "- Keep all existing component labels unchanged — they are permanent IDs.\n"
+            "- Update style/color/material for existing components from what you see.\n"
+            "- Add new components to the `components` array for any visible part not already listed.\n"
+            "- NEVER add components as top-level keys on the subject (e.g. no `clothing: {...}`).\n"
+            "- Do NOT add background or environment entries anywhere.\n"
+            "FEATURES: Each entry (including the top-level subject) may have an optional `features` array "
+            "of short strings describing specific visible markings, emblems, or decorations. "
+            "If the existing JSON already has `features` on an entry, copy them unchanged and append "
+            "any newly visible ones. Never remove existing features.\n\n"
+            "Update visual_style, composition, thematic_tags freely.\n\n"
+            "Return only the complete updated JSON in ```json ... ``` fences."
+        )
+    else:
+        task = (
+            f"{_hint_prefix}"
+            "Look at the image. Then return an updated version of the existing JSON below.\n\n"
+            f"Metadata (copy verbatim): {_json.dumps(metadata_obj)}\n\n"
+            "Existing JSON to update:\n"
+            "```json\n"
+            f"{current_json_str}\n"
+            "```\n\n"
+            "Keep all existing subject labels unchanged. Update their style/color/material "
+            "from the image if you can see them. Add new entries for any visible foreground "
+            "objects not already listed. If an entry already has `features`, copy them unchanged "
+            "and only append newly visible ones. Update visual_style, composition, thematic_tags freely.\n\n"
+            "Return only the complete updated JSON in ```json ... ``` fences."
+        )
     return task
 
 
@@ -9585,8 +9927,10 @@ def _merge_refine_from_json(props, json_text):
 
     comp = data.get("composition", {})
     if comp:
-        props.refine_comp_perspective = comp.get("perspective",  props.refine_comp_perspective)
-        props.refine_comp_focal_point = comp.get("focal_point",  props.refine_comp_focal_point)
+        props.refine_comp_perspective = (comp.get("perspective",  props.refine_comp_perspective)
+                                          or comp.get("camera_angle", props.refine_comp_perspective))
+        props.refine_comp_focal_point = (comp.get("focal_point",  props.refine_comp_focal_point)
+                                          or comp.get("framing",    props.refine_comp_focal_point))
 
     incoming_tags = data.get("thematic_tags", [])
     if incoming_tags:
@@ -9595,61 +9939,203 @@ def _merge_refine_from_json(props, json_text):
             tag = props.refine_tags.add()
             tag.value = tag_str
 
+    # Standard subject keys — anything outside this set that is a dict with a
+    # label field was placed there by a model that didn't follow the components
+    # array structure.  We rescue those into the components list below.
+    _STANDARD_SUBJECT_KEYS = frozenset({
+        "label", "style", "scale", "color", "material",
+        "_linked_object", "_asset_object_link",
+        "components", "nested_subjects", "features",
+    })
+
+    def _extract_components(subj_data):
+        """Return the components list from *subj_data*, rescuing loose dict keys."""
+        comps = (subj_data.get("components")
+                 or subj_data.get("nested_subjects"))
+        # Defensive rescue: collect any dict-valued key the model put directly on
+        # the subject instead of in the components array (e.g. "clothing": {...}).
+        rescued = [
+            v for k, v in subj_data.items()
+            if k not in _STANDARD_SUBJECT_KEYS
+            and isinstance(v, dict)
+            and v.get("label")
+        ]
+        if rescued:
+            print(f"[RefineJSON Merge] ↩ Rescued {len(rescued)} loose component(s) "
+                  f"({', '.join(v['label'] for v in rescued)})")
+            comps = list(comps or []) + rescued
+        return comps or None
+
     # -- Subject matter: merge by label --
-    # Build fast lookup of existing subjects
-    by_label = {s.label: i for i, s in enumerate(props.refine_subjects)}
+    # In asset mode the AI returns the asset as the single subject_matter entry
+    # with components nested inside it.  We need to:
+    #   • Update the asset identity props (style/scale/color/material).
+    #   • Merge the components into refine_subjects (the flat component list).
+    # In scene mode the standard per-subject merge applies.
+    _in_asset_mode = getattr(props, 'asset_mode', False)
+    asset_name     = getattr(props, 'current_asset_name', '').strip()
 
-    for subj_data in data.get("subject_matter", []):
-        label = subj_data.get("label", "").strip()
-        if not label:
-            continue
+    subject_list = data.get("subject_matter", [])
 
-        if label in by_label:
-            # Update visual fields only — never touch linked_object_name
-            existing = props.refine_subjects[by_label[label]]
-            if subj_data.get("style"):
-                existing.style    = subj_data["style"]
-            if subj_data.get("scale"):
-                existing.scale    = subj_data["scale"]
-            if subj_data.get("color"):
-                existing.color    = subj_data["color"]
-            if subj_data.get("material"):
-                existing.material = subj_data["material"]
-            # Merge features: replace if AI returned a non-empty list
-            incoming_feats = subj_data.get("features", [])
-            if incoming_feats:
-                existing.features.clear()
-                for feat_str in incoming_feats:
-                    feat = existing.features.add()
-                    feat.value = feat_str
-        else:
-            # New subject — append and restore any persisted link
-            try:
-                _link_map = _json.loads(props.asset_object_links or "{}")
-            except Exception:
-                _link_map = {}
+    if _in_asset_mode and subject_list:
+        # The first (and normally only) entry IS the asset.  If the model
+        # returned the asset entry, update identity props and merge components.
+        # Any additional top-level entries are treated as extra components.
+        all_components = []
+        for subj_data in subject_list:
+            label = subj_data.get("label", "").strip()
+            # Entry that matches the asset name → update identity + pull components
+            if label == asset_name or not all_components:
+                if subj_data.get("style"):
+                    props.asset_subject_style    = subj_data["style"]
+                if subj_data.get("scale"):
+                    props.asset_subject_scale    = subj_data["scale"]
+                if subj_data.get("color"):
+                    props.asset_subject_color    = subj_data["color"]
+                if subj_data.get("material"):
+                    props.asset_subject_material = subj_data["material"]
+                # Merge asset-level features — append new, keep existing.
+                _existing_feat_vals = {f.value for f in props.asset_subject_features}
+                for feat_str in subj_data.get("features", []):
+                    if (isinstance(feat_str, str) and feat_str.strip()
+                            and feat_str not in _existing_feat_vals):
+                        fi = props.asset_subject_features.add()
+                        fi.value = feat_str
+                        _existing_feat_vals.add(feat_str)
+                extracted = _extract_components(subj_data)
+                if extracted:
+                    all_components.extend(extracted)
+            else:
+                # Additional subject entries returned by the model in asset mode
+                # are treated as extra component entries.
+                comp_entry = {k: v for k, v in subj_data.items()
+                              if k in ("label", "style", "scale", "color", "material")}
+                if comp_entry.get("label"):
+                    all_components.append(comp_entry)
 
-            subj = props.refine_subjects.add()
-            subj.label         = label
-            subj.style         = subj_data.get("style",    "")
-            subj.scale         = subj_data.get("scale",    "")
-            subj.color         = subj_data.get("color",    "")
-            subj.material      = subj_data.get("material", "")
-            subj.show_expanded = False
-            for feat_str in subj_data.get("features", []):
-                feat = subj.features.add()
-                feat.value = feat_str
-            linked = subj_data.get("_linked_object", "") or _link_map.get(label, "")
-            if linked:
-                subj.linked_object_name = linked
-            by_label[label] = len(props.refine_subjects) - 1
-            print(f"[RefineJSON Merge] ➕ New subject '{label}'")
+        def _merge_features_into(target_item, incoming_feats):
+            """Append new feature strings; never overwrite existing user annotations."""
+            existing_vals = {f.value for f in target_item.features}
+            for feat_str in (incoming_feats or []):
+                if isinstance(feat_str, str) and feat_str.strip() and feat_str not in existing_vals:
+                    fi = target_item.features.add()
+                    fi.value = feat_str
+                    existing_vals.add(feat_str)
 
-    # Sync any scene objects not yet in the list
-    try:
-        sync_scene_objects_to_json(props, bpy.context)
-    except Exception as _se:
-        print(f"[RefineJSON Merge] ⚠ Post-merge sync skipped: {_se}")
+        # Merge collected components into refine_subjects (flat component list)
+        by_label = {s.label: i for i, s in enumerate(props.refine_subjects)}
+        for comp_data in all_components:
+            comp_label = comp_data.get("label", "").strip()
+            if not comp_label:
+                continue
+            if comp_label in by_label:
+                existing = props.refine_subjects[by_label[comp_label]]
+                if comp_data.get("style"):    existing.style    = comp_data["style"]
+                if comp_data.get("scale"):    existing.scale    = comp_data["scale"]
+                if comp_data.get("color"):    existing.color    = comp_data["color"]
+                if comp_data.get("material"): existing.material = comp_data["material"]
+                _merge_features_into(existing, comp_data.get("features"))
+                sub_comps = _extract_components(comp_data)
+                if sub_comps:
+                    try:
+                        existing.components_json = _json.dumps(sub_comps)
+                    except Exception:
+                        pass
+            else:
+                new_comp = props.refine_subjects.add()
+                new_comp.label         = comp_label
+                new_comp.style         = comp_data.get("style",    "")
+                new_comp.scale         = comp_data.get("scale",    "")
+                new_comp.color         = comp_data.get("color",    "")
+                new_comp.material      = comp_data.get("material", "")
+                new_comp.show_expanded = True
+                for feat_str in comp_data.get("features", []):
+                    if isinstance(feat_str, str) and feat_str.strip():
+                        fi = new_comp.features.add()
+                        fi.value = feat_str
+                sub_comps = _extract_components(comp_data)
+                if sub_comps:
+                    try:
+                        new_comp.components_json = _json.dumps(sub_comps)
+                    except Exception:
+                        pass
+                by_label[comp_label] = len(props.refine_subjects) - 1
+                print(f"[RefineJSON Merge] ➕ New component '{comp_label}'")
+
+    else:
+        # Scene mode: standard per-subject merge.
+        def _merge_features_into(target_item, incoming_feats):
+            existing_vals = {f.value for f in target_item.features}
+            for feat_str in (incoming_feats or []):
+                if isinstance(feat_str, str) and feat_str.strip() and feat_str not in existing_vals:
+                    fi = target_item.features.add()
+                    fi.value = feat_str
+                    existing_vals.add(feat_str)
+
+        by_label = {s.label: i for i, s in enumerate(props.refine_subjects)}
+
+        for subj_data in subject_list:
+            label = subj_data.get("label", "").strip()
+            if not label:
+                continue
+
+            if label in by_label:
+                # Update visual fields only — never touch linked_object_name
+                existing = props.refine_subjects[by_label[label]]
+                if subj_data.get("style"):
+                    existing.style    = subj_data["style"]
+                if subj_data.get("scale"):
+                    existing.scale    = subj_data["scale"]
+                if subj_data.get("color"):
+                    existing.color    = subj_data["color"]
+                if subj_data.get("material"):
+                    existing.material = subj_data["material"]
+                # Append new features — keep existing user annotations intact.
+                _merge_features_into(existing, subj_data.get("features"))
+                # Merge components: replace if AI returned a non-empty list.
+                _incoming_comps = _extract_components(subj_data)
+                if _incoming_comps:
+                    try:
+                        existing.components_json = _json.dumps(_incoming_comps)
+                    except Exception:
+                        pass
+            else:
+                # New subject — append and restore any persisted link
+                try:
+                    _link_map = _json.loads(props.asset_object_links or "{}")
+                except Exception:
+                    _link_map = {}
+
+                subj = props.refine_subjects.add()
+                subj.label         = label
+                subj.style         = subj_data.get("style",    "")
+                subj.scale         = subj_data.get("scale",    "")
+                subj.color         = subj_data.get("color",    "")
+                subj.material      = subj_data.get("material", "")
+                subj.show_expanded = False
+                for feat_str in subj_data.get("features", []):
+                    if isinstance(feat_str, str) and feat_str.strip():
+                        fi = subj.features.add()
+                        fi.value = feat_str
+                _new_comps = _extract_components(subj_data)
+                if _new_comps:
+                    try:
+                        subj.components_json = _json.dumps(_new_comps)
+                    except Exception:
+                        pass
+                linked = subj_data.get("_linked_object", "") or _link_map.get(label, "")
+                if linked:
+                    subj.linked_object_name = linked
+                by_label[label] = len(props.refine_subjects) - 1
+                print(f"[RefineJSON Merge] ➕ New subject '{label}'")
+
+    # Sync any scene objects not yet in the list — skip in asset mode to prevent
+    # scene mesh objects from being injected into the asset's component list.
+    if not getattr(props, 'asset_mode', False):
+        try:
+            sync_scene_objects_to_json(props, bpy.context)
+        except Exception as _se:
+            print(f"[RefineJSON Merge] ⚠ Post-merge sync skipped: {_se}")
 
 
 class STYLEENGINE_OT_ApplyToParent(bpy.types.Operator):
@@ -9672,7 +10158,7 @@ class STYLEENGINE_OT_ApplyToParent(bpy.types.Operator):
         props       = context.scene.style_engine_props
         child_label = props.current_asset_name
 
-        # 1. Build nested_subjects list from the current asset's subjects
+        # 1. Build components list from the current asset's subjects
         nested = []
         for subj in props.refine_subjects:
             entry = {
@@ -9681,11 +10167,10 @@ class STYLEENGINE_OT_ApplyToParent(bpy.types.Operator):
                 "scale":    subj.scale,
                 "color":    subj.color,
                 "material": subj.material,
-                "features": [f.value for f in subj.features if f.value.strip()],
             }
-            if subj.nested_subjects_json:
+            if subj.components_json:
                 try:
-                    entry["nested_subjects"] = json.loads(subj.nested_subjects_json)
+                    entry["components"] = json.loads(subj.components_json)
                 except Exception:
                     pass
             nested.append(entry)
@@ -9700,11 +10185,11 @@ class STYLEENGINE_OT_ApplyToParent(bpy.types.Operator):
             self.report({'ERROR'}, f"Could not parse parent subjects: {_je}")
             return {'CANCELLED'}
 
-        # 3. Find the matching subject in the parent and inject nested_subjects
+        # 3. Find the matching subject in the parent and inject components
         updated = False
         for se in parent_data.get("subject_matter", []):
             if se.get("label") == child_label:
-                se["nested_subjects"] = nested
+                se["components"] = nested
                 updated = True
                 break
         if not updated:
@@ -9712,6 +10197,18 @@ class STYLEENGINE_OT_ApplyToParent(bpy.types.Operator):
                         f"Subject '{child_label}' not found in parent — "
                         f"check the subject label matches the asset name")
             return {'CANCELLED'}
+
+        # 3b. Push visual_style to the parent if the asset has non-empty values
+        #     that differ from what the parent currently records.
+        _asset_vs = {
+            "art_style":          props.refine_style_art_style,
+            "medium":             props.refine_style_medium,
+            "lighting_condition": props.refine_style_lighting,
+        }
+        _parent_vs = parent_data.get("visual_style", {})
+        if any(_asset_vs.values()) and _asset_vs != _parent_vs:
+            parent_data["visual_style"] = _asset_vs
+            print(f"[ApplyToParent] Visual style pushed to parent: {_asset_vs}")
 
         updated_str = json.dumps(parent_data, indent=2)
 
@@ -9728,8 +10225,14 @@ class STYLEENGINE_OT_ApplyToParent(bpy.types.Operator):
                                         path_components=_pc_arg)
             print(f"[ApplyToParent] Saved to disk: {_parent_name} "
                   f"(path={_parent_components})")
-        # If stack is empty, the parent is the scene — only asset_prev_subjects
-        # matters; it gets restored into the live subjects on ExitAssetMode.
+        else:
+            # Parent is the scene — also update the live scene visual_style props
+            # so the change is visible immediately when the user exits to scene mode.
+            if any(_asset_vs.values()) and _asset_vs != _parent_vs:
+                props.refine_style_art_style = _asset_vs["art_style"]
+                props.refine_style_medium    = _asset_vs["medium"]
+                props.refine_style_lighting  = _asset_vs["lighting_condition"]
+                print("[ApplyToParent] Scene visual style props updated directly")
 
         self.report({'INFO'}, f"Applied '{child_label}' subjects to parent")
         return {'FINISHED'}
@@ -9833,10 +10336,16 @@ class WM_OT_RefineImageAnalyzeJSON(bpy.types.Operator):
 
             # ── Build and inject the task prompt (node 10) ────────────────────
             meta = _get_blender_scene_metadata(context, uploaded_filename)
+            _in_asset_mode = getattr(props, "asset_mode", False)
+            _hint = _get_prompt_context_hint(props)
+            if _hint:
+                print(f"[RefineJSON] Context hint: {_hint}")
             if has_subjects:
-                task_prompt = _build_agent_json_task_prompt_merge(meta, props)
+                task_prompt = _build_agent_json_task_prompt_merge(
+                    meta, props, asset_mode=_in_asset_mode, context_hint=_hint)
             else:
-                task_prompt = _build_agent_json_task_prompt(meta)
+                task_prompt = _build_agent_json_task_prompt(
+                    meta, asset_mode=_in_asset_mode, context_hint=_hint)
 
             task_node = "10"
             if task_node in workflow:
@@ -9947,7 +10456,9 @@ class WM_OT_RefineImageSubmit(bpy.types.Operator):
         from . import workspace_setup
 
         if props.use_structured_editing:
-            json_body = _build_refine_json(props)
+            # In asset mode use the agent-specific builder so the asset's own
+            # style/scale/color/material are included as the top-level subject.
+            json_body = _build_refine_json_for_agent(props)
             instruction = "Edit this image based on the following JSON modifications:\n" + json_body
 
             # Write instruction into STYLEENGINE_Prompt so generate_ai_image_cloud picks it up
@@ -9961,13 +10472,13 @@ class WM_OT_RefineImageSubmit(bpy.types.Operator):
             print(f"[RefineImage] Wrote structured instruction to STYLEENGINE_Prompt "
                   f"({len(instruction)} chars)")
 
-        # Alignment and BG removal are always forced on for agent-driven
-        # refinement: alignment keeps the composition anchored, BG removal
-        # isolates the subject so the agent focuses on what matters.
+        # Alignment is always forced on — keeps the composition anchored.
+        # BG removal is forced on only in asset mode (isolates the subject);
+        # in scene mode the background is intentionally preserved.
         _prev_alignment  = props.gemini_alignment
         _prev_remove_bg  = props.gemini_remove_bg
         props.gemini_alignment = True
-        props.gemini_remove_bg = True
+        props.gemini_remove_bg = bool(getattr(props, "asset_mode", False))
 
         try:
             workspace_setup.generate_ai_image_cloud(context, refine_mode=True)
@@ -10039,6 +10550,8 @@ classes = (
     WM_OT_RefineImageRemoveSubject,
     WM_OT_RefineImageAddFeature,
     WM_OT_RefineImageRemoveFeature,
+    WM_OT_AssetSubjectAddFeature,
+    WM_OT_AssetSubjectRemoveFeature,
     WM_OT_RefineImageAddTag,
     WM_OT_RefineImageRemoveTag,
     WM_OT_RefineImageAnalyzeJSON,

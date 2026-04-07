@@ -977,7 +977,17 @@ def switch_asset_iteration(context, asset_label, new_index):
     # Update asset camera background image
     img_rel  = new_entry.get("image_file")
     img_path = (asset_dir / img_rel) if img_rel else None
-    asset_temp = get_asset_temp_directory(context, asset_label)
+    # Use the full ancestry chain so nested assets write to the right directory.
+    try:
+        _hist_props = bpy.context.scene.style_engine_props
+        _hist_comps = get_asset_path_components(_hist_props)
+    except Exception:
+        _hist_comps = [asset_label]
+    if _hist_comps and len(_hist_comps) > 1:
+        asset_temp = get_nested_asset_directory(context, _hist_comps) / "temp"
+        asset_temp.mkdir(parents=True, exist_ok=True)
+    else:
+        asset_temp = get_asset_temp_directory(context, asset_label)
     current_ai = asset_temp / "current_ai.png"
     if img_path and img_path.exists():
         try:
@@ -987,7 +997,7 @@ def switch_asset_iteration(context, asset_label, new_index):
     else:
         print(f"[Asset History] ℹ No image for iteration {new_index}")
 
-    refresh_asset_camera_image(asset_label)
+    refresh_asset_camera_image(asset_label, path_components=_hist_comps)
 
     # Restore the subjects JSON that was snapshotted when this iteration was created
     try:
@@ -1856,15 +1866,24 @@ def compress_image_for_upload(image_path, max_side=1920):
         return Path(image_path)
 
 
-def _asset_datablock_name(object_name):
+def _asset_datablock_name(name_or_components):
     """Unique Blender image-datablock name for an asset's camera background.
+
+    Accepts either a plain string (leaf name) or a list of path components
+    (full ancestry chain) so nested assets get distinct datablock names
+    and never collide with siblings that share a leaf label.
     Keeps it distinct from the scene's 'current_ai.png' to prevent Blender
-    auto-suffixing it '.001'."""
-    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in object_name)
+    auto-suffixing it '.001'.
+    """
+    if isinstance(name_or_components, list):
+        raw = "_".join(name_or_components)
+    else:
+        raw = name_or_components
+    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in raw)
     return f"current_ai_{safe}"
 
 
-def create_asset_placeholder_image(context, object_name):
+def create_asset_placeholder_image(context, object_name, path_components=None):
     """
     Create a fresh 1024×1024 black PNG at <asset_temp>/current_ai.png and
     load it as a named Blender image datablock.
@@ -1873,12 +1892,19 @@ def create_asset_placeholder_image(context, object_name):
     always has a real on-disk file, exactly mirroring what the ai_camera
     setup does for the global current_ai.png.
 
+    *path_components* is the full ancestry chain (e.g. ["gollum", "trinkets"]).
+    When provided, the nested directory is used instead of the flat Models dir.
+
     Returns the Path to the created file.
     """
-    asset_temp = get_asset_temp_directory(context, object_name)
-    asset_temp.mkdir(parents=True, exist_ok=True)
+    if path_components and len(path_components) > 1:
+        asset_temp = get_nested_asset_directory(context, path_components) / "temp"
+        asset_temp.mkdir(parents=True, exist_ok=True)
+    else:
+        asset_temp = get_asset_temp_directory(context, object_name)
+        asset_temp.mkdir(parents=True, exist_ok=True)
     img_path  = asset_temp / "current_ai.png"
-    db_name   = _asset_datablock_name(object_name)
+    db_name   = _asset_datablock_name(path_components if path_components else object_name)
 
     # Remove stale datablock (name conflict or wrong filepath)
     if db_name in bpy.data.images:
@@ -1899,7 +1925,8 @@ def create_asset_placeholder_image(context, object_name):
     return img_path
 
 
-def setup_asset_camera_background(context, object_name, cam_obj):
+def setup_asset_camera_background(context, object_name, cam_obj,
+                                   path_components=None):
     """
     Set up (or refresh) the background image on an asset camera.
 
@@ -1907,14 +1934,22 @@ def setup_asset_camera_background(context, object_name, cam_obj):
     never clashes with the scene's 'current_ai.png' datablock and Blender
     never auto-renames it '.001'.
 
+    *path_components* is the full ancestry chain (e.g. ["gollum", "trinkets"]).
+    When provided it is used for both the directory path and the datablock name
+    so nested assets resolve to their own subdirectory and datablock.
+
     Expects create_asset_placeholder_image() to have been called first (during
     EnterAssetMode) so the file always exists on disk at entry time.
     """
-    asset_temp = get_asset_temp_directory(context, object_name)
-    asset_temp.mkdir(parents=True, exist_ok=True)
+    if path_components and len(path_components) > 1:
+        asset_temp = get_nested_asset_directory(context, path_components) / "temp"
+        asset_temp.mkdir(parents=True, exist_ok=True)
+    else:
+        asset_temp = get_asset_temp_directory(context, object_name)
+        asset_temp.mkdir(parents=True, exist_ok=True)
     img_path  = asset_temp / "current_ai.png"
     canonical = str(img_path)
-    db_name   = _asset_datablock_name(object_name)
+    db_name   = _asset_datablock_name(path_components if path_components else object_name)
 
     cam_data = cam_obj.data
     cam_data.show_background_images = True
@@ -1958,20 +1993,32 @@ def setup_asset_camera_background(context, object_name, cam_obj):
     print(f"[Asset Mode] ✓ Asset camera background set: {db_name} → {img_path.name}")
 
 
-def refresh_asset_camera_image(object_name):
+def refresh_asset_camera_image(object_name, path_components=None):
     """
     Reload the asset camera background from the asset's own temp/current_ai.png.
+
+    *path_components* is the full ancestry chain (e.g. ["gollum", "trinkets"]).
+    When provided it is used to build the full camera name (e.g.
+    asset_camera_gollum_trinkets) so nested cameras are found correctly.
 
     The download callbacks write directly to the asset temp via
     get_active_ai_output_path, so no copy from global temp is needed here.
     """
     try:
-        ctx      = bpy.context
-        safe     = "".join(c if c.isalnum() or c in "-_" else "_" for c in object_name)
+        ctx = bpy.context
+        name_key = path_components if path_components else object_name
+        if isinstance(name_key, list):
+            safe = "".join(
+                c if c.isalnum() or c in "-_" else "_"
+                for c in "_".join(name_key)
+            )
+        else:
+            safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in name_key)
         cam_name = f"asset_camera_{safe}"
         cam_obj  = bpy.data.objects.get(cam_name)
         if cam_obj:
-            setup_asset_camera_background(ctx, object_name, cam_obj)
+            setup_asset_camera_background(ctx, object_name, cam_obj,
+                                          path_components=path_components)
         else:
             print(f"[Asset Mode] ⚠ Asset camera '{cam_name}' not found in scene")
 
@@ -2022,7 +2069,9 @@ def refresh_ai_image():
             if getattr(props, 'asset_mode', False):
                 asset_name = getattr(props, 'current_asset_name', '')
                 if asset_name:
-                    refresh_asset_camera_image(asset_name)
+                    _comps = get_asset_path_components(props)
+                    refresh_asset_camera_image(asset_name,
+                                               path_components=_comps if _comps else None)
                 return  # global current_ai.png must not be touched
         except Exception as _ae:
             print(f"[Asset Mode] ⚠ asset camera refresh skipped: {_ae}")
@@ -3607,7 +3656,9 @@ def render_passes(context):
     _in_asset_mode = getattr(_asset_props, 'asset_mode', False)
     if _in_asset_mode:
         _asset_name = getattr(_asset_props, 'current_asset_name', '')
-        _safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in _asset_name)
+        _render_comps = get_asset_path_components(_asset_props)
+        _render_key   = "_".join(_render_comps) if _render_comps else _asset_name
+        _safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in _render_key)
         _asset_cam_name = f"asset_camera_{_safe}"
         ai_camera = bpy.data.objects.get(_asset_cam_name)
         if ai_camera is None:
@@ -3855,15 +3906,12 @@ def queue_asset_isolation_workflow(context, object_name):
             if _parts:
                 descriptor = f"{object_name} ({', '.join(_parts)})"
 
-            # Architectural detection — check label, material, and features
+            # Architectural detection — check label and material
             _label_words = set(object_name.lower().replace("_", " ").split())
             if _label_words & _ARCH_LABEL_KEYWORDS:
                 is_arch = True
             elif _subj.material and any(
                     k in _subj.material.lower() for k in _ARCH_MATERIAL_KEYWORDS):
-                is_arch = True
-            elif any(any(k in f.value.lower() for k in _ARCH_FEATURE_KEYWORDS)
-                     for f in _subj.features):
                 is_arch = True
     except Exception as _de:
         print(f"[Asset Mode] Could not build subject descriptor: {_de}")

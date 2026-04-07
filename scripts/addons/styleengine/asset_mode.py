@@ -54,8 +54,19 @@ def _draw_asset_mode_overlay():
 # ================================================================
 
 
-def _get_asset_camera_name(object_name):
-    safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in object_name)
+def _get_asset_camera_name(name_or_components):
+    """Return the camera object name for an asset.
+
+    Accepts either a plain string (leaf name) or a list of path components
+    (full ancestry chain).  Using the full chain prevents naming collisions
+    when two assets at different nesting depths share the same leaf label
+    (e.g. a top-level 'trinkets' vs 'gollum/trinkets').
+    """
+    if isinstance(name_or_components, list):
+        raw = "_".join(name_or_components)
+    else:
+        raw = name_or_components
+    safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in raw)
     return f"asset_camera_{safe}"
 
 
@@ -154,16 +165,18 @@ def _frame_camera_on_object(cam_obj, target_obj):
     cam_obj.matrix_world = rot_mat
 
 
-def _get_or_create_asset_camera(object_name):
+def _get_or_create_asset_camera(path_components):
     """
-    Return the asset camera for *object_name*, creating it if necessary.
+    Return the asset camera for the given path, creating it if necessary.
 
-    The camera is linked to the scene root collection and then parented to the
-    asset's Empty anchor (same name as object_name) so the entire asset hierarchy
-    lives under one outliner entry.  No separate asset_cameras collection is used.
+    Accepts a list of path components (full ancestry chain, e.g. ["gollum",
+    "trinkets"]) or a plain string for backward compatibility.  The camera
+    name encodes the full path so there are no collisions between assets at
+    different nesting depths that share a leaf label.
     """
-    cam_name = _get_asset_camera_name(object_name)
-    cam_obj  = bpy.data.objects.get(cam_name)
+    cam_name  = _get_asset_camera_name(path_components)
+    leaf_name = path_components[-1] if isinstance(path_components, list) else path_components
+    cam_obj   = bpy.data.objects.get(cam_name)
     if cam_obj is None:
         cam_data      = bpy.data.cameras.new(cam_name)
         cam_data.lens = 50.0
@@ -175,8 +188,8 @@ def _get_or_create_asset_camera(object_name):
         # Hide from viewport by default — still works as active render/scene camera
         cam_obj.hide_viewport = True
 
-        # Parent to the asset Empty anchor so it sits under it in the outliner
-        anchor = bpy.data.objects.get(object_name)
+        # Parent to the asset Empty anchor (leaf name) so the hierarchy is clean
+        anchor = bpy.data.objects.get(leaf_name)
         if anchor and anchor.type == 'EMPTY':
             cam_obj.parent = anchor
             cam_obj.matrix_parent_inverse = anchor.matrix_world.inverted()
@@ -260,6 +273,18 @@ class STYLEENGINE_OT_EnterAssetMode(bpy.types.Operator):
                     "asset_subject_index":    props.asset_subject_index,
                     "asset_object_links":     props.asset_object_links,
                     "asset_current_3d_index": props.asset_current_3d_index,
+                    "prev_visual_style": {
+                        "art_style":          props.refine_style_art_style,
+                        "medium":             props.refine_style_medium,
+                        "lighting_condition": props.refine_style_lighting,
+                    },
+                    # Identity of the asset being paused — restored on nested exit
+                    "asset_subject_style":    props.asset_subject_style,
+                    "asset_subject_scale":    props.asset_subject_scale,
+                    "asset_subject_color":    props.asset_subject_color,
+                    "asset_subject_material": props.asset_subject_material,
+                    "asset_subject_features": [f.value for f in props.asset_subject_features
+                                               if f.value.strip()],
                 }
                 _stack.append(_snapshot)
                 props.asset_mode_stack = json.dumps(_stack)
@@ -278,18 +303,27 @@ class STYLEENGINE_OT_EnterAssetMode(bpy.types.Operator):
         }
         props.asset_stored_visibility = json.dumps(vis_dict)
 
+        # ── 2b. Compute the full ancestry path for this entry ────────────────
+        # The stack was already updated above (if nested), so reading it here
+        # gives the correct parent chain.  A single-level entry still produces
+        # a one-element list, which generates the same camera/dir name as before.
+        _pending_stack_   = json.loads(props.asset_mode_stack or "[]")
+        _pending_parents_ = [e["asset_name"] for e in _pending_stack_]
+        _path_comps       = _pending_parents_ + [asset_label]
+
         # ── 3. Hide everything except the active object ────────────────────
-        # Also keep the asset camera (keyed to asset_label) visible.
+        # Also keep the asset camera (full-path key) visible.
+        _this_cam_name = _get_asset_camera_name(_path_comps)
         for o in scene.objects:
             if o == obj:
                 continue
-            if o.type == 'CAMERA' and o.name == _get_asset_camera_name(asset_label):
+            if o.type == 'CAMERA' and o.name == _this_cam_name:
                 continue
             o.hide_viewport = True
             o.hide_render   = True
 
-        # ── 4. Create / retrieve the dedicated asset camera (by concept label) ──
-        cam_obj = _get_or_create_asset_camera(asset_label)
+        # ── 4. Create / retrieve the dedicated asset camera (full path key) ──
+        cam_obj = _get_or_create_asset_camera(_path_comps)
         # Unhide while this asset is active so the background image (current_ai.png)
         # is visible in camera view. Re-hidden on ExitAssetMode.
         cam_obj.hide_viewport = False
@@ -309,18 +343,16 @@ class STYLEENGINE_OT_EnterAssetMode(bpy.types.Operator):
 
         # ── 6c. Create black placeholder + set up camera background ──────
         # All asset_label iterations share the same directory/camera.
-        # For nested assets the directory lives under the parent's path.
+        # Pass path_components so nested assets use their own subdirectory.
         try:
             from . import workspace_setup as _ws
-            # Build the new nested path components BEFORE updating current_asset_name
-            _pending_stack  = json.loads(props.asset_mode_stack or "[]")
-            _pending_parents = [e["asset_name"] for e in _pending_stack]
-            _nested_components = _pending_parents + [asset_label]
             _ws.ensure_asset_directory(context, asset_label,
-                                       path_components=_nested_components
-                                       if len(_nested_components) > 1 else None)
-            _ws.create_asset_placeholder_image(context, asset_label)
-            _ws.setup_asset_camera_background(context, asset_label, cam_obj)
+                                       path_components=_path_comps
+                                       if len(_path_comps) > 1 else None)
+            _ws.create_asset_placeholder_image(context, asset_label,
+                                               path_components=_path_comps)
+            _ws.setup_asset_camera_background(context, asset_label, cam_obj,
+                                              path_components=_path_comps)
         except Exception as _e:
             print(f"[Asset Mode] ⚠ Could not set up camera background: {_e}")
 
@@ -431,8 +463,43 @@ class STYLEENGINE_OT_EnterAssetMode(bpy.types.Operator):
         try:
             from . import workspace_setup as _ws
             from . import ui_panel as _up
+
+            # Capture the parent's visual_style BEFORE any overwrites so we can
+            # inherit it into the asset if the asset has no override of its own.
+            _parent_vs = {
+                "art_style":          props.refine_style_art_style,
+                "medium":             props.refine_style_medium,
+                "lighting_condition": props.refine_style_lighting,
+            }
+
             # Save scene subjects to the snapshot property
             props.asset_prev_subjects = _up._build_refine_json(props)
+
+            # Populate asset identity from the matching parent subject entry.
+            # This gives the Asset Mode identity box its initial values.
+            props.asset_subject_style    = ""
+            props.asset_subject_scale    = ""
+            props.asset_subject_color    = ""
+            props.asset_subject_material = ""
+            props.asset_subject_features.clear()
+            try:
+                _id_snap = json.loads(props.asset_prev_subjects)
+                for _id_s in _id_snap.get("subject_matter", []):
+                    if _id_s.get("label") == asset_label:
+                        props.asset_subject_style    = _id_s.get("style",    "")
+                        props.asset_subject_scale    = _id_s.get("scale",    "")
+                        props.asset_subject_color    = _id_s.get("color",    "")
+                        props.asset_subject_material = _id_s.get("material", "")
+                        for _feat_str in _id_s.get("features", []):
+                            if isinstance(_feat_str, str) and _feat_str.strip():
+                                _fi = props.asset_subject_features.add()
+                                _fi.value = _feat_str
+                        print(f"[Asset Mode] Identity loaded for '{asset_label}': "
+                              f"style={props.asset_subject_style!r} "
+                              f"features={[f.value for f in props.asset_subject_features]!r}")
+                        break
+            except Exception as _ide:
+                print(f"[Asset Mode] ⚠ Identity load skipped: {_ide}")
 
             # Determine nested path for loading this asset's subjects
             _pending_stack_11   = json.loads(props.asset_mode_stack or "[]")
@@ -440,20 +507,65 @@ class STYLEENGINE_OT_EnterAssetMode(bpy.types.Operator):
             _nested_comps_11    = _pending_parents_11 + [asset_label]
             _pc_arg             = _nested_comps_11 if len(_nested_comps_11) > 1 else None
 
-            # Try to load iteration-specific snapshot first, then asset-level file
+            # Try to load iteration-specific snapshot first, then asset-level file.
+            # If neither exists, fall back to the components embedded in the parent
+            # subject entry (populated by ExitAssetMode auto-sync or Apply to Parent).
             _active_iter = _ws.read_asset_history(
                 context, asset_label).get("active_index", 0)
             _iter_json = _ws.load_asset_iteration_subjects_json(
                 context, asset_label, _active_iter)
             _asset_json = _iter_json or _ws.load_asset_subjects_json(
                 context, asset_label, path_components=_pc_arg)
+
+            # Fallback: extract components from the parent snapshot's matching subject.
+            if not _asset_json and props.asset_prev_subjects:
+                try:
+                    _parent_snap = json.loads(props.asset_prev_subjects)
+                    for _ps in _parent_snap.get("subject_matter", []):
+                        if _ps.get("label") == asset_label:
+                            _comps = (_ps.get("components")
+                                      or _ps.get("nested_subjects"))
+                            if _comps:
+                                _seeded = {
+                                    "mode": "asset",
+                                    "metadata": _parent_snap.get("metadata", {}),
+                                    "visual_style": _parent_snap.get("visual_style", {}),
+                                    "composition": {
+                                        "camera_angle": "",
+                                        "framing": "",
+                                    },
+                                    "subject_matter": _comps,
+                                    "thematic_tags": [],
+                                }
+                                _asset_json = json.dumps(_seeded, indent=2)
+                                print(f"[Asset Mode] Seeded subjects from parent "
+                                      f"components for '{asset_label}'")
+                            break
+                except Exception as _cse:
+                    print(f"[Asset Mode] ⚠ Parent components fallback failed: {_cse}")
+
             if _asset_json:
                 _up._populate_refine_from_json(props, _asset_json)
+                # Inherit parent visual_style when the asset has no override yet
+                if not any([props.refine_style_art_style,
+                            props.refine_style_medium,
+                            props.refine_style_lighting]):
+                    props.refine_style_art_style = _parent_vs["art_style"]
+                    props.refine_style_medium    = _parent_vs["medium"]
+                    props.refine_style_lighting  = _parent_vs["lighting_condition"]
+                    print(f"[Asset Mode] Visual style inherited from parent for '{asset_label}'")
+                # Auto-expand all component rows so fields are immediately visible
+                for _subj in props.refine_subjects:
+                    _subj.show_expanded = True
                 print(f"[Asset Mode] Subjects JSON loaded for '{asset_label}'")
             else:
-                # Brand-new asset — clear subjects so the AI starts fresh
+                # Brand-new asset — clear subjects and inherit visual_style from parent
                 props.refine_subjects.clear()
-                print(f"[Asset Mode] No subjects JSON found — cleared for '{asset_label}'")
+                props.refine_style_art_style = _parent_vs["art_style"]
+                props.refine_style_medium    = _parent_vs["medium"]
+                props.refine_style_lighting  = _parent_vs["lighting_condition"]
+                print(f"[Asset Mode] No subjects JSON found — cleared for '{asset_label}', "
+                      f"visual style inherited from parent")
         except Exception as _sje:
             print(f"[Asset Mode] ⚠ Subjects JSON swap on enter skipped: {_sje}")
 
@@ -512,16 +624,30 @@ class STYLEENGINE_OT_EnterAssetMode(bpy.types.Operator):
         # Use asset_label (concept name) for directory lookups; fall back to obj.name.
         label = asset_label or obj.name
 
+        # Resolve the full ancestry chain (stack + current) so directory and
+        # camera lookups are unique even when two assets share a leaf name.
+        _nprops     = context.scene.style_engine_props
+        path_comps  = _ws.get_asset_path_components(_nprops)
+        # Fallback: if props not yet updated, build it manually.
+        if not path_comps:
+            path_comps = [label]
+
         # ── Skip if the asset already has saved images ────────────────────
-        asset_dir   = _ws.ensure_asset_directory(context, label)
+        asset_dir   = _ws.ensure_asset_directory(context, label,
+                                                 path_components=path_comps
+                                                 if len(path_comps) > 1 else None)
         images_dir  = asset_dir / "Images"
         existing    = sorted(images_dir.glob("*.png")) if images_dir.exists() else []
         if existing:
             latest     = existing[-1]
-            asset_temp = _ws.get_asset_temp_directory(context, label)
+            if len(path_comps) > 1:
+                asset_temp = _ws.get_nested_asset_directory(context, path_comps) / "temp"
+                asset_temp.mkdir(parents=True, exist_ok=True)
+            else:
+                asset_temp = _ws.get_asset_temp_directory(context, label)
             try:
                 _shutil.copy2(latest, asset_temp / "current_ai.png")
-                _ws.refresh_asset_camera_image(label)
+                _ws.refresh_asset_camera_image(label, path_components=path_comps)
                 print(f"[Asset Mode] 📷 Restored existing asset image: {latest.name}")
             except Exception as e:
                 print(f"[Asset Mode] ⚠ Could not restore existing image: {e}")
@@ -567,8 +693,16 @@ class STYLEENGINE_OT_ExitAssetMode(bpy.types.Operator):
             scene.camera = None
 
         # Re-hide the asset camera now that it's no longer the active camera.
-        # Covers cameras created before hide_viewport was set in _get_or_create.
-        _asset_cam_name = _get_asset_camera_name(props.current_asset_name)
+        # Use the full ancestry chain so nested cameras are found by their
+        # path-qualified name (e.g. asset_camera_gollum_trinkets).
+        try:
+            from . import workspace_setup as _ws
+            _exit_comps = _ws.get_asset_path_components(props)
+        except Exception:
+            _exit_comps = []
+        _asset_cam_name = _get_asset_camera_name(
+            _exit_comps if _exit_comps else props.current_asset_name
+        )
         _asset_cam = bpy.data.objects.get(_asset_cam_name)
         if _asset_cam:
             _asset_cam.hide_viewport = True
@@ -606,7 +740,51 @@ class STYLEENGINE_OT_ExitAssetMode(bpy.types.Operator):
                 _current_json = _up._build_refine_json(props)
                 _ws.save_asset_subjects_json(context, asset_label, _current_json)
                 print(f"[Asset Mode] Saved asset subjects for '{asset_label}'")
-            # Restore the scene subjects from the snapshot
+
+            # Auto-sync: inject current asset subjects as 'components' on the
+            # matching parent subject entry so the fractal JSON stays in sync.
+            if asset_label and props.asset_prev_subjects:
+                try:
+                    _parent_snap = json.loads(props.asset_prev_subjects)
+                    _child_subjects = [
+                        {
+                            "label":    _s.label,
+                            "style":    _s.style,
+                            "scale":    _s.scale,
+                            "color":    _s.color,
+                            "material": _s.material,
+                            **({"components": json.loads(_s.components_json)}
+                               if _s.components_json else {}),
+                        }
+                        for _s in props.refine_subjects
+                    ]
+                    for _pe in _parent_snap.get("subject_matter", []):
+                        if _pe.get("label") == asset_label:
+                            _pe["components"] = _child_subjects
+                            # Write back any identity edits made in the identity box
+                            if props.asset_subject_style:
+                                _pe["style"]    = props.asset_subject_style
+                            if props.asset_subject_scale:
+                                _pe["scale"]    = props.asset_subject_scale
+                            if props.asset_subject_color:
+                                _pe["color"]    = props.asset_subject_color
+                            if props.asset_subject_material:
+                                _pe["material"] = props.asset_subject_material
+                            # Write back asset-level features
+                            _exit_feats = [f.value for f in props.asset_subject_features
+                                           if f.value.strip()]
+                            if _exit_feats:
+                                _pe["features"] = _exit_feats
+                            elif "features" in _pe and not _exit_feats:
+                                # User cleared all features — reflect that in parent
+                                _pe.pop("features", None)
+                            break
+                    props.asset_prev_subjects = json.dumps(_parent_snap, indent=2)
+                    print(f"[Asset Mode] Auto-synced components → parent for '{asset_label}'")
+                except Exception as _ase:
+                    print(f"[Asset Mode] ⚠ Auto-sync to parent failed: {_ase}")
+
+            # Restore the scene subjects from the (now updated) snapshot
             if props.asset_prev_subjects:
                 _up._populate_refine_from_json(props, props.asset_prev_subjects)
                 print("[Asset Mode] Scene subjects restored")
@@ -642,6 +820,20 @@ class STYLEENGINE_OT_ExitAssetMode(bpy.types.Operator):
             props.asset_subject_index       = _snapshot["asset_subject_index"]
             props.asset_object_links        = _snapshot["asset_object_links"]
             props.asset_current_3d_index    = _snapshot["asset_current_3d_index"]
+            _vs = _snapshot.get("prev_visual_style", {})
+            props.refine_style_art_style    = _vs.get("art_style", "")
+            props.refine_style_medium       = _vs.get("medium", "")
+            props.refine_style_lighting     = _vs.get("lighting_condition", "")
+            # Restore the paused level's identity
+            props.asset_subject_style    = _snapshot.get("asset_subject_style",    "")
+            props.asset_subject_scale    = _snapshot.get("asset_subject_scale",    "")
+            props.asset_subject_color    = _snapshot.get("asset_subject_color",    "")
+            props.asset_subject_material = _snapshot.get("asset_subject_material", "")
+            props.asset_subject_features.clear()
+            for _feat_str in _snapshot.get("asset_subject_features", []):
+                if isinstance(_feat_str, str) and _feat_str.strip():
+                    _fi = props.asset_subject_features.add()
+                    _fi.value = _feat_str
             props.asset_mode_depth         -= 1
             # asset_mode stays True — we are still in an asset mode level
             # N-panel stays registered
@@ -662,6 +854,12 @@ class STYLEENGINE_OT_ExitAssetMode(bpy.types.Operator):
             props.asset_prev_subjects      = ""
             props.asset_mode_stack         = "[]"
             props.asset_mode_depth         = 0
+            # Clear identity fields — back in scene mode they are irrelevant
+            props.asset_subject_style    = ""
+            props.asset_subject_scale    = ""
+            props.asset_subject_color    = ""
+            props.asset_subject_material = ""
+            props.asset_subject_features.clear()
 
             # ── 5. Swap N-panels back ─────────────────────────────────────
             _unregister_asset_panel()
@@ -898,15 +1096,19 @@ class VIEW3D_PT_AssetMode(bpy.types.Panel):
 
         layout.separator()
 
-        # ── Asset info ────────────────────────────────────────────────────
-        info_box = layout.box()
-        info_box.label(text=f"Asset:  {props.current_asset_name}", icon='OBJECT_DATA')
-        obj = bpy.data.objects.get(props.current_asset_name)
-        if obj and obj.material_slots and obj.material_slots[0].material:
-            info_box.label(text=f"Material:  {obj.material_slots[0].material.name}",
-                           icon='MATERIAL')
-        cam_name = _get_asset_camera_name(props.current_asset_name)
-        info_box.label(text=f"Camera:  {cam_name}", icon='CAMERA_DATA')
+        # ── Asset header (name + camera — compact, non-editable) ─────────
+        # The editable style/scale/color/material live inside the Refine
+        # Image section so they sit in context with Components and Tags.
+        id_box = layout.box()
+        id_row = id_box.row(align=True)
+        id_row.label(text=props.current_asset_name, icon='OBJECT_DATA')
+        try:
+            from . import workspace_setup as _ws
+            _panel_comps = _ws.get_asset_path_components(props)
+        except Exception:
+            _panel_comps = []
+        cam_name = _get_asset_camera_name(_panel_comps if _panel_comps else props.current_asset_name)
+        id_row.label(text=cam_name, icon='CAMERA_DATA')
 
         # ── Iteration History Browser (manifest-driven) ───────────────────
         from . import workspace_setup as _ws
