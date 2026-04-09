@@ -820,7 +820,18 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         default='DEFAULT',
         update=update_session_json,
     )
-    
+
+    ollama_model: bpy.props.EnumProperty(
+        name="Ollama Model",
+        description="Ollama model used for all agent/JSON analysis workflows",
+        items=[
+            ('gemma4:e2b', "gemma4:e2b", "Gemma 4 2B — fast, recommended"),
+            ('gemma4:31b', "gemma4:31b", "Gemma 4 31B — highest quality, slower"),
+            ('gemma3:4b',  "gemma3:4b",  "Gemma 3 4B — legacy"),
+        ],
+        default='gemma4:e2b',
+    )
+
     show_image_generation_main: bpy.props.BoolProperty(
         name="Show Image Generation",
         description="Expand or collapse the Image Generation section",
@@ -833,11 +844,6 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         default=False
     )
 
-    use_structured_editing: bpy.props.BoolProperty(
-        name="Use structured editing",
-        description="Pass the JSON form as a structured instruction to the agent",
-        default=False
-    )
 
     # Refine Image — Metadata
     refine_meta_filename: bpy.props.StringProperty(name="Filename", default="")
@@ -4165,10 +4171,6 @@ class WM_OT_TrellisGenerate(bpy.types.Operator):
                                         except Exception:
                                             _iter_img = None
 
-                                    ws.append_asset_history_iteration(
-                                        bpy.context, _am_name, actual_name,
-                                        mesh_path=saved_glb, image_path=_iter_img)
-
                                     # Update subject link so Shift+V re-entry hits Tier 2
                                     _si = _am_props.asset_subject_index
                                     if 0 <= _si < len(_am_props.refine_subjects):
@@ -4501,10 +4503,6 @@ class WM_OT_TrellisRetexture(bpy.types.Operator):
                                             _sh.copy2(_src_ai_rt, _iter_img_rt)
                                         except Exception:
                                             _iter_img_rt = None
-
-                                    ws.append_asset_history_iteration(
-                                        bpy.context, _am_name_rt, actual_name_rt,
-                                        mesh_path=saved_glb_rt, image_path=_iter_img_rt)
 
                                     _si_rt = _am_props_rt.asset_subject_index
                                     if 0 <= _si_rt < len(_am_props_rt.refine_subjects):
@@ -7989,6 +7987,14 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                     exp_icon = 'TRIA_DOWN' if subj.show_expanded else 'TRIA_RIGHT'
                     s_hdr.prop(subj, "show_expanded", text="", icon=exp_icon, emboss=False)
                     s_hdr.prop(subj, "label", text="")
+                    # Auto-populate — fill style/scale/color/material/features from image
+                    ap_op = s_hdr.operator("style_engine.refine_image_auto_populate",
+                                           text="", icon='EYEDROPPER')
+                    ap_op.subject_index = si
+                    # Duplicate subject — copy JSON + history + linked objects
+                    dup_op = s_hdr.operator("style_engine.copy_subject",
+                                            text="", icon='DUPLICATE')
+                    dup_op.subject_index = si
                     # Edit Asset — enter Asset Mode for this subject's object
                     edit_op = s_hdr.operator("style_engine.edit_asset",
                                              text="", icon='OUTLINER_OB_MESH')
@@ -7996,23 +8002,6 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                     rem_subj_op = s_hdr.operator("style_engine.refine_image_remove_subject", text="", icon='X')
                     rem_subj_op.subject_index = si
 
-                    # ◀ N/M ▶ iteration strip — only shown when > 1 iteration exists
-                    try:
-                        from . import workspace_setup as _ws_iter
-                        _hist = _ws_iter.read_asset_history(context, subj.label)
-                        _iter_count = len(_hist.get("iterations", []))
-                        if _iter_count > 1:
-                            iter_row = s_box.row(align=True)
-                            _active  = _hist.get("active_index", 0)
-                            prev_it  = iter_row.operator("style_engine.subject_iter_prev",
-                                                          text="", icon='TRIA_LEFT')
-                            prev_it.subject_index = si
-                            iter_row.label(text=f"{_active + 1} / {_iter_count}")
-                            next_it  = iter_row.operator("style_engine.subject_iter_next",
-                                                          text="", icon='TRIA_RIGHT')
-                            next_it.subject_index = si
-                    except Exception:
-                        pass
 
                     if subj.show_expanded:
                         s_col = s_box.column(align=True)
@@ -8070,9 +8059,6 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
 
                 # ── Submit ─────────────────────────────────────────────────
                 ri_box.separator()
-                struct_row = ri_box.row()
-                struct_icon = 'CHECKBOX_HLT' if style_props.use_structured_editing else 'CHECKBOX_DEHLT'
-                struct_row.prop(style_props, "use_structured_editing", text="Use structured editing", icon=struct_icon)
                 submit_row = ri_box.row()
                 submit_row.scale_y = 1.5
                 submit_row.operator("style_engine.refine_image_submit", text="Refine with Agent", icon='RENDER_RESULT')
@@ -8089,6 +8075,7 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
 
         if style_props.show_text_generation:
             agent_box.prop(style_props, "prompt_llm_profile", text="Agents")
+            agent_box.prop(style_props, "ollama_model", text="Model")
             row = agent_box.row()
             row.scale_y = 2.0
             row.operator("style_engine.refine_prompt", text="Refine Prompt", icon='SORTALPHA')
@@ -8539,6 +8526,22 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
 # 3.5 PROMPT REFINEMENT OPERATOR
 # ----------------------------------------------------------------
 
+def _patch_ollama_model(workflow, props):
+    """Overwrite node 1's model field with the user-selected Ollama model.
+
+    Only touches node "1" when it is a Griptape Agent Config: Ollama Drivers
+    node, so the helper is safe to call on any workflow.
+    """
+    try:
+        node = workflow.get("1", {})
+        if node.get("class_type") == "Griptape Agent Config: Ollama Drivers":
+            model = getattr(props, "ollama_model", "gemma4:e2b") or "gemma4:e2b"
+            node["inputs"]["model"] = model
+            print(f"[Style Engine] Ollama model → {model}")
+    except Exception as _e:
+        print(f"[Style Engine] ⚠ Could not patch Ollama model: {_e}")
+
+
 def _prompt_llm_workflow_spec(props, role):
     """
     Map UI profile + logical role to workflow filename and node IDs to patch.
@@ -8723,7 +8726,8 @@ class WM_OT_RefinePrompt(bpy.types.Operator):
             
             with open(workflow_file, 'r') as f:
                 workflow = json.load(f)
-            
+            _patch_ollama_model(workflow, props)
+
             print(f"[Refine Prompt] ✓ Loaded workflow: {workflow_file.name} (profile={props.prompt_llm_profile})")
             
             text_node = spec["text_node"]
@@ -8866,7 +8870,8 @@ class WM_OT_GenerateImageDescription(bpy.types.Operator):
             
             with open(workflow_file, 'r') as f:
                 workflow = json.load(f)
-            
+            _patch_ollama_model(workflow, props)
+
             print(f"[Image Description] ✓ Loaded workflow: {workflow_file.name} (profile={props.prompt_llm_profile})")
             
             # 4. Upload image to ComfyUI server
@@ -9052,7 +9057,8 @@ class WM_OT_GenerateImageDescriptionFromFile(bpy.types.Operator):
             
             with open(workflow_file, 'r') as f:
                 workflow = json.load(f)
-            
+            _patch_ollama_model(workflow, props)
+
             print(f"[Image Description from File] ✓ Loaded workflow: {workflow_file.name} (profile={props.prompt_llm_profile})")
             
             # 3. Upload image to ComfyUI server
@@ -9296,7 +9302,8 @@ class WM_OT_GenerateImageDescriptionFromViewport(bpy.types.Operator):
             
             with open(workflow_file, 'r') as f:
                 workflow = json.load(f)
-            
+            _patch_ollama_model(workflow, props)
+
             print(f"[Viewport Description] ✓ Loaded workflow: {workflow_file.name} (profile={props.prompt_llm_profile})")
             
             # 5. Upload image to ComfyUI server
@@ -9485,7 +9492,8 @@ class STYLEENGINE_OT_SubjectIterPrev(bpy.types.Operator):
         if active <= 0:
             self.report({'INFO'}, "Already at first iteration")
             return {'CANCELLED'}
-        ws.switch_asset_iteration(context, subj.label, active - 1)
+        ws.switch_asset_iteration(context, subj.label, active - 1,
+                                   subject_index=self.subject_index)
         return {'FINISHED'}
 
 
@@ -9510,7 +9518,8 @@ class STYLEENGINE_OT_SubjectIterNext(bpy.types.Operator):
         if active >= total - 1:
             self.report({'INFO'}, "Already at latest iteration")
             return {'CANCELLED'}
-        ws.switch_asset_iteration(context, subj.label, active + 1)
+        ws.switch_asset_iteration(context, subj.label, active + 1,
+                                   subject_index=self.subject_index)
         return {'FINISHED'}
 
 
@@ -9770,6 +9779,16 @@ def _build_agent_json_task_prompt(meta: dict, asset_mode: bool = False,
 
     _hint_prefix = (context_hint + "\n\n") if context_hint else ""
 
+    # Schema reminder shown in both branches so the model always knows features is required.
+    _feat_rule = (
+        "Each subject_matter entry MUST include a `features` array with 1-3 short "
+        "strings describing specific observable visual details of that item — such as "
+        "texture, surface finish, condition, markings, decorations, or notable details "
+        "(e.g. [\"jeweled arches\", \"ermine lining\"] or [\"worn leather binding\", \"gilded pages\"] "
+        "or [\"dented surface\", \"engraved scrollwork\"]). "
+        "Describe what you actually see. Do NOT leave features empty."
+    )
+
     if asset_mode:
         task = (
             f"{_hint_prefix}"
@@ -9780,10 +9799,8 @@ def _build_agent_json_task_prompt(meta: dict, asset_mode: bool = False,
             "Fill in the JSON below based on what you observe. "
             "The metadata block is already correct — copy it unchanged. "
             "Populate subject_matter with each component/part of this single object "
-            "(e.g. for a character: helmet, breastplate, sword; for a vehicle: hood, wheel, exhaust). "
-            "For each entry, if you notice specific visible markings, emblems, decorations, or "
-            "distinctive surface details, list them as short strings in a `features` array "
-            "(e.g. [\"lion emblem\", \"engraved border\"]). Only include features you can clearly see.\n\n"
+            "(e.g. for a character: helmet, breastplate, sword; for a vehicle: hood, wheel, exhaust).\n\n"
+            f"{_feat_rule}\n\n"
             "Use thematic_tags for material and style keywords.\n\n"
             "```json\n"
             f"{skeleton}\n"
@@ -9796,10 +9813,8 @@ def _build_agent_json_task_prompt(meta: dict, asset_mode: bool = False,
             "object, component, and part you can see.\n\n"
             "Fill in the JSON below based on what you observe. "
             "The metadata block is already correct — copy it unchanged. "
-            "Populate subject_matter with every foreground element you can identify. "
-            "For each entry, if you notice specific visible markings, emblems, decorations, or "
-            "distinctive surface details, list them as short strings in a `features` array "
-            "(e.g. [\"dragon emblem\", \"cracked surface\"]). Only include features you can clearly see.\n\n"
+            "Populate subject_matter with every foreground element you can identify.\n\n"
+            f"{_feat_rule}\n\n"
             "Use thematic_tags with scene/context keywords.\n\n"
             "```json\n"
             f"{skeleton}\n"
@@ -9849,6 +9864,15 @@ def _build_agent_json_task_prompt_merge(meta: dict, props,
 
     _hint_prefix = (context_hint + "\n\n") if context_hint else ""
 
+    _merge_feat_rule = (
+        "FEATURES (required): Every entry MUST have a `features` array with 1-3 short strings "
+        "describing specific observable visual details of that item (texture, finish, condition, "
+        "markings, decorations — e.g. [\"jeweled arches\", \"ermine lining\"] or "
+        "[\"worn leather binding\", \"gilded pages\"]). "
+        "If the entry already has features, copy them unchanged and append any newly visible ones. "
+        "Never remove existing features. Never leave features empty."
+    )
+
     if asset_mode:
         task = (
             f"{_hint_prefix}"
@@ -9868,10 +9892,7 @@ def _build_agent_json_task_prompt_merge(meta: dict, props,
             "- Add new components to the `components` array for any visible part not already listed.\n"
             "- NEVER add components as top-level keys on the subject (e.g. no `clothing: {...}`).\n"
             "- Do NOT add background or environment entries anywhere.\n"
-            "FEATURES: Each entry (including the top-level subject) may have an optional `features` array "
-            "of short strings describing specific visible markings, emblems, or decorations. "
-            "If the existing JSON already has `features` on an entry, copy them unchanged and append "
-            "any newly visible ones. Never remove existing features.\n\n"
+            f"{_merge_feat_rule}\n\n"
             "Update visual_style, composition, thematic_tags freely.\n\n"
             "Return only the complete updated JSON in ```json ... ``` fences."
         )
@@ -9885,12 +9906,49 @@ def _build_agent_json_task_prompt_merge(meta: dict, props,
             f"{current_json_str}\n"
             "```\n\n"
             "Keep all existing subject labels unchanged. Update their style/color/material "
-            "from the image if you can see them. Add new entries for any visible foreground "
-            "objects not already listed. If an entry already has `features`, copy them unchanged "
-            "and only append newly visible ones. Update visual_style, composition, thematic_tags freely.\n\n"
+            f"from the image if you can see them. Add new entries for any visible foreground "
+            f"objects not already listed. {_merge_feat_rule} "
+            "Update visual_style, composition, thematic_tags freely.\n\n"
             "Return only the complete updated JSON in ```json ... ``` fences."
         )
     return task
+
+
+def _build_auto_populate_task_prompt(props, target_label: str,
+                                     asset_mode: bool = False) -> str:
+    """
+    Build a targeted task prompt for auto-populating a single subject/component.
+
+    The model receives the full existing JSON and is instructed to fill in ONLY
+    the entry whose label matches *target_label* — every other entry is left
+    untouched.  Using the merge workflow (AgentJSONMerge.json) this produces a
+    minimal diff that the existing _merge_refine_from_json logic can apply safely.
+    """
+    import json as _json
+
+    # Serialise the current form state so the model knows what already exists
+    try:
+        if asset_mode:
+            current_json_str = _build_refine_json_for_agent(props)
+        else:
+            current_json_str = _build_refine_json(props)
+    except Exception:
+        current_json_str = "{}"
+
+    item_word = "component" if asset_mode else "subject"
+
+    return (
+        f"This image contains a {item_word} called '{target_label}'.\n\n"
+        f"Find '{target_label}' in the image and update ONLY the entry labelled "
+        f"'{target_label}' in the existing JSON below.\n"
+        f"Fill in its style, scale, color, material, and features based on what "
+        f"you can observe in the image.\n"
+        f"Every other entry in subject_matter MUST remain exactly unchanged — "
+        f"do NOT alter their labels, style, color, material, or features.\n\n"
+        f"Existing JSON:\n"
+        f"```json\n{current_json_str}\n```\n\n"
+        f"Return only the complete updated JSON in ```json ... ``` fences."
+    )
 
 
 def _merge_refine_from_json(props, json_text):
@@ -10168,6 +10226,9 @@ class STYLEENGINE_OT_ApplyToParent(bpy.types.Operator):
                 "color":    subj.color,
                 "material": subj.material,
             }
+            _feats = [f.value for f in subj.features if f.value.strip()]
+            if _feats:
+                entry["features"] = _feats
             if subj.components_json:
                 try:
                     entry["components"] = json.loads(subj.components_json)
@@ -10234,7 +10295,24 @@ class STYLEENGINE_OT_ApplyToParent(bpy.types.Operator):
                 props.refine_style_lighting  = _asset_vs["lighting_condition"]
                 print("[ApplyToParent] Scene visual style props updated directly")
 
-        self.report({'INFO'}, f"Applied '{child_label}' subjects to parent")
+        # 6. Queue visual cascade: show modified asset inside the parent image
+        #    The second image slot carries the child's current_ai as visual proof,
+        #    so Gemini can see *exactly* what changed rather than inferring from text.
+        try:
+            _json_body = _build_refine_json_for_agent(props)
+            _visual_prompt = (
+                f"The second image shows '{child_label}' as it has been modified. "
+                f"Repaint '{child_label}' in the first image so it visually matches "
+                f"the second image exactly. Keep every other element in the first "
+                f"image completely unchanged.\n\n"
+                f"JSON reference for the modification:\n{_json_body}"
+            )
+            ws.queue_apply_to_parent_workflow(context, child_label, _visual_prompt)
+        except Exception as _qe:
+            print(f"[ApplyToParent] ⚠ Could not queue visual cascade: {_qe}")
+            import traceback; traceback.print_exc()
+
+        self.report({'INFO'}, f"Applied '{child_label}' to parent — visual cascade queued")
         return {'FINISHED'}
 
 
@@ -10299,6 +10377,7 @@ class WM_OT_RefineImageAnalyzeJSON(bpy.types.Operator):
 
             with open(workflow_file, 'r') as f:
                 workflow = json.load(f)
+            _patch_ollama_model(workflow, props)
 
             server_client = runcomfy_deployment.get_server_client()
 
@@ -10383,6 +10462,14 @@ class WM_OT_RefineImageAnalyzeJSON(bpy.types.Operator):
                     else:
                         _populate_refine_from_json(_props, json_text)
                         print("[RefineJSON] ✓ Refine Image fields populated (fresh) from JSON output")
+                    # Persist scene subjects to disk (scene mode only)
+                    if not getattr(_props, 'asset_mode', False):
+                        try:
+                            from . import workspace_setup as _ws_ref
+                            _ws_ref.save_scene_subjects_json(
+                                bpy.context, _build_refine_json(_props))
+                        except Exception:
+                            pass
                 except Exception as e:
                     print(f"[RefineJSON] ❌ Callback error: {e}")
                     import traceback; traceback.print_exc()
@@ -10399,6 +10486,141 @@ class WM_OT_RefineImageAnalyzeJSON(bpy.types.Operator):
 
         except Exception as e:
             self.report({'ERROR'}, f"Failed: {str(e)}")
+            import traceback; traceback.print_exc()
+            return {'CANCELLED'}
+
+
+class WM_OT_RefineImageAutoPopulate(bpy.types.Operator):
+    """Auto-fill a single subject/component by asking the AI to find it in the image"""
+    bl_idname  = "style_engine.refine_image_auto_populate"
+    bl_label   = "Auto-populate"
+    bl_description = (
+        "Send the current image to the AI and ask it to fill in the style, scale, "
+        "color, material, and features for this subject only"
+    )
+    bl_options = {'REGISTER'}
+
+    subject_index: bpy.props.IntProperty(default=0)
+
+    @classmethod
+    def poll(cls, context):
+        from . import runcomfy_deployment, workspace_setup
+        if not runcomfy_deployment.is_server_mode():
+            return False
+        try:
+            return workspace_setup.get_active_ai_output_path(context).exists()
+        except Exception:
+            return False
+
+    def execute(self, context):
+        import json, re, time as _time
+        from pathlib import Path
+        from . import runcomfy_deployment, workspace_setup
+
+        props = context.scene.style_engine_props
+
+        # Validate index
+        if self.subject_index < 0 or self.subject_index >= len(props.refine_subjects):
+            self.report({'ERROR'}, "Invalid subject index")
+            return {'CANCELLED'}
+
+        target_label = props.refine_subjects[self.subject_index].label.strip()
+        if not target_label:
+            self.report({'ERROR'}, "Subject has no label — give it a name first")
+            return {'CANCELLED'}
+
+        # Resolve the active current_ai (respects asset mode)
+        image_path = workspace_setup.get_active_ai_output_path(context)
+        if not image_path.exists():
+            image_path = workspace_setup.find_current_ai(context)
+        if image_path is None or not image_path.exists():
+            self.report({'ERROR'}, "No current_ai.png — generate an image first")
+            return {'CANCELLED'}
+
+        try:
+            addon_dir     = Path(__file__).parent
+            workflow_file = addon_dir / "workflows" / "Text" / "AgentJSONMerge.json"
+            if not workflow_file.exists():
+                self.report({'ERROR'}, "AgentJSONMerge.json workflow not found")
+                return {'CANCELLED'}
+
+            with open(workflow_file, 'r') as f:
+                workflow = json.load(f)
+            _patch_ollama_model(workflow, props)
+
+            server_client = runcomfy_deployment.get_server_client()
+
+            # Upload with unique timestamped name to bypass ComfyUI node cache
+            _ts          = int(_time.time())
+            _unique_name = f"autopop_{_ts}.png"
+            _tmp_upload  = image_path.parent / _unique_name
+            try:
+                import shutil as _sh
+                _sh.copy2(str(image_path), str(_tmp_upload))
+                upload_response = server_client.upload_image(str(_tmp_upload), overwrite=True)
+            finally:
+                try:
+                    _tmp_upload.unlink()
+                except Exception:
+                    pass
+
+            uploaded_filename = upload_response.get("name", "")
+            if not uploaded_filename:
+                self.report({'ERROR'}, "Image upload failed")
+                return {'CANCELLED'}
+
+            workflow["11"]["inputs"]["image"] = uploaded_filename
+
+            # Build targeted task prompt — only fill the named subject
+            _in_asset_mode = getattr(props, "asset_mode", False)
+            task_prompt = _build_auto_populate_task_prompt(
+                props, target_label, asset_mode=_in_asset_mode)
+
+            if "10" in workflow:
+                workflow["10"]["inputs"]["STRING"] = task_prompt
+            else:
+                print("[AutoPopulate] ⚠ Node '10' not found in workflow")
+
+            response  = server_client.queue_prompt(workflow)
+            prompt_id = response['prompt_id']
+
+            from . import runcomfy_polling, progress_bar
+            progress_bar.set_current_workflow(workflow)
+
+            _target = target_label  # capture for closure
+
+            def on_auto_populate_complete(success, result=None, error=None,
+                                          workflow_type=None):
+                if not success:
+                    print(f"[AutoPopulate] ❌ Failed: {error}")
+                    return
+                try:
+                    outputs   = result.get('outputs', {})
+                    json_text = _extract_text_from_griptape_output(outputs)
+                    if not json_text:
+                        print(f"[AutoPopulate] ❌ No text output")
+                        return
+                    json_text = re.sub(r'^```(?:json)?\s*', '', json_text.strip())
+                    json_text = re.sub(r'\s*```$',          '', json_text.strip())
+                    _props = bpy.context.scene.style_engine_props
+                    _merge_refine_from_json(_props, json_text)
+                    print(f"[AutoPopulate] ✓ '{_target}' fields populated from image")
+                except Exception as _e:
+                    print(f"[AutoPopulate] ❌ Callback error: {_e}")
+                    import traceback; traceback.print_exc()
+
+            runcomfy_polling.RunComfyPoller.start_polling(
+                deployment_id='server',
+                request_id=prompt_id,
+                callback=on_auto_populate_complete,
+                workflow_type='text',
+            )
+
+            self.report({'INFO'}, f"Auto-populating '{target_label}' from image…")
+            return {'FINISHED'}
+
+        except Exception as e:
+            self.report({'ERROR'}, f"Auto-populate failed: {e}")
             import traceback; traceback.print_exc()
             return {'CANCELLED'}
 
@@ -10455,22 +10677,27 @@ class WM_OT_RefineImageSubmit(bpy.types.Operator):
         props = context.scene.style_engine_props
         from . import workspace_setup
 
-        if props.use_structured_editing:
-            # In asset mode use the agent-specific builder so the asset's own
-            # style/scale/color/material are included as the top-level subject.
-            json_body = _build_refine_json_for_agent(props)
-            instruction = "Edit this image based on the following JSON modifications:\n" + json_body
+        # Always build the structured JSON instruction and inject it into
+        # STYLEENGINE_Prompt so the agent receives the full form state.
+        # In asset mode the agent-specific builder includes the asset's own
+        # style/scale/color/material as the top-level subject.
+        json_body = _build_refine_json_for_agent(props)
+        instruction = "Edit this image based on the following JSON modifications:\n" + json_body
 
-            # Write instruction into STYLEENGINE_Prompt so generate_ai_image_cloud picks it up
-            text_block = bpy.data.texts.get("STYLEENGINE_Prompt")
-            if not text_block:
-                text_block = bpy.data.texts.new("STYLEENGINE_Prompt")
+        text_block = bpy.data.texts.get("STYLEENGINE_Prompt")
+        if not text_block:
+            text_block = bpy.data.texts.new("STYLEENGINE_Prompt")
 
-            workspace_setup.save_prompt_snapshot(context, prefix="before_structured_refine")
-            text_block.clear()
-            text_block.write(instruction)
-            print(f"[RefineImage] Wrote structured instruction to STYLEENGINE_Prompt "
-                  f"({len(instruction)} chars)")
+        # Snapshot and capture the original prompt so we can restore it after
+        # queuing. generate_ai_image_cloud reads STYLEENGINE_Prompt synchronously
+        # at the start of the call, so restoring immediately after is safe and
+        # prevents the JSON instruction from polluting subsequent generations.
+        _original_prompt = text_block.as_string()
+        workspace_setup.save_prompt_snapshot(context, prefix="before_structured_refine")
+        text_block.clear()
+        text_block.write(instruction)
+        print(f"[RefineImage] Wrote structured instruction to STYLEENGINE_Prompt "
+              f"({len(instruction)} chars)")
 
         # Alignment is always forced on — keeps the composition anchored.
         # BG removal is forced on only in asset mode (isolates the subject);
@@ -10489,9 +10716,203 @@ class WM_OT_RefineImageSubmit(bpy.types.Operator):
             self.report({'ERROR'}, f"Refine failed: {e}")
             import traceback; traceback.print_exc()
             return {'CANCELLED'}
+        finally:
+            # Restore STYLEENGINE_Prompt to the original user text.
+            # The prompt was already consumed by generate_ai_image_cloud above.
+            text_block.clear()
+            text_block.write(_original_prompt)
+            print(f"[RefineImage] Restored STYLEENGINE_Prompt to original text "
+                  f"({len(_original_prompt)} chars)")
 
         props.gemini_alignment = _prev_alignment
         props.gemini_remove_bg  = _prev_remove_bg
+        return {'FINISHED'}
+
+
+# ----------------------------------------------------------------
+# 3.7  COPY SUBJECT / ASSET
+# ----------------------------------------------------------------
+
+class STYLEENGINE_OT_CopySubject(bpy.types.Operator):
+    """Create a full copy of a subject: JSON entry, image history, 3D models, and linked objects."""
+    bl_idname  = "style_engine.copy_subject"
+    bl_label   = "Duplicate Subject/Asset"
+    bl_description = (
+        "Create a full copy of this subject — including its image & 3D history, "
+        "linked Blender objects, and asset camera"
+    )
+    bl_options = {'REGISTER', 'UNDO'}
+
+    subject_index: bpy.props.IntProperty(default=0)
+
+    # ------------------------------------------------------------------
+    def _unique_label(self, props, base_label):
+        """Append _v2, _v3 … until the label is not already used."""
+        existing = {s.label for s in props.refine_subjects}
+        if base_label not in existing:
+            return base_label
+        i = 2
+        while True:
+            candidate = f"{base_label}_v{i}"
+            if candidate not in existing:
+                return candidate
+            i += 1
+
+    # ------------------------------------------------------------------
+    def _duplicate_hierarchy(self, context, root_obj, new_base_label):
+        """
+        Deep-duplicate *root_obj* and all of its children without relying on
+        bpy.ops (which requires a specific window context).
+
+        Returns the new root object's name, or "" on failure.
+        """
+        old_base = root_obj.name
+        obj_map  = {}   # old → new
+
+        def _dup_obj(obj):
+            new_obj = obj.copy()
+            if obj.data:
+                new_obj.data = obj.data.copy()
+            context.scene.collection.objects.link(new_obj)
+            obj_map[obj] = new_obj
+
+        # Duplicate root first, then all descendants
+        _dup_obj(root_obj)
+        for child in root_obj.children_recursive:
+            _dup_obj(child)
+
+        # Re-wire parent relationships inside the duplicate hierarchy
+        for old_obj, new_obj in obj_map.items():
+            if old_obj.parent in obj_map:
+                new_obj.parent = obj_map[old_obj.parent]
+                new_obj.matrix_parent_inverse = old_obj.matrix_parent_inverse.copy()
+
+        # Rename: replace the old base name prefix with the new label
+        new_root = obj_map[root_obj]
+        new_root.name = new_base_label
+        if new_root.data:
+            new_root.data.name = new_base_label
+        for old_obj, new_obj in obj_map.items():
+            if old_obj is root_obj:
+                continue
+            suffix = old_obj.name[len(old_base):] if old_obj.name.startswith(old_base) else f"_{old_obj.name}"
+            new_obj.name = new_base_label + suffix
+            if new_obj.data:
+                new_obj.data.name = new_obj.name
+
+        return new_root.name
+
+    # ------------------------------------------------------------------
+    def execute(self, context):
+        import json as _json, shutil as _shutil
+        from . import workspace_setup as _ws
+
+        props = context.scene.style_engine_props
+
+        if self.subject_index < 0 or self.subject_index >= len(props.refine_subjects):
+            self.report({'ERROR'}, "Invalid subject index")
+            return {'CANCELLED'}
+
+        src_subj  = props.refine_subjects[self.subject_index]
+        src_label = src_subj.label.strip()
+        new_label = self._unique_label(props, src_label)
+
+        # ── 1. Determine path components for source and destination ──────────
+        try:
+            _in_asset_mode = getattr(props, "asset_mode", False)
+            if _in_asset_mode:
+                _stack   = _json.loads(getattr(props, "asset_mode_stack", "[]") or "[]")
+                _parents = [e["asset_name"] for e in _stack]
+                src_comps = _parents + [src_label]
+                dst_comps = _parents + [new_label]
+            else:
+                src_comps = [src_label]
+                dst_comps = [new_label]
+        except Exception as _e:
+            print(f"[CopySubject] ⚠ Could not resolve path components: {_e}")
+            src_comps = [src_label]
+            dst_comps = [new_label]
+
+        # ── 2. Copy asset directory tree ────────────────────────────────────
+        try:
+            src_dir = _ws.get_nested_asset_directory(context, src_comps)
+            dst_dir = _ws.get_nested_asset_directory(context, dst_comps)
+            if src_dir.exists():
+                _shutil.copytree(str(src_dir), str(dst_dir))
+                print(f"[CopySubject] ✓ Directory copied: {src_dir.name} → {dst_dir.name}")
+            else:
+                _ws.ensure_nested_asset_directory(context, dst_comps)
+                print(f"[CopySubject] ℹ No asset directory found — created empty structure for '{new_label}'")
+        except Exception as _e:
+            print(f"[CopySubject] ⚠ Directory copy failed: {_e}")
+            import traceback; traceback.print_exc()
+
+        # ── 3. Duplicate asset camera ────────────────────────────────────────
+        try:
+            from . import asset_mode as _am
+            src_cam_name = _am._get_asset_camera_name(src_comps)
+            dst_cam_name = _am._get_asset_camera_name(dst_comps)
+            src_cam = bpy.data.objects.get(src_cam_name)
+            if src_cam and src_cam.type == 'CAMERA':
+                new_cam_data        = src_cam.data.copy()
+                new_cam_data.name   = dst_cam_name
+                new_cam_obj         = bpy.data.objects.new(dst_cam_name, new_cam_data)
+                new_cam_obj.location        = src_cam.location.copy()
+                new_cam_obj.rotation_euler  = src_cam.rotation_euler.copy()
+                new_cam_obj.hide_viewport   = True
+                new_cam_obj.hide_render     = True
+                context.scene.collection.objects.link(new_cam_obj)
+                print(f"[CopySubject] ✓ Camera duplicated: {src_cam_name} → {dst_cam_name}")
+        except Exception as _e:
+            print(f"[CopySubject] ⚠ Camera duplication failed: {_e}")
+
+        # ── 4. Duplicate linked Blender object hierarchy ────────────────────
+        new_linked_name = ""
+        try:
+            src_linked = src_subj.linked_object_name
+            src_obj    = bpy.data.objects.get(src_linked) if src_linked else None
+            if src_obj:
+                # Find the true root (might already be root, or we follow parents
+                # until we hit an object NOT in refine_subjects' linked objects)
+                root = src_obj
+                while root.parent and root.parent.name in {
+                    s.linked_object_name for s in props.refine_subjects
+                }:
+                    root = root.parent
+
+                new_linked_name = self._duplicate_hierarchy(context, root, new_label)
+                print(f"[CopySubject] ✓ Object hierarchy duplicated: '{src_linked}' → '{new_linked_name}'")
+        except Exception as _e:
+            print(f"[CopySubject] ⚠ Object duplication failed: {_e}")
+            import traceback; traceback.print_exc()
+
+        # ── 5. Add new subject entry ─────────────────────────────────────────
+        new_subj = props.refine_subjects.add()
+        new_subj.label          = new_label
+        new_subj.style          = src_subj.style
+        new_subj.scale          = src_subj.scale
+        new_subj.color          = src_subj.color
+        new_subj.material       = src_subj.material
+        new_subj.show_expanded  = src_subj.show_expanded
+        # Deep-copy components_json — nested _linked_object values are intentionally
+        # left as-is (they point to the original meshes) so the user can re-enter
+        # asset mode and re-link them as needed.
+        new_subj.components_json = src_subj.components_json
+        for feat in src_subj.features:
+            f = new_subj.features.add()
+            f.value = feat.value
+        new_subj.linked_object_name = new_linked_name
+
+        # ── 6. Update persistent link registry ──────────────────────────────
+        if new_linked_name:
+            try:
+                _lm = _json.loads(props.asset_object_links or "{}")
+                _lm[new_label] = new_linked_name
+                props.asset_object_links = _json.dumps(_lm)
+            except Exception:
+                pass
+
+        self.report({'INFO'}, f"'{src_label}'  →  '{new_label}'")
         return {'FINISHED'}
 
 
@@ -10555,9 +10976,11 @@ classes = (
     WM_OT_RefineImageAddTag,
     WM_OT_RefineImageRemoveTag,
     WM_OT_RefineImageAnalyzeJSON,
+    WM_OT_RefineImageAutoPopulate,
     WM_OT_RefineImagePasteJSON,
     WM_OT_RefineImageSubmit,
     STYLEENGINE_OT_ApplyToParent,
+    STYLEENGINE_OT_CopySubject,
     VIEW3D_PT_StyleEngine,
 )
 

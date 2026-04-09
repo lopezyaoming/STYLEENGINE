@@ -11,6 +11,7 @@ from pathlib import Path
 import urllib.request
 import urllib.error
 import shutil
+from bpy.app.handlers import persistent
 
 # Get the addon directory (works both in dev and when installed from ZIP)
 ADDON_DIR = Path(__file__).parent
@@ -250,6 +251,7 @@ def migrate_session_to_project(context):
     print(f"[Style Engine] ✅ Migration complete! ({migrated_count} images)")
 
 
+@persistent
 def on_blend_file_saved(dummy):
     """
     Handler called after .blend file is saved.
@@ -283,29 +285,51 @@ def on_blend_file_saved(dummy):
 def get_generation_list(context):
     """
     Get list of all saved generations, sorted chronologically (oldest to newest).
-    
+
+    In Asset Mode returns images from the active asset's Images/ folder so the
+    generation browser navigates asset iterations rather than the scene library.
+
     Returns:
         list[Path]: List of generation image paths, sorted by timestamp
     """
+    try:
+        _props = context.scene.style_engine_props
+        if getattr(_props, 'asset_mode', False):
+            _comps = get_asset_path_components(_props)
+            if _comps:
+                _asset_dir = get_nested_asset_directory(context, _comps)
+            else:
+                _asset_dir = get_asset_directory(context, _props.current_asset_name)
+            _images_dir = _asset_dir / "Images"
+            if not _images_dir.exists():
+                return []
+            _gens = list(_images_dir.glob("*.png"))
+            _gens.sort()
+            return _gens
+    except Exception as _e:
+        print(f"[Style Engine] ⚠ get_generation_list asset-mode fallback: {_e}")
+
     working_dir = get_working_directory(context)
-    
+
     if not working_dir.exists():
         return []
-    
+
     # Get all PNG files in generations folder
     generations = list(working_dir.glob("*.png"))
-    
+
     # Sort by filename (which includes timestamp, so chronological)
     generations.sort()
-    
+
     return generations
 
 
 def load_generation_to_current(context, generation_path):
     """
     Load a specific generation to current_ai.png for viewing/projection.
-    Writes exclusively to temp_dir/current_ai.png — the single canonical path
-    that Blender's image datablock tracks.
+
+    In Asset Mode writes to the asset's own temp/current_ai.png and refreshes
+    the asset camera background, so the scene's current_ai.png is never touched.
+    In Scene Mode writes to the global temp/current_ai.png as before.
 
     Args:
         context: Blender context
@@ -320,6 +344,59 @@ def load_generation_to_current(context, generation_path):
         print(f"[Style Engine] ⚠️ Generation not found: {generation_path}")
         return False
 
+    # ── Asset Mode: write to the asset's own temp, refresh asset camera ──────
+    try:
+        _props = context.scene.style_engine_props
+        if getattr(_props, 'asset_mode', False):
+            _comps = get_asset_path_components(_props)
+            if _comps:
+                _asset_temp = get_nested_asset_directory(context, _comps) / "temp"
+            else:
+                _asset_temp = get_asset_temp_directory(
+                    context, _props.current_asset_name)
+            _asset_temp.mkdir(parents=True, exist_ok=True)
+            _current_ai = _asset_temp / "current_ai.png"
+            try:
+                shutil.copy2(generation_path, _current_ai)
+                print(f"[Style Engine] 📷 Loaded asset generation: {generation_path.name}")
+            except Exception as _ce:
+                print(f"[Style Engine] ❌ Failed to load asset generation: {_ce}")
+                return False
+            # Refresh the asset camera background (not the scene ai_camera)
+            refresh_asset_camera_image(
+                _comps[-1] if _comps else _props.current_asset_name,
+                path_components=_comps if _comps else None,
+            )
+            # Restore sidecars (same logic as scene mode below, same sidecar files)
+            _sidecar_txt = generation_path.with_suffix(".txt")
+            if _sidecar_txt.exists():
+                try:
+                    tb = bpy.data.texts.get("STYLEENGINE_Prompt")
+                    if not tb:
+                        tb = bpy.data.texts.new("STYLEENGINE_Prompt")
+                    tb.clear()
+                    tb.write(_sidecar_txt.read_text(encoding='utf-8'))
+                    print(f"[Style Engine] 📖 Restored asset prompt sidecar: "
+                          f"{_sidecar_txt.name}")
+                except Exception as _te:
+                    print(f"[Style Engine] ⚠ Asset prompt sidecar error: {_te}")
+            _sidecar_json = generation_path.with_suffix(".json")
+            if _sidecar_json.exists():
+                try:
+                    import json as _j
+                    _data = _j.loads(_sidecar_json.read_text(encoding='utf-8'))
+                    from . import ui_panel as _up
+                    _up._populate_refine_from_json(_props, _j.dumps(_data))
+                    print(f"[Style Engine] 🔬 Restored asset JSON sidecar: "
+                          f"{_sidecar_json.name}")
+                except Exception as _je:
+                    print(f"[Style Engine] ⚠ Asset JSON sidecar error: {_je}")
+            return True
+    except Exception as _am_e:
+        print(f"[Style Engine] ⚠ load_generation_to_current asset branch error: {_am_e}")
+        # Fall through to scene-mode path
+
+    # ── Scene Mode: write to global temp, refresh ai_camera ──────────────────
     temp_dir = get_temp_directory(context)
     temp_dir.mkdir(parents=True, exist_ok=True)
     current_ai_path = temp_dir / "current_ai.png"
@@ -663,6 +740,80 @@ def ensure_nested_asset_directory(context, path_components):
     return asset_dir
 
 
+def _read_image_aspect_and_size(image_path):
+    """
+    Read a PNG/JPEG's pixel dimensions and return (aspect_ratio_str, image_size_str)
+    suitable for the NanoBananaAIO node's aspect_ratio / image_size inputs.
+
+    aspect_ratio_str — simplified ratio e.g. "16:9", "1:1", "4:3"
+    image_size_str   — Gemini size token: "1K" (≤1080p), "2K" (≤1440p), "4K" (larger)
+
+    Falls back to ("1:1", "1K") on any error.
+    """
+    import struct as _struct
+    from math import gcd as _gcd
+
+    try:
+        path = Path(image_path)
+        w, h = None, None
+
+        if path.suffix.lower() == '.png':
+            with open(path, 'rb') as f:
+                sig = f.read(8)
+                if sig == b'\x89PNG\r\n\x1a\n':
+                    f.read(4)                          # IHDR length field
+                    if f.read(4) == b'IHDR':
+                        w = _struct.unpack('>I', f.read(4))[0]
+                        h = _struct.unpack('>I', f.read(4))[0]
+
+        elif path.suffix.lower() in ('.jpg', '.jpeg'):
+            with open(path, 'rb') as f:
+                data = f.read(65536)                   # read enough for SOF marker
+            i = 0
+            while i < len(data) - 9:
+                if data[i] != 0xFF:
+                    break
+                marker = data[i + 1]
+                if marker in (0xC0, 0xC2):             # SOF0 / SOF2
+                    h = _struct.unpack('>H', data[i + 5:i + 7])[0]
+                    w = _struct.unpack('>H', data[i + 7:i + 9])[0]
+                    break
+                seg_len = _struct.unpack('>H', data[i + 2:i + 4])[0]
+                i += 2 + seg_len
+
+        if w and h:
+            # Snap to the nearest ratio the NanoBananaAIO node actually accepts.
+            _VALID = {
+                '1:1':  1.0,
+                '2:3':  2/3,
+                '3:2':  1.5,
+                '3:4':  0.75,
+                '4:3':  4/3,
+                '4:5':  0.8,
+                '5:4':  1.25,
+                '9:16': 9/16,
+                '16:9': 16/9,
+                '21:9': 21/9,
+            }
+            actual = w / h
+            aspect_str = min(_VALID, key=lambda k: abs(_VALID[k] - actual))
+
+            long_edge = max(w, h)
+            if long_edge <= 1080:
+                size_str = "1K"
+            elif long_edge <= 1440:
+                size_str = "2K"
+            else:
+                size_str = "4K"
+
+            return aspect_str, size_str
+
+    except Exception as _e:
+        print(f"[Style Engine] ⚠ Could not read image dimensions from {image_path}: {_e}")
+
+    return "1:1", "1K"
+
+
 def get_asset_path_components(props):
     """Return the full ancestry chain including the current asset.
 
@@ -744,6 +895,63 @@ def write_asset_history(context, asset_label, history):
             tmp_path.unlink(missing_ok=True)
         except Exception:
             pass
+
+
+def _get_scene_subjects_json_path(scene=None):
+    """Return Path to scene_subjects.json, or None if the project dir is unknown.
+
+    This is the persistent disk backup of the top-level scene subjects,
+    independent of the .blend file and of image generation sidecars.
+    File: <project>_styleengine/scene_subjects.json
+    """
+    try:
+        import bpy as _bpy
+        _blend = _bpy.data.filepath
+        if not _blend:
+            # Unsaved project — use a session-temp location
+            _tmp = _get_system_temp_dir()
+            return _tmp / "scene_subjects.json"
+        _base = Path(_blend).stem
+        _proj_dir = Path(_blend).parent / f"{_base}_styleengine"
+        _proj_dir.mkdir(parents=True, exist_ok=True)
+        return _proj_dir / "scene_subjects.json"
+    except Exception:
+        return None
+
+
+def save_scene_subjects_json(context, subjects_json_str):
+    """Persist the serialized scene subjects JSON to disk.
+
+    Called at key moments (image generation, JSON analysis, manual edits)
+    so the scene subjects survive a file saved in asset mode or a crash.
+    File: <project>_styleengine/scene_subjects.json
+    """
+    path = _get_scene_subjects_json_path()
+    if path is None:
+        return
+    tmp = path.with_suffix(".json.tmp")
+    try:
+        with open(tmp, 'w', encoding='utf-8') as f:
+            f.write(subjects_json_str)
+        tmp.replace(path)
+        print(f"[Scene JSON] 💾 scene_subjects.json saved → {path.parent.name}/")
+    except Exception as e:
+        print(f"[Scene JSON] ⚠ Could not save scene_subjects.json: {e}")
+        try:
+            tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
+def load_scene_subjects_json():
+    """Return the saved scene subjects JSON string, or None if absent."""
+    path = _get_scene_subjects_json_path()
+    if path and path.exists():
+        try:
+            return path.read_text(encoding='utf-8')
+        except Exception as e:
+            print(f"[Scene JSON] ⚠ Could not read scene_subjects.json: {e}")
+    return None
 
 
 def save_asset_subjects_json(context, asset_label, subjects_json_str,
@@ -920,11 +1128,14 @@ def save_asset_mesh_to_3d(context, asset_label, source_glb):
         return None
 
 
-def switch_asset_iteration(context, asset_label, new_index):
+def switch_asset_iteration(context, asset_label, new_index, subject_index=-1):
     """
     Switch the visible mesh to the iteration at *new_index*, update
     linked_object_name / asset_object_links, copy the iteration's image
     to asset temp/current_ai.png, and refresh the camera background.
+
+    subject_index — the props.refine_subjects index of the subject whose
+    arrows were clicked.  Pass -1 (default) to fall back to label lookup.
 
     Returns True on success.
     """
@@ -959,11 +1170,18 @@ def switch_asset_iteration(context, asset_label, new_index):
     # Update Blender property links
     try:
         props = bpy.context.scene.style_engine_props
-        # Update the subject that owns this asset
-        si = props.asset_subject_index
+        # Prefer the explicitly passed subject_index; fall back to searching
+        # by label so callers that don't have the index still work.
+        si = subject_index
+        if not (0 <= si < len(props.refine_subjects)):
+            # label-based fallback
+            si = next(
+                (i for i, s in enumerate(props.refine_subjects)
+                 if s.label == asset_label),
+                -1
+            )
         if 0 <= si < len(props.refine_subjects):
-            subj = props.refine_subjects[si]
-            subj.linked_object_name = new_entry["object_name"]
+            props.refine_subjects[si].linked_object_name = new_entry["object_name"]
         try:
             lm = json.loads(props.asset_object_links or "{}")
         except Exception:
@@ -999,22 +1217,27 @@ def switch_asset_iteration(context, asset_label, new_index):
 
     refresh_asset_camera_image(asset_label, path_components=_hist_comps)
 
-    # Restore the subjects JSON that was snapshotted when this iteration was created
+    # Restore the subjects JSON that was snapshotted when this iteration was created.
+    # ONLY do this when we are already inside asset mode — the snapshot contains the
+    # asset's components, not the scene subject list.  Calling _populate_refine_from_json
+    # from scene mode would wipe all scene subjects and then re-trigger sync.
     try:
-        _iter_json = load_asset_iteration_subjects_json(context, asset_label, new_index)
-        if _iter_json:
-            from . import ui_panel as _up
-            _props = bpy.context.scene.style_engine_props
-            _up._populate_refine_from_json(_props, _iter_json)
-            print(f"[Asset History] Restored subjects JSON for iteration {new_index}")
-        else:
-            # Fall back to the asset's persistent subjects file if no iteration snapshot
-            _asset_json = load_asset_subjects_json(context, asset_label)
-            if _asset_json:
+        _props_check = bpy.context.scene.style_engine_props
+        if getattr(_props_check, 'asset_mode', False):
+            _iter_json = load_asset_iteration_subjects_json(context, asset_label, new_index)
+            if _iter_json:
                 from . import ui_panel as _up
-                _props = bpy.context.scene.style_engine_props
-                _up._populate_refine_from_json(_props, _asset_json)
-                print(f"[Asset History] Restored asset subjects JSON (no iter snapshot)")
+                _up._populate_refine_from_json(_props_check, _iter_json)
+                print(f"[Asset History] Restored subjects JSON for iteration {new_index}")
+            else:
+                _asset_json = load_asset_subjects_json(context, asset_label)
+                if _asset_json:
+                    from . import ui_panel as _up
+                    _up._populate_refine_from_json(_props_check, _asset_json)
+                    print(f"[Asset History] Restored asset subjects JSON (no iter snapshot)")
+        else:
+            print(f"[Asset History] Scene mode — skipping subjects JSON restore "
+                  f"(mesh swap only) for iteration {new_index}")
     except Exception as _je:
         print(f"[Asset History] ⚠ Could not restore subjects JSON: {_je}")
 
@@ -1409,6 +1632,12 @@ def save_generation_to_library(context, source_image_path, backend='unknown'):
             with open(json_sidecar_path, 'w', encoding='utf-8') as f:
                 _json.dump(refine_data, f, indent=2, ensure_ascii=False)
             print(f"[Style Engine] 🔬 Saved JSON sidecar: {json_sidecar_path.name}")
+            # Also update the standalone scene_subjects.json backup (scene mode only)
+            if not getattr(context.scene.style_engine_props, 'asset_mode', False):
+                try:
+                    save_scene_subjects_json(context, _json.dumps(refine_data, indent=2))
+                except Exception:
+                    pass
         else:
             print("[Style Engine] ⚠ Refine Image form empty — no .json sidecar saved")
     except Exception as e:
@@ -1630,17 +1859,21 @@ def find_current_ai(context):
     return None
 
 
+@persistent
 def on_blend_file_loaded(dummy):
     """
     Handler called by bpy.app.handlers.load_post after every file load
     (File > Open, File > Recent, drag-and-drop, etc.).
 
+    Decorated with @persistent so Blender does NOT clear it when a new
+    file is opened — without this the handler would be removed before
+    load_post fires and would never run.
+
     1. Saves the old temp-dir path before clearing the lock.
     2. Resets the lock so get_temp_directory() re-evaluates for the new file.
-    3. Migrates working files (current_ai.png etc.) from the old location — and
-       from the system-temp fallback — to wherever the project now lives.
-       This is the critical step that prevents "current_ai.png not found" when
-       the session previously locked to system temp before the file was saved.
+    3. Migrates working files (current_ai.png etc.) from the old location.
+    4. Schedules a deferred asset-mode reset via a timer (bpy.context is not
+       fully valid inside load_post on all Blender versions).
     """
     global _session_id, _session_temp_dir
 
@@ -1664,6 +1897,149 @@ def on_blend_file_loaded(dummy):
         print(f"[Style Engine] 🔄 File loaded — temp dir now: {new_temp}")
     except Exception as e:
         print(f"[Style Engine] ⚠ on_blend_file_loaded migration error: {e}")
+
+    # Defer the asset-mode reset to the next main-loop tick.
+    # bpy.context.scene is not guaranteed to be valid inside load_post on all
+    # Blender 4.x builds; iterating bpy.data.scenes in a timer is always safe.
+    def _deferred_asset_mode_reset():
+        try:
+            for scene in bpy.data.scenes:
+                if not hasattr(scene, 'style_engine_props'):
+                    continue
+                props = scene.style_engine_props
+                if not getattr(props, 'asset_mode', False):
+                    continue
+
+                # ── 1. Restore render resolution ─────────────────────────────
+                rx = getattr(props, 'asset_prev_resolution_x', 0)
+                ry = getattr(props, 'asset_prev_resolution_y', 0)
+                if rx > 0 and ry > 0:
+                    scene.render.resolution_x = rx
+                    scene.render.resolution_y = ry
+
+                # ── 2. Restore active camera ──────────────────────────────────
+                # The file was saved with scene.camera = asset_camera_*.
+                # Read the saved previous camera name and restore it.
+                prev_cam_name = getattr(props, 'asset_prev_camera', '')
+                if prev_cam_name and prev_cam_name in bpy.data.objects:
+                    scene.camera = bpy.data.objects[prev_cam_name]
+                    print(f"[Style Engine] 📷 Restored active camera → '{prev_cam_name}'")
+                # Hide all asset cameras — none should be active in scene mode
+                for _cam_obj in bpy.data.objects:
+                    if _cam_obj.type == 'CAMERA' and _cam_obj.name.startswith("asset_camera_"):
+                        _cam_obj.hide_viewport = True
+
+                # ── 3. Restore object visibility ──────────────────────────────
+                # Try the saved per-object visibility dict first; fall back to
+                # unhiding everything (safe because the user is now in scene mode).
+                _vis_json = getattr(props, 'asset_stored_visibility', '')
+                if _vis_json:
+                    try:
+                        _vis_dict = json.loads(_vis_json)
+                        for _oname, _hv_hr in _vis_dict.items():
+                            _o = bpy.data.objects.get(_oname)
+                            if _o:
+                                _o.hide_viewport, _o.hide_render = _hv_hr
+                    except Exception:
+                        for obj in bpy.data.objects:
+                            obj.hide_viewport = False
+                            obj.hide_render   = False
+                else:
+                    for obj in bpy.data.objects:
+                        obj.hide_viewport = False
+                        obj.hide_render   = False
+
+                # ── 4. Restore scene subjects ─────────────────────────────────
+                # When saved in asset mode, refine_subjects holds the asset's
+                # components. The scene subjects are in asset_prev_subjects.
+                # Priority: asset_prev_subjects → scene_subjects.json on disk.
+                _restored_subjects = False
+                _prev_subj = getattr(props, 'asset_prev_subjects', '')
+                if _prev_subj:
+                    try:
+                        from . import ui_panel as _up
+                        _up._populate_refine_from_json(props, _prev_subj)
+                        _restored_subjects = True
+                        print("[Style Engine] ✅ Scene subjects restored from asset_prev_subjects")
+                    except Exception as _se:
+                        print(f"[Style Engine] ⚠ Subject restore from property failed: {_se}")
+
+                if not _restored_subjects:
+                    # Fallback: load scene_subjects.json from disk
+                    _ssj = _get_scene_subjects_json_path(scene)
+                    if _ssj and _ssj.exists():
+                        try:
+                            from . import ui_panel as _up
+                            _up._populate_refine_from_json(props, _ssj.read_text(encoding='utf-8'))
+                            _restored_subjects = True
+                            print(f"[Style Engine] ✅ Scene subjects restored from {_ssj.name}")
+                        except Exception as _fe:
+                            print(f"[Style Engine] ⚠ Subject restore from disk failed: {_fe}")
+
+                if not _restored_subjects:
+                    print("[Style Engine] ⚠ Could not restore scene subjects — "
+                          "refine_subjects may still show asset components")
+
+                # ── 5. Clear ALL asset mode flags — mirrors ExitAssetMode top-level ──
+                props.asset_mode               = False
+                props.current_asset_name       = ""
+                props.asset_mode_stack         = "[]"
+                props.asset_mode_depth         = 0      # CRITICAL: prevents stale depth
+                props.asset_prev_subjects      = ""
+                props.asset_stored_visibility  = ""
+                props.asset_prev_camera        = ""
+                props.asset_current_3d_index   = 0
+                props.asset_prev_resolution_x  = 1024
+                props.asset_prev_resolution_y  = 1024
+                props.asset_prev_prompt        = ""
+                props.asset_subject_style      = ""
+                props.asset_subject_scale      = ""
+                props.asset_subject_color      = ""
+                props.asset_subject_material   = ""
+                try:
+                    props.asset_subject_features.clear()
+                except Exception:
+                    pass
+
+                print(f"[Style Engine] ⚠ Asset Mode auto-exited on load "
+                      f"(scene '{scene.name}') — N-panel restored")
+        except Exception as _e:
+            print(f"[Style Engine] ⚠ Asset Mode reset failed: {_e}")
+            import traceback as _tb; _tb.print_exc()
+        return None  # unregister the timer
+
+    bpy.app.timers.register(_deferred_asset_mode_reset, first_interval=0.2)
+
+    # Second deferred pass: if the file was saved in scene mode but refine_subjects
+    # is somehow empty, attempt a quiet restore from scene_subjects.json.
+    # This runs at 0.5 s so it fires after the asset-mode reset above.
+    def _deferred_scene_subjects_restore():
+        try:
+            for scene in bpy.data.scenes:
+                if not hasattr(scene, 'style_engine_props'):
+                    continue
+                props = scene.style_engine_props
+                # Skip if we're in asset mode (reset above handles that case)
+                if getattr(props, 'asset_mode', False):
+                    continue
+                # Only try if subjects are empty
+                if len(props.refine_subjects) > 0:
+                    continue
+                _ssj = _get_scene_subjects_json_path(scene)
+                if _ssj and _ssj.exists():
+                    try:
+                        from . import ui_panel as _up
+                        _up._populate_refine_from_json(
+                            props, _ssj.read_text(encoding='utf-8'))
+                        print(f"[Style Engine] 🔄 Scene subjects loaded from "
+                              f"scene_subjects.json fallback")
+                    except Exception as _rfe:
+                        print(f"[Style Engine] ⚠ scene_subjects.json restore failed: {_rfe}")
+        except Exception as _e2:
+            print(f"[Style Engine] ⚠ Scene subjects fallback restore error: {_e2}")
+        return None
+
+    bpy.app.timers.register(_deferred_scene_subjects_restore, first_interval=0.5)
 
     # Ensure all asset cameras in this .blend are hidden from the viewport.
     # Cameras created before the hide_viewport fix will be corrected here.
@@ -3804,6 +4180,127 @@ def render_passes(context):
 # ----------------------------------------------------------------
 
 
+def _apply_black_key(image_path, threshold=18):
+    """Replace near-black pixels with full transparency in-place.
+
+    Uses Blender's built-in bpy.data.images + numpy (both always available)
+    so no external dependencies are required.
+
+    threshold — any pixel with R, G, B all below this value (0-255) is made
+    fully transparent.  Pure black background from Gemini sits at 0; even
+    the darkest mortar joint on a brick wall has some colour, so 18 is safe
+    without eroding real edges.
+    """
+    import numpy as _np
+    from pathlib import Path as _Path
+
+    path = _Path(image_path)
+    img  = None
+    try:
+        img = bpy.data.images.load(str(path))
+        w, h = img.size
+        # pixels are stored as a flat RGBA float list (values 0.0–1.0)
+        arr = _np.array(img.pixels[:], dtype=_np.float32).reshape(h, w, 4)
+        t   = threshold / 255.0
+        mask = (arr[:, :, 0] < t) & (arr[:, :, 1] < t) & (arr[:, :, 2] < t)
+        arr[mask, 3] = 0.0
+        img.pixels[:] = arr.flatten().tolist()
+        img.filepath_raw = str(path)
+        img.file_format  = 'PNG'
+        img.save()
+        n_keyed = int(mask.sum())
+        print(f"[BlackKey] ✓ Keyed {n_keyed:,} px (threshold={threshold}): {path.name}")
+        return True
+    except Exception as _e:
+        print(f"[BlackKey] ⚠ Could not apply black key to {path.name}: {_e}")
+        import traceback as _tb; _tb.print_exc()
+        return False
+    finally:
+        if img and img.name in bpy.data.images:
+            bpy.data.images.remove(img)
+
+
+def _on_arch_isolation_complete(context, server_client,
+                                 success, result=None, error=None, workflow_type=None):
+    """Callback for architectural asset isolation (no rembg).
+
+    Downloads the raw Gemini output, applies a pure-black chroma key in
+    Python to produce clean transparency, then saves to library and refreshes
+    the asset camera background — identical end-state to the normal flow.
+    """
+    from . import runcomfy_server_client as _rsc
+    if not success:
+        print(f"[ArchKey] ❌ Isolation failed: {error}")
+        return
+    try:
+        images = _rsc.extract_output_images(result)
+        if not images:
+            print("[ArchKey] No output images in result")
+            return
+
+        # First non-preview image is the main Gemini output
+        main_img = next(
+            (i for i in images
+             if not i['filename'].lower().startswith(('canny', 'depth'))),
+            None
+        )
+        if not main_img:
+            print("[ArchKey] No main output image found")
+            return
+
+        dest_path = get_active_ai_output_path(context)
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path  = str(dest_path) + '.tmp'
+
+        ok = server_client.download_image(
+            main_img['filename'], tmp_path,
+            main_img.get('subfolder', ''), main_img.get('type', 'output'),
+        )
+        if ok and os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 1024:
+            os.replace(tmp_path, str(dest_path))
+            print(f"[ArchKey] ✓ Downloaded: {dest_path.name}")
+        else:
+            print("[ArchKey] ❌ Download failed or file too small")
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+            return
+
+        def _deferred():
+            try:
+                _ctx  = bpy.context
+                _path = get_active_ai_output_path(_ctx)
+                # Apply black-key BEFORE saving to library so the
+                # transparent version is what gets archived.
+                _apply_black_key(_path)
+                # Save timestamped copy to project library
+                saved = save_generation_to_library(_ctx, _path, backend='GCS')
+                if saved:
+                    print(f"[ArchKey] ✓ Saved to library: {Path(saved).name}")
+                # Refresh camera background
+                _p = _ctx.scene.style_engine_props
+                if getattr(_p, 'asset_mode', False):
+                    _comps = get_asset_path_components(_p)
+                    refresh_asset_camera_image(
+                        _p.current_asset_name,
+                        path_components=_comps if _comps else None,
+                    )
+                else:
+                    refresh_ai_image()
+                print("[ArchKey] ✓ Camera background refreshed")
+            except Exception as _e:
+                print(f"[ArchKey] ⚠ Deferred error: {_e}")
+                import traceback as _tb; _tb.print_exc()
+            return None
+
+        bpy.app.timers.register(_deferred, first_interval=0.05)
+
+    except Exception as _e:
+        print(f"[ArchKey] ❌ Callback error: {_e}")
+        import traceback as _tb; _tb.print_exc()
+
+
 def queue_asset_isolation_workflow(context, object_name):
     """
     Queue AssetNanoAlignmentRB.json to extract a single asset from the current
@@ -3880,10 +4377,14 @@ def queue_asset_isolation_workflow(context, object_name):
         "facade", "wall", "floor", "ceiling", "pavement", "sidewalk", "road",
         "street", "building", "elevation", "structure", "roof", "ground",
         "terrain", "brick", "concrete", "tile", "slab", "panel", "surface",
+        "column", "pillar", "arch", "gate", "doorway", "window", "balcony",
+        "railing", "stair", "step", "path", "cobble", "cobblestone", "alley",
+        "alleyway", "courtyard", "parapet", "buttress", "cladding", "masonry",
     }
     _ARCH_MATERIAL_KEYWORDS = {
         "concrete", "brick", "stone", "asphalt", "plaster", "mortar",
-        "cement", "stucco", "tile", "wood_panel", "cladding",
+        "cement", "stucco", "tile", "wood_panel", "cladding", "masonry",
+        "cobblestone", "sandstone", "limestone", "marble", "granite",
     }
     _ARCH_FEATURE_KEYWORDS = {
         "facade", "wall", "building", "elevation", "structural", "background",
@@ -3893,6 +4394,14 @@ def queue_asset_isolation_workflow(context, object_name):
     # so Gemini understands the specific look of the object to extract.
     descriptor    = object_name
     is_arch       = False   # will flip to True for architectural/planar subjects
+
+    # Label-based detection is always run — object_name is always available
+    # regardless of whether a valid subject entry exists in the list.
+    _label_words = set(object_name.lower().replace("_", " ").split())
+    if _label_words & _ARCH_LABEL_KEYWORDS:
+        is_arch = True
+        print(f"[Asset Mode] Arch detected via label words: {_label_words & _ARCH_LABEL_KEYWORDS}")
+
     try:
         _props = context.scene.style_engine_props
         _si    = _props.asset_subject_index
@@ -3906,29 +4415,54 @@ def queue_asset_isolation_workflow(context, object_name):
             if _parts:
                 descriptor = f"{object_name} ({', '.join(_parts)})"
 
-            # Architectural detection — check label and material
-            _label_words = set(object_name.lower().replace("_", " ").split())
-            if _label_words & _ARCH_LABEL_KEYWORDS:
-                is_arch = True
-            elif _subj.material and any(
+            # Material-based detection (supplements the label check above)
+            if not is_arch and _subj.material and any(
                     k in _subj.material.lower() for k in _ARCH_MATERIAL_KEYWORDS):
                 is_arch = True
+                print(f"[Asset Mode] Arch detected via material: '{_subj.material}'")
     except Exception as _de:
         print(f"[Asset Mode] Could not build subject descriptor: {_de}")
 
     workflow_json["69"]["inputs"]["text"] = descriptor
 
-    # Node 63: extraction prefix — add isometric instruction for architectural subjects
+    # Node 63 + Node 70: for architectural/planar subjects force an explicit
+    # axonometric/isometric perspective — the generic prompt is not strong enough
+    # to prevent rembg from treating a facade or wall as background.
     if is_arch:
         workflow_json["63"]["inputs"]["text"] = (
-            "From the current scene, extract the following architectural asset "
-            "and render it in a clean isometric three-quarter view so all major "
-            "surfaces are visible:"
+            "From the current scene, extract the following architectural asset:"
         )
-        print(f"[Asset Mode] Architectural subject detected — isometric view requested")
-    # else: leave node 63 at its default "From the current scene, extract..." text
+        workflow_json["70"]["inputs"]["text"] = (
+            ". This is the PRIMARY FOREGROUND SUBJECT — a planar architectural "
+            "or structural element. It must NEVER be treated as background. "
+            "YOU MUST USE AN AXONOMETRIC OR ISOMETRIC PERSPECTIVE — render it as "
+            "a clean architectural elevation or isometric three-quarter projection "
+            "so that all major surfaces are clearly visible and the element reads "
+            "as a self-contained panel or tile, completely separate from any "
+            "surrounding scene. The entire object must read as a single, unified, "
+            "self-contained element: every part belongs to it. "
+            "Render it on a pure black (#000000) background with a subtle rim "
+            "light or soft specular highlight along its silhouette edges so every "
+            "boundary of the object is clearly distinguishable from the background. "
+            "Capture the whole object fully within the frame with clear visible "
+            "edges on all sides. Preserve every specific detail, surface texture, "
+            "distinctive markings and characteristic feature exactly as they appear "
+            "in the source image — do not invent, generalise or substitute. "
+            "Retain the medium, style and color palette of the original scene."
+        )
+        print(f"[Asset Mode] Architectural subject detected — forcing axonometric/isometric view")
+    # else: leave node 63 and node 70 at their default text
 
     print(f"[Asset Mode] Node 69 descriptor: '{descriptor}' (arch={is_arch})")
+
+    # For architectural assets bypass InspyrenetRembg entirely:
+    # rewire SaveImage (64) to read directly from NanoBananaAIO (50) and
+    # delete the rembg node.  The black-key is applied in Python instead,
+    # where it is reliable because we know the background colour exactly.
+    if is_arch and "64" in workflow_json and "67" in workflow_json:
+        workflow_json["64"]["inputs"]["images"] = ["50", 0]
+        del workflow_json["67"]
+        print("[Asset Mode] Arch asset — rembg node removed, black-key will run in Python")
 
     # Node 71: scene image input
     workflow_json["71"]["inputs"]["image"] = uploaded_filename
@@ -3951,17 +4485,234 @@ def queue_asset_isolation_workflow(context, object_name):
         return
 
     # ── Poll ─────────────────────────────────────────────────────────────────
+    if is_arch:
+        # Arch assets: use the black-key callback (rembg was stripped above)
+        _arch_cb = lambda success, result=None, error=None, workflow_type=None: \
+            _on_arch_isolation_complete(context, server_client,
+                                         success, result, error, workflow_type)
+        runcomfy_polling.RunComfyPoller.start_polling(
+            deployment_id='server',
+            request_id=prompt_id,
+            callback=_arch_cb,
+            workflow_type='gemini',
+        )
+    else:
+        runcomfy_polling.RunComfyPoller.start_polling(
+            deployment_id='server',
+            request_id=prompt_id,
+            callback=lambda success, result=None, error=None, workflow_type=None:
+                on_generation_complete_server(
+                    context, success, result, error,
+                    workflow_type or 'gemini', server_client
+                ),
+            workflow_type='gemini',
+        )
+    print("[Asset Mode] 🎨 Isolation render started!")
+
+
+# ----------------------------------------------------------------
+
+def queue_apply_to_parent_workflow(context, child_label, prompt_str):
+    """
+    Queue ImageNanoAlignmentRef.json to visually update the parent's current_ai.png
+    so it reflects the modified child asset shown in the second image slot.
+
+    image_1 (node 56) = parent's current_ai.png  — the scene / parent level to edit
+    image_2 (node 67) = child's  current_ai.png  — the modified asset as visual ref
+
+    The result is saved directly to the parent's current_ai.png path, never to the
+    active asset path (get_active_ai_output_path), so asset-mode isolation is
+    preserved while the parent level is still updated.
+    """
+    import time as _time
+    from . import runcomfy_deployment, runcomfy_polling
+
+    # ── Guard: don't stack generations ──────────────────────────────────────
+    if runcomfy_polling.RunComfyPoller.active_requests:
+        print("[ApplyToParent] Generation already in progress — skipping visual cascade")
+        return
+
+    # ── Server client ────────────────────────────────────────────────────────
+    try:
+        server_client = runcomfy_deployment.get_server_client()
+    except Exception as e:
+        print(f"[ApplyToParent] ⚠ Could not get server client: {e}")
+        return
+
+    # ── Resolve image paths ──────────────────────────────────────────────────
+    props = context.scene.style_engine_props
+
+    # Child = active asset's current render
+    child_image_path = get_active_ai_output_path(context)
+
+    # Parent = one level up the stack
+    try:
+        _stack = json.loads(getattr(props, 'asset_mode_stack', '[]') or '[]')
+        if not _stack:
+            # Parent is the scene itself
+            parent_image_path = get_temp_directory(context) / "current_ai.png"
+            parent_components = None
+        else:
+            parent_components = [e["asset_name"] for e in _stack]
+            parent_image_path = (get_nested_asset_directory(context, parent_components)
+                                 / "temp" / "current_ai.png")
+    except Exception as _pe:
+        print(f"[ApplyToParent] ⚠ Could not resolve parent image path: {_pe}")
+        return
+
+    if not child_image_path.exists():
+        print(f"[ApplyToParent] ⚠ Child current_ai not found: {child_image_path}")
+        return
+    if not parent_image_path.exists():
+        print(f"[ApplyToParent] ⚠ Parent current_ai not found: {parent_image_path}")
+        return
+
+    # ── Upload both images ───────────────────────────────────────────────────
+    print(f"[ApplyToParent] Uploading parent image: {parent_image_path}")
+    try:
+        parent_upload   = server_client.upload_image(str(parent_image_path))
+        parent_filename = parent_upload['name']
+        print(f"[ApplyToParent] ✓ Parent uploaded: {parent_filename}")
+    except Exception as e:
+        print(f"[ApplyToParent] ⚠ Parent upload failed: {e}")
+        return
+
+    print(f"[ApplyToParent] Uploading child image: {child_image_path}")
+    try:
+        child_upload   = server_client.upload_image(str(child_image_path))
+        child_filename = child_upload['name']
+        print(f"[ApplyToParent] ✓ Child uploaded: {child_filename}")
+    except Exception as e:
+        print(f"[ApplyToParent] ⚠ Child upload failed: {e}")
+        return
+
+    # ── Load & patch workflow ────────────────────────────────────────────────
+    # Use the RB variant when the parent is itself an asset (isolated subject
+    # with no background), keep the plain variant when the parent is the scene
+    # (background must be preserved).
+    addon_dir  = Path(__file__).parent
+    wf_name    = "ImageNanoAlignmentRefRB.json" if parent_components else "ImageNanoAlignmentRef.json"
+    wf_path    = addon_dir / "workflows" / "Image" / wf_name
+    if not wf_path.exists():
+        print(f"[ApplyToParent] ⚠ {wf_name} not found: {wf_path}")
+        return
+    print(f"[ApplyToParent] Using workflow: {wf_name}")
+
+    with open(wf_path, 'r') as f:
+        workflow_json = json.load(f)
+
+    # Node 56 (image_1): parent scene — provides spatial context for in-painting
+    workflow_json["56"]["inputs"]["image"] = parent_filename
+    # Node 67 (image_2): modified child asset — provides the visual target
+    workflow_json["67"]["inputs"]["image"] = child_filename
+    # Node 63: instruction prompt
+    workflow_json["63"]["inputs"]["text"] = prompt_str
+    # Node 65: instructions (blank — prompt is self-contained)
+    workflow_json["65"]["inputs"]["value"] = ""
+    # Node 66: spatial alignment text (blank — parent image IS the spatial ref)
+    workflow_json["66"]["inputs"]["value"] = ""
+
+    # Node 50: match the parent image's own dimensions so the output never
+    # changes the aspect ratio or resolution of the parent level.
+    _parent_aspect, _parent_size = _read_image_aspect_and_size(parent_image_path)
+    workflow_json["50"]["inputs"]["aspect_ratio"] = _parent_aspect
+    workflow_json["50"]["inputs"]["image_size"]   = _parent_size
+
+    print(f"[ApplyToParent] Patched workflow — "
+          f"parent='{parent_filename}' child='{child_filename}'")
+
+    # ── Queue ────────────────────────────────────────────────────────────────
+    from . import progress_bar
+    try:
+        queue_response = server_client.queue_prompt(workflow_json)
+        prompt_id = queue_response.get('prompt_id')
+        progress_bar.set_current_workflow(workflow_json)
+        print(f"[ApplyToParent] 🎨 Visual cascade queued (ID: {prompt_id[:8]}…)")
+    except Exception as e:
+        print(f"[ApplyToParent] ⚠ queue_prompt failed: {e}")
+        return
+
+    # ── Custom completion callback ───────────────────────────────────────────
+    # Deliberately does NOT use on_generation_complete_server because that
+    # function always saves to get_active_ai_output_path() (the child path).
+    # Here we write explicitly to the parent path.
+    _parent_image_path = parent_image_path     # capture for closure
+    _parent_components = parent_components
+
+    def _on_apply_to_parent_complete(success, result=None, error=None,
+                                     workflow_type=None):
+        if not success:
+            print(f"[ApplyToParent] ❌ Visual cascade failed: {error}")
+            return
+        try:
+            from . import runcomfy_server_client
+            images = runcomfy_server_client.extract_output_images(result)
+            if not images:
+                print("[ApplyToParent] No output images in result")
+                return
+
+            for img_info in images:
+                # Skip canny / depth previews
+                fname_lower = img_info['filename'].lower()
+                if fname_lower.startswith('canny') or fname_lower.startswith('depth'):
+                    continue
+
+                tmp_path = str(_parent_image_path) + '.tmp'
+                ok = server_client.download_image(
+                    img_info['filename'], tmp_path,
+                    img_info.get('subfolder', ''),
+                    img_info.get('type', 'output'),
+                )
+                if ok and os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 1024:
+                    os.replace(tmp_path, str(_parent_image_path))
+                    print(f"[ApplyToParent] ✅ Parent current_ai updated: "
+                          f"{_parent_image_path}")
+
+                    def _deferred_refresh():
+                        try:
+                            _ctx = bpy.context
+                            # Save a timestamped library entry so the generation
+                            # browser can see and navigate to this result.
+                            saved = save_generation_to_library(
+                                _ctx, _parent_image_path, backend='GCS'
+                            )
+                            if saved:
+                                print(f"[ApplyToParent] ✓ Saved to library: "
+                                      f"{Path(saved).name}")
+
+                            # Refresh the parent camera background
+                            if _parent_components:
+                                refresh_asset_camera_image(
+                                    _parent_components[-1],
+                                    path_components=_parent_components,
+                                )
+                            else:
+                                refresh_ai_image()
+                            print("[ApplyToParent] ✓ Parent camera background refreshed")
+                        except Exception as _re:
+                            print(f"[ApplyToParent] ⚠ Refresh error: {_re}")
+                            import traceback
+                            traceback.print_exc()
+                        return None
+
+                    bpy.app.timers.register(_deferred_refresh, first_interval=0.1)
+                else:
+                    print(f"[ApplyToParent] ❌ Download failed or file too small")
+
+                break  # only the first main-output image is needed
+
+        except Exception as _ce:
+            print(f"[ApplyToParent] ❌ Completion callback error: {_ce}")
+            import traceback
+            traceback.print_exc()
+
     runcomfy_polling.RunComfyPoller.start_polling(
         deployment_id='server',
         request_id=prompt_id,
-        callback=lambda success, result=None, error=None, workflow_type=None:
-            on_generation_complete_server(
-                context, success, result, error,
-                workflow_type or 'gemini', server_client
-            ),
+        callback=_on_apply_to_parent_complete,
         workflow_type='gemini',
     )
-    print("[Asset Mode] 🎨 Isolation render started!")
+    print(f"[ApplyToParent] 🎨 Visual cascade started — '{child_label}' → parent")
 
 
 # ----------------------------------------------------------------

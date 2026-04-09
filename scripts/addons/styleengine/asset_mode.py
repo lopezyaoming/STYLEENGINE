@@ -259,7 +259,10 @@ class STYLEENGINE_OT_EnterAssetMode(bpy.types.Operator):
 
         # ── 0. If already in Asset Mode, push the current level onto the stack ──
         # This enables arbitrary nesting (Asset Mode within Asset Mode).
-        if props.asset_mode_depth > 0:
+        # Use props.asset_mode (not asset_mode_depth) as the guard — depth can
+        # survive a file-load reset and cause spurious stack pushes with an empty
+        # current_asset_name, which corrupts the camera/directory path components.
+        if props.asset_mode:
             try:
                 _stack = json.loads(props.asset_mode_stack or "[]")
                 _snapshot = {
@@ -423,40 +426,6 @@ class STYLEENGINE_OT_EnterAssetMode(bpy.types.Operator):
         # ── 9. Swap N-panels ──────────────────────────────────────────────
         _register_asset_panel()
 
-        # ── 10. Restore active iteration if history exists ───────────────
-        # If this asset already has mesh iterations, show the active one instead
-        # of triggering a new isolation render.
-        try:
-            from . import workspace_setup as _ws
-            history = _ws.read_asset_history(context, asset_label)
-            iters   = history.get("iterations", [])
-            if iters:
-                active_i   = history.get("active_index", 0)
-                active_entry = iters[min(active_i, len(iters) - 1)]
-                active_obj   = bpy.data.objects.get(active_entry.get("object_name", ""))
-                if active_obj and active_obj.name != obj.name:
-                    # Show the historically-active mesh instead of the current selection
-                    for o in scene.objects:
-                        if o == cam_obj:
-                            continue
-                        _parts2 = o.name.rsplit('.', 1)
-                        _base2  = _parts2[0] if (len(_parts2) == 2 and _parts2[1].isdigit()) else o.name
-                        if _base2 == asset_label:
-                            o.hide_viewport = (o.name != active_obj.name)
-                            o.hide_render   = (o.name != active_obj.name)
-                    # Update link to point at the active iteration's mesh
-                    subj.linked_object_name = active_obj.name
-                    try:
-                        _lm2 = json.loads(props.asset_object_links or "{}")
-                    except Exception:
-                        _lm2 = {}
-                    _lm2[asset_label] = active_obj.name
-                    props.asset_object_links = json.dumps(_lm2)
-                print(f"[Asset Mode] 📖 Restored iteration {active_i+1}/{len(iters)}: "
-                      f"'{active_entry.get('object_name')}'")
-        except Exception as _he:
-            print(f"[Asset Mode] ⚠ History restore skipped: {_he}")
-
         # ── 11. Swap subjects JSON ───────────────────────────────────────────
         # Serialize the current scene subjects, then load the asset-specific
         # subjects from disk (or start fresh for a brand-new asset).
@@ -472,8 +441,15 @@ class STYLEENGINE_OT_EnterAssetMode(bpy.types.Operator):
                 "lighting_condition": props.refine_style_lighting,
             }
 
-            # Save scene subjects to the snapshot property
-            props.asset_prev_subjects = _up._build_refine_json(props)
+            # Save scene subjects to the snapshot property AND to disk.
+            # The disk copy survives a file saved in asset mode and acts as a
+            # third-tier recovery path on the next file load.
+            _scene_subj_json = _up._build_refine_json(props)
+            props.asset_prev_subjects = _scene_subj_json
+            try:
+                _ws.save_scene_subjects_json(context, _scene_subj_json)
+            except Exception as _ssje:
+                print(f"[Asset Mode] ⚠ Could not save scene_subjects.json: {_ssje}")
 
             # Populate asset identity from the matching parent subject entry.
             # This gives the Asset Mode identity box its initial values.
@@ -746,18 +722,25 @@ class STYLEENGINE_OT_ExitAssetMode(bpy.types.Operator):
             if asset_label and props.asset_prev_subjects:
                 try:
                     _parent_snap = json.loads(props.asset_prev_subjects)
-                    _child_subjects = [
-                        {
+                    def _subject_to_dict(_s):
+                        _e = {
                             "label":    _s.label,
                             "style":    _s.style,
                             "scale":    _s.scale,
                             "color":    _s.color,
                             "material": _s.material,
-                            **({"components": json.loads(_s.components_json)}
-                               if _s.components_json else {}),
                         }
-                        for _s in props.refine_subjects
-                    ]
+                        _feats = [f.value for f in _s.features if f.value.strip()]
+                        if _feats:
+                            _e["features"] = _feats
+                        if _s.components_json:
+                            try:
+                                _e["components"] = json.loads(_s.components_json)
+                            except Exception:
+                                pass
+                        return _e
+
+                    _child_subjects = [_subject_to_dict(_s) for _s in props.refine_subjects]
                     for _pe in _parent_snap.get("subject_matter", []):
                         if _pe.get("label") == asset_label:
                             _pe["components"] = _child_subjects
@@ -1110,32 +1093,17 @@ class VIEW3D_PT_AssetMode(bpy.types.Panel):
         cam_name = _get_asset_camera_name(_panel_comps if _panel_comps else props.current_asset_name)
         id_row.label(text=cam_name, icon='CAMERA_DATA')
 
-        # ── Iteration History Browser (manifest-driven) ───────────────────
-        from . import workspace_setup as _ws
-        history    = _ws.read_asset_history(context, props.current_asset_name)
-        iters      = history.get("iterations", [])
-        active_idx = history.get("active_index", 0)
-        total      = len(iters)
-
-        hist_box = layout.box()
-        hist_hdr = hist_box.row()
-        hist_hdr.label(text="Iterations", icon='TIME')
-
-        if total:
-            hist_hdr.label(text=f"{active_idx + 1} / {total}")
-            nav_row   = hist_box.row(align=True)
-            nav_row.scale_y = 1.3
-            prev_part = nav_row.row(align=True)
-            prev_part.enabled = (active_idx > 0)
-            prev_part.operator("style_engine.asset_history_prev", text="", icon='TRIA_LEFT')
-            entry     = iters[active_idx]
-            obj_label = entry.get("object_name", "?")[:22]
-            nav_row.label(text=obj_label)
-            next_part = nav_row.row(align=True)
-            next_part.enabled = (active_idx < total - 1)
-            next_part.operator("style_engine.asset_history_next", text="", icon='TRIA_RIGHT')
-        else:
-            hist_box.label(text="No iterations yet — generate a 3D mesh", icon='INFO')
+        # ── Active mesh display ───────────────────────────────────────────
+        try:
+            _subj_idx = props.asset_subject_index
+            _linked   = (props.refine_subjects[_subj_idx].linked_object_name
+                         if 0 <= _subj_idx < len(props.refine_subjects) else "")
+        except Exception:
+            _linked = ""
+        mesh_box = layout.box()
+        mesh_row = mesh_box.row()
+        mesh_row.label(text="Active mesh:", icon='MESH_DATA')
+        mesh_row.label(text=_linked if _linked else "(none)")
 
         layout.separator()
 
