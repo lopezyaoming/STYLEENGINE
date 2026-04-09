@@ -7,7 +7,7 @@
         0
       ],
       "image_count": 1,
-      "use_search": true,
+      "use_search": false,
       "aspect_ratio": "1:1",
       "image_size": "1K",
       "temperature": 0

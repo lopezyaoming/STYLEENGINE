@@ -903,14 +903,16 @@ def _get_scene_subjects_json_path(scene=None):
     This is the persistent disk backup of the top-level scene subjects,
     independent of the .blend file and of image generation sidecars.
     File: <project>_styleengine/scene_subjects.json
+
+    Returns None for unsaved files so we never accidentally read/write a shared
+    temp-dir file and bleed subjects between different unsaved sessions.
     """
     try:
         import bpy as _bpy
         _blend = _bpy.data.filepath
         if not _blend:
-            # Unsaved project — use a session-temp location
-            _tmp = _get_system_temp_dir()
-            return _tmp / "scene_subjects.json"
+            # Unsaved project — no disk fallback; avoid polluting the shared temp dir
+            return None
         _base = Path(_blend).stem
         _proj_dir = Path(_blend).parent / f"{_base}_styleengine"
         _proj_dir.mkdir(parents=True, exist_ok=True)
@@ -1860,6 +1862,38 @@ def find_current_ai(context):
 
 
 @persistent
+def on_blend_file_pre_save(dummy):
+    """
+    Handler called by bpy.app.handlers.save_pre immediately before every .blend
+    write.  Ensures scene_subjects_json captures the correct subjects regardless
+    of whether the user is saving from scene mode or asset mode.
+
+    In scene mode  → build fresh from live refine_subjects collection.
+    In asset mode  → use asset_prev_subjects (the scene-level snapshot saved on
+                     asset-mode entry), because refine_subjects currently holds
+                     the asset's components, not the scene subjects.
+    """
+    for scene in bpy.data.scenes:
+        if not hasattr(scene, 'style_engine_props'):
+            continue
+        props = scene.style_engine_props
+        try:
+            from . import ui_panel as _up
+            if getattr(props, 'asset_mode', False):
+                # Saving while in asset mode — preserve the scene-level snapshot
+                if getattr(props, 'asset_prev_subjects', ''):
+                    props.scene_subjects_json = props.asset_prev_subjects
+                    print("[Style Engine] 💾 pre-save: scene_subjects_json ← asset_prev_subjects")
+            else:
+                # Saving in scene mode — build from live collection
+                if len(props.refine_subjects) > 0:
+                    props.scene_subjects_json = _up._build_refine_json(props)
+                    print("[Style Engine] 💾 pre-save: scene_subjects_json updated from live subjects")
+        except Exception as _e:
+            print(f"[Style Engine] ⚠ pre-save subjects snapshot failed: {_e}")
+
+
+@persistent
 def on_blend_file_loaded(dummy):
     """
     Handler called by bpy.app.handlers.load_post after every file load
@@ -1894,152 +1928,117 @@ def on_blend_file_loaded(dummy):
         if sys_temp != new_temp:
             _migrate_working_files(sys_temp, new_temp)
 
+        # Delete any stale scene_subjects.json left in the global system-temp dir.
+        # This file is now only written to project folders (never to sys_temp),
+        # so any copy there is from an old version and would bleed into new sessions.
+        _stale_ssj = sys_temp / "scene_subjects.json"
+        try:
+            if _stale_ssj.exists():
+                _stale_ssj.unlink()
+                print("[Style Engine] 🧹 Removed stale scene_subjects.json from temp dir")
+        except Exception:
+            pass
+
         print(f"[Style Engine] 🔄 File loaded — temp dir now: {new_temp}")
     except Exception as e:
         print(f"[Style Engine] ⚠ on_blend_file_loaded migration error: {e}")
 
-    # Defer the asset-mode reset to the next main-loop tick.
+    # Defer the restore to the next main-loop tick.
     # bpy.context.scene is not guaranteed to be valid inside load_post on all
     # Blender 4.x builds; iterating bpy.data.scenes in a timer is always safe.
-    def _deferred_asset_mode_reset():
+    # Because all asset-mode properties are now SKIP_SAVE, asset_mode is always
+    # False on load — no mode-detection or complex branching is needed here.
+    def _deferred_restore():
         try:
+            from . import ui_panel as _up
             for scene in bpy.data.scenes:
                 if not hasattr(scene, 'style_engine_props'):
                     continue
                 props = scene.style_engine_props
-                if not getattr(props, 'asset_mode', False):
-                    continue
 
-                # ── 1. Restore render resolution ─────────────────────────────
-                rx = getattr(props, 'asset_prev_resolution_x', 0)
-                ry = getattr(props, 'asset_prev_resolution_y', 0)
-                if rx > 0 and ry > 0:
-                    scene.render.resolution_x = rx
-                    scene.render.resolution_y = ry
+                # ── 0. Unconditionally clear ALL mode-state properties.
+                #    SKIP_SAVE prevents writing them, but old .blend files may still
+                #    have the values saved from before the SKIP_SAVE fix was applied.
+                #    We force-reset here so the N-panel always comes up in scene mode.
 
-                # ── 2. Restore active camera ──────────────────────────────────
-                # The file was saved with scene.camera = asset_camera_*.
-                # Read the saved previous camera name and restore it.
-                prev_cam_name = getattr(props, 'asset_prev_camera', '')
-                if prev_cam_name and prev_cam_name in bpy.data.objects:
-                    scene.camera = bpy.data.objects[prev_cam_name]
-                    print(f"[Style Engine] 📷 Restored active camera → '{prev_cam_name}'")
-                # Hide all asset cameras — none should be active in scene mode
-                for _cam_obj in bpy.data.objects:
-                    if _cam_obj.type == 'CAMERA' and _cam_obj.name.startswith("asset_camera_"):
-                        _cam_obj.hide_viewport = True
+                # Restore render resolution FIRST, before clearing the saved values.
+                # asset_prev_resolution_x/y are PERSISTENT (no SKIP_SAVE) so they
+                # survive file saves — a non-zero value means the file was saved while
+                # in asset mode and the scene resolution needs to be recovered.
+                _rx = getattr(props, 'asset_prev_resolution_x', 0)
+                _ry = getattr(props, 'asset_prev_resolution_y', 0)
+                if _rx > 0 and _ry > 0:
+                    scene.render.resolution_x = _rx
+                    scene.render.resolution_y = _ry
+                    print(f"[Style Engine] 📐 Restored render resolution → {_rx}×{_ry}")
 
-                # ── 3. Restore object visibility ──────────────────────────────
-                # Try the saved per-object visibility dict first; fall back to
-                # unhiding everything (safe because the user is now in scene mode).
-                _vis_json = getattr(props, 'asset_stored_visibility', '')
-                if _vis_json:
-                    try:
-                        _vis_dict = json.loads(_vis_json)
-                        for _oname, _hv_hr in _vis_dict.items():
-                            _o = bpy.data.objects.get(_oname)
-                            if _o:
-                                _o.hide_viewport, _o.hide_render = _hv_hr
-                    except Exception:
-                        for obj in bpy.data.objects:
-                            obj.hide_viewport = False
-                            obj.hide_render   = False
-                else:
-                    for obj in bpy.data.objects:
-                        obj.hide_viewport = False
-                        obj.hide_render   = False
-
-                # ── 4. Restore scene subjects ─────────────────────────────────
-                # When saved in asset mode, refine_subjects holds the asset's
-                # components. The scene subjects are in asset_prev_subjects.
-                # Priority: asset_prev_subjects → scene_subjects.json on disk.
-                _restored_subjects = False
-                _prev_subj = getattr(props, 'asset_prev_subjects', '')
-                if _prev_subj:
-                    try:
-                        from . import ui_panel as _up
-                        _up._populate_refine_from_json(props, _prev_subj)
-                        _restored_subjects = True
-                        print("[Style Engine] ✅ Scene subjects restored from asset_prev_subjects")
-                    except Exception as _se:
-                        print(f"[Style Engine] ⚠ Subject restore from property failed: {_se}")
-
-                if not _restored_subjects:
-                    # Fallback: load scene_subjects.json from disk
-                    _ssj = _get_scene_subjects_json_path(scene)
-                    if _ssj and _ssj.exists():
-                        try:
-                            from . import ui_panel as _up
-                            _up._populate_refine_from_json(props, _ssj.read_text(encoding='utf-8'))
-                            _restored_subjects = True
-                            print(f"[Style Engine] ✅ Scene subjects restored from {_ssj.name}")
-                        except Exception as _fe:
-                            print(f"[Style Engine] ⚠ Subject restore from disk failed: {_fe}")
-
-                if not _restored_subjects:
-                    print("[Style Engine] ⚠ Could not restore scene subjects — "
-                          "refine_subjects may still show asset components")
-
-                # ── 5. Clear ALL asset mode flags — mirrors ExitAssetMode top-level ──
-                props.asset_mode               = False
-                props.current_asset_name       = ""
-                props.asset_mode_stack         = "[]"
-                props.asset_mode_depth         = 0      # CRITICAL: prevents stale depth
-                props.asset_prev_subjects      = ""
-                props.asset_stored_visibility  = ""
-                props.asset_prev_camera        = ""
-                props.asset_current_3d_index   = 0
-                props.asset_prev_resolution_x  = 1024
-                props.asset_prev_resolution_y  = 1024
-                props.asset_prev_prompt        = ""
-                props.asset_subject_style      = ""
-                props.asset_subject_scale      = ""
-                props.asset_subject_color      = ""
-                props.asset_subject_material   = ""
+                props.asset_mode              = False
+                props.current_asset_name      = ""
+                props.asset_mode_stack        = "[]"
+                props.asset_mode_depth        = 0
+                props.asset_prev_subjects     = ""
+                props.asset_prev_camera       = ""
+                props.asset_current_3d_index  = 0
+                props.asset_prev_resolution_x = 0   # 0 = "nothing to restore"
+                props.asset_prev_resolution_y = 0
+                props.asset_prev_prompt       = ""
+                props.asset_subject_index     = -1
+                props.asset_subject_style     = ""
+                props.asset_subject_scale     = ""
+                props.asset_subject_color     = ""
+                props.asset_subject_material  = ""
                 try:
                     props.asset_subject_features.clear()
                 except Exception:
                     pass
 
-                print(f"[Style Engine] ⚠ Asset Mode auto-exited on load "
-                      f"(scene '{scene.name}') — N-panel restored")
+                # ── 1. Restore visibility if file was saved during asset isolation.
+                #    asset_stored_visibility is PERSISTENT so it survives the save.
+                vis_json = getattr(props, 'asset_stored_visibility', '')
+                if vis_json:
+                    try:
+                        for obj_name, hv_hr in json.loads(vis_json).items():
+                            obj = bpy.data.objects.get(obj_name)
+                            if obj:
+                                obj.hide_viewport, obj.hide_render = hv_hr
+                    except Exception:
+                        for obj in bpy.data.objects:
+                            obj.hide_viewport = False
+                            obj.hide_render   = False
+                    props.asset_stored_visibility = ""  # consumed, clear it
+
+                # ── 2. Restore active camera if an asset camera is currently active.
+                if scene.camera and scene.camera.name.startswith("asset_camera_"):
+                    ai_cam = bpy.data.objects.get("ai_camera")
+                    if ai_cam:
+                        scene.camera = ai_cam
+                        print(f"[Style Engine] 📷 Restored active camera → 'ai_camera'")
+
+                # ── 3. Hide all asset cameras from the viewport.
+                for obj in bpy.data.objects:
+                    if obj.type == 'CAMERA' and obj.name.startswith("asset_camera_"):
+                        obj.hide_viewport = True
+
+                # ── 4. Repopulate refine_subjects.
+                #    Priority: scene_subjects_json (in .blend) → scene_subjects.json on disk.
+                json_str = getattr(props, 'scene_subjects_json', '')
+                if not json_str:
+                    json_str = load_scene_subjects_json() or ''
+                if json_str:
+                    try:
+                        _up._populate_refine_from_json(props, json_str)
+                        print("[Style Engine] ✅ Scene subjects restored on file load")
+                    except Exception as _pe:
+                        print(f"[Style Engine] ⚠ Subject restore failed: {_pe}")
+                else:
+                    print("[Style Engine] ℹ No scene subjects found to restore")
+
         except Exception as _e:
-            print(f"[Style Engine] ⚠ Asset Mode reset failed: {_e}")
+            print(f"[Style Engine] ⚠ deferred restore failed: {_e}")
             import traceback as _tb; _tb.print_exc()
         return None  # unregister the timer
 
-    bpy.app.timers.register(_deferred_asset_mode_reset, first_interval=0.2)
-
-    # Second deferred pass: if the file was saved in scene mode but refine_subjects
-    # is somehow empty, attempt a quiet restore from scene_subjects.json.
-    # This runs at 0.5 s so it fires after the asset-mode reset above.
-    def _deferred_scene_subjects_restore():
-        try:
-            for scene in bpy.data.scenes:
-                if not hasattr(scene, 'style_engine_props'):
-                    continue
-                props = scene.style_engine_props
-                # Skip if we're in asset mode (reset above handles that case)
-                if getattr(props, 'asset_mode', False):
-                    continue
-                # Only try if subjects are empty
-                if len(props.refine_subjects) > 0:
-                    continue
-                _ssj = _get_scene_subjects_json_path(scene)
-                if _ssj and _ssj.exists():
-                    try:
-                        from . import ui_panel as _up
-                        _up._populate_refine_from_json(
-                            props, _ssj.read_text(encoding='utf-8'))
-                        print(f"[Style Engine] 🔄 Scene subjects loaded from "
-                              f"scene_subjects.json fallback")
-                    except Exception as _rfe:
-                        print(f"[Style Engine] ⚠ scene_subjects.json restore failed: {_rfe}")
-        except Exception as _e2:
-            print(f"[Style Engine] ⚠ Scene subjects fallback restore error: {_e2}")
-        return None
-
-    bpy.app.timers.register(_deferred_scene_subjects_restore, first_interval=0.5)
+    bpy.app.timers.register(_deferred_restore, first_interval=0.2)
 
     # Ensure all asset cameras in this .blend are hidden from the viewport.
     # Cameras created before the hide_viewport fix will be corrected here.

@@ -831,8 +831,8 @@ class STYLEENGINE_OT_ExitAssetMode(bpy.types.Operator):
             props.asset_stored_visibility  = ""
             props.asset_prev_camera        = ""
             props.asset_current_3d_index   = 0
-            props.asset_prev_resolution_x  = 1024
-            props.asset_prev_resolution_y  = 1024
+            props.asset_prev_resolution_x  = 0   # 0 = sentinel: nothing to restore on next load
+            props.asset_prev_resolution_y  = 0
             props.asset_prev_prompt        = ""
             props.asset_prev_subjects      = ""
             props.asset_mode_stack         = "[]"
@@ -876,12 +876,50 @@ class STYLEENGINE_OT_EditAsset(bpy.types.Operator):
             self.report({'ERROR'}, "Subject has no label")
             return {'CANCELLED'}
 
-        # Look for an existing object (MESH or EMPTY) with this name
-        target_obj = bpy.data.objects.get(target_name)
-        if target_obj is None or target_obj.type not in {'MESH', 'EMPTY'}:
-            # Create an EMPTY (ARROWS) as the placeholder — no geometry means it can
-            # never interfere with Trellis or render passes, and the arrows icon gives
-            # a clear visual anchor in the viewport.
+        # ── Resolve the real Blender object name ──────────────────────────────
+        # The label is always the base name (e.g. "cake") but the actual Blender
+        # object may be a versioned MESH like "cake.001".  We collect ALL candidates
+        # (exact name, versioned variants, link-map entry) and always prefer a MESH
+        # over an EMPTY placeholder — this handles stale link maps and leftover
+        # placeholder empties from previous sessions.
+
+        try:
+            _link_map = json.loads(props.asset_object_links or "{}")
+        except Exception:
+            _link_map = {}
+
+        resolved_name = _link_map.get(target_name, target_name)
+
+        # Gather every candidate: the link-map resolved name, the bare label, and
+        # any versioned variant (label.001, label.002, …).
+        _candidates = []
+        for _o in bpy.data.objects:
+            if _o.type not in {'MESH', 'EMPTY'}:
+                continue
+            if _o.name in (resolved_name, target_name):
+                _candidates.append(_o)
+            elif (_o.name.startswith(target_name + ".")
+                    and _o.name[len(target_name) + 1:].isdigit()):
+                _candidates.append(_o)
+
+        # Always prefer a MESH over an EMPTY (EMPTY is just a placeholder).
+        # Among MESHes prefer the link-map resolved name, then the highest version.
+        _meshes  = [o for o in _candidates if o.type == 'MESH']
+        _empties = [o for o in _candidates if o.type == 'EMPTY']
+
+        if _meshes:
+            # Prefer the exact name from the link map; otherwise take the first mesh
+            target_obj = (bpy.data.objects.get(resolved_name)
+                          if bpy.data.objects.get(resolved_name) in _meshes
+                          else _meshes[0])
+            if target_obj not in _meshes:
+                target_obj = _meshes[0]
+            print(f"[Asset Mode] 🔍 Resolved '{target_name}' → MESH '{target_obj.name}'")
+        elif _empties:
+            target_obj = _empties[0]
+            print(f"[Asset Mode] 🔍 Resolved '{target_name}' → EMPTY '{target_obj.name}'")
+        else:
+            # Nothing exists — create an EMPTY placeholder
             target_obj = bpy.data.objects.new(target_name, None)  # None data = Empty
             target_obj.empty_display_type = 'ARROWS'
             target_obj.empty_display_size = 0.2
@@ -892,22 +930,18 @@ class STYLEENGINE_OT_EditAsset(bpy.types.Operator):
         context.view_layer.objects.active = target_obj
         target_obj.select_set(True)
 
-        # Pre-seed the link so EnterAssetMode fires Tier 1 immediately:
-        # stamp linked_object_name on this subject and record the index.
-        # EnterAssetMode will reinforce the same stamp — idempotent.
-        subj.linked_object_name = target_name
+        # Pre-seed the link so EnterAssetMode fires Tier 1 immediately.
+        # Always store the REAL object name (e.g. "transistor.001"), never the bare label,
+        # so the isolation loop in EnterAssetMode correctly spares this object.
+        subj.linked_object_name = target_obj.name
         props.asset_subject_index = self.subject_index
 
-        # Also keep the persistent label→object map up to date.
-        try:
-            _link_map = json.loads(props.asset_object_links or "{}")
-        except Exception:
-            _link_map = {}
-        _link_map[subj.label] = target_name
+        # Write the correct real→name mapping back (never overwrite with bare label).
+        _link_map[subj.label] = target_obj.name
         props.asset_object_links = json.dumps(_link_map)
 
         print(f"[Asset Mode] 🔗 EditAsset: pre-seeded link subject[{self.subject_index}]"
-              f" '{subj.label}' → '{target_name}'")
+              f" '{subj.label}' → '{target_obj.name}'")
 
         # Pass the active object explicitly so EnterAssetMode.poll() sees it
         # even when called from the N-panel (where context may lag behind the

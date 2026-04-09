@@ -410,7 +410,14 @@ def _build_refine_json(props):
         "subject_matter": subjects,
         "thematic_tags": tags,
     }
-    return _json.dumps(data, indent=2)
+    result = _json.dumps(data, indent=2)
+    # Keep the canonical string in sync whenever JSON is built in scene mode.
+    if not _is_asset:
+        try:
+            props.scene_subjects_json = result
+        except Exception:
+            pass
+    return result
 
 
 def _build_refine_json_for_agent(props):
@@ -570,6 +577,11 @@ def _populate_refine_from_json(props, json_str):
             sync_scene_objects_to_json(props, bpy.context)
         except Exception as _se:
             print(f"[Scene Sync] ⚠ Post-JSON sync skipped: {_se}")
+        # Keep the canonical string in sync whenever subjects are populated in scene mode.
+        try:
+            props.scene_subjects_json = json_str
+        except Exception:
+            pass
 
 
 def _get_gemini_instruction_items():
@@ -875,6 +887,7 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         name="Active Asset Subject Index",
         description="refine_subjects index for the asset currently in Asset Mode (-1 = none)",
         default=-1,
+        options={'SKIP_SAVE'},
     )
     # Permanent {label → object_name} map stored as a compact JSON string.
     # Updated every time a link is established.  Used by _populate_refine_from_json
@@ -888,11 +901,13 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         name="Asset Mode",
         description="Whether the addon is currently in Asset Mode (editing a single asset)",
         default=False,
+        options={'SKIP_SAVE'},
     )
     current_asset_name: bpy.props.StringProperty(
         name="Current Asset",
         description="Name of the active asset object in Asset Mode",
         default="",
+        options={'SKIP_SAVE'},
     )
     asset_stored_visibility: bpy.props.StringProperty(
         name="Stored Visibility",
@@ -903,43 +918,58 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         name="Previous Camera",
         description="Name of the scene camera to restore when exiting Asset Mode",
         default="",
+        options={'SKIP_SAVE'},
     )
     asset_current_3d_index: bpy.props.IntProperty(
         name="Asset 3D History Index",
         description="Current index in the asset 3D generation history browser",
         default=0,
         min=0,
+        options={'SKIP_SAVE'},
     )
     asset_prev_resolution_x: bpy.props.IntProperty(
         name="Previous Resolution X",
-        description="Render resolution X saved before entering Asset Mode",
-        default=1024,
+        description="Render resolution X saved before entering Asset Mode — PERSISTENT so it survives saves in asset mode",
+        default=0,
     )
     asset_prev_resolution_y: bpy.props.IntProperty(
         name="Previous Resolution Y",
-        description="Render resolution Y saved before entering Asset Mode",
-        default=1024,
+        description="Render resolution Y saved before entering Asset Mode — PERSISTENT so it survives saves in asset mode",
+        default=0,
     )
     asset_prev_prompt: bpy.props.StringProperty(
         name="Previous Prompt Snapshot",
         description="Scene-mode STYLEENGINE_Prompt content saved before entering Asset Mode",
         default="",
+        options={'SKIP_SAVE'},
     )
     asset_prev_subjects: bpy.props.StringProperty(
         name="Previous Subjects Snapshot",
         description="Scene-mode subjects JSON saved before entering Asset Mode",
+        default="",
+        options={'SKIP_SAVE'},
+    )
+    # Canonical, always-valid serialized scene subjects.  PERSISTENT (no SKIP_SAVE).
+    # This is the single source of truth: updated on every scene-mode JSON build/populate,
+    # and always written in save_pre so the .blend captures the correct subjects regardless
+    # of which mode was active when the user pressed Save.
+    scene_subjects_json: bpy.props.StringProperty(
+        name="Scene Subjects JSON",
+        description="Canonical serialized scene subjects — always valid, always current",
         default="",
     )
     asset_mode_stack: bpy.props.StringProperty(
         name="Asset Mode Stack",
         description="JSON array of parent-level state snapshots for nested Asset Mode",
         default="[]",
+        options={'SKIP_SAVE'},
     )
     asset_mode_depth: bpy.props.IntProperty(
         name="Asset Mode Depth",
         description="0 = Scene Mode, 1 = first Asset Mode, 2+ = nested",
         default=0,
         min=0,
+        options={'SKIP_SAVE'},
     )
     # Identity of the current asset as seen from its parent's subject entry.
     # These map directly to the parent JSON's style/scale/color/material fields
@@ -949,21 +979,25 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         name="Asset Style",
         description="Visual style of this asset (as seen from parent)",
         default="",
+        options={'SKIP_SAVE'},
     )
     asset_subject_scale: bpy.props.StringProperty(
         name="Asset Scale",
         description="Scale of this asset (as seen from parent)",
         default="",
+        options={'SKIP_SAVE'},
     )
     asset_subject_color: bpy.props.StringProperty(
         name="Asset Color",
         description="Color of this asset (as seen from parent)",
         default="",
+        options={'SKIP_SAVE'},
     )
     asset_subject_material: bpy.props.StringProperty(
         name="Asset Material",
         description="Material of this asset (as seen from parent)",
         default="",
+        options={'SKIP_SAVE'},
     )
     # Free-form feature annotations that belong to THIS asset as seen from the
     # parent.  Mirrors the per-subject RefineFeatureItem list but lives on the

@@ -221,6 +221,11 @@ def register():
         bpy.app.handlers.save_post.append(workspace_setup.on_blend_file_saved)
         print("[Style Engine] ✓ Save handler registered for session migration")
 
+    # Pre-save handler — snapshots scene_subjects_json before the .blend is written
+    if workspace_setup.on_blend_file_pre_save not in bpy.app.handlers.save_pre:
+        bpy.app.handlers.save_pre.append(workspace_setup.on_blend_file_pre_save)
+        print("[Style Engine] ✓ Pre-save handler registered for subjects snapshot")
+
     # Load handler — reset temp-dir lock whenever a new file is opened
     if workspace_setup.on_blend_file_loaded not in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.append(workspace_setup.on_blend_file_loaded)
@@ -235,6 +240,11 @@ def unregister():
     if workspace_setup.on_blend_file_saved in bpy.app.handlers.save_post:
         bpy.app.handlers.save_post.remove(workspace_setup.on_blend_file_saved)
         print("[Style Engine] ✓ Save handler unregistered")
+
+    # Unregister pre-save handler
+    if workspace_setup.on_blend_file_pre_save in bpy.app.handlers.save_pre:
+        bpy.app.handlers.save_pre.remove(workspace_setup.on_blend_file_pre_save)
+        print("[Style Engine] ✓ Pre-save handler unregistered")
 
     # Unregister load handler
     if workspace_setup.on_blend_file_loaded in bpy.app.handlers.load_post:
