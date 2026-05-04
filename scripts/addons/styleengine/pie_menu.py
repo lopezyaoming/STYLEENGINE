@@ -1309,6 +1309,12 @@ class STYLEENGINE_MT_pie_main(Menu):
                                 text="Refine Current Image",
                                 icon='IMAGE_REFERENCE')
 
+            explode_row = col.row()
+            explode_row.scale_y = 1.4
+            explode_row.operator("style_engine.explode_asset",
+                                 text="Explode Asset",
+                                 icon='MOD_EXPLODE')
+
             col.separator()
 
             if style_props.ai_model == 'GEMINI':

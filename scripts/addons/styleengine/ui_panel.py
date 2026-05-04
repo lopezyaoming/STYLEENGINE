@@ -999,6 +999,26 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         default="",
         options={'SKIP_SAVE'},
     )
+    # Editable subject string sent to SAM3 "Isolate Asset".  Auto-populated with
+    # the asset name (underscores → spaces) on every asset-mode entry, but the
+    # user can change it before triggering isolation (e.g. "brick facade left" →
+    # "brick wall" to avoid over-specific segmentation).
+    sam3_isolate_subject: bpy.props.StringProperty(
+        name="SAM3 Subject",
+        description="Subject name passed to SAM3 segmentation — edit if the asset name is too specific",
+        default="",
+        options={'SKIP_SAVE'},
+    )
+    isolate_method: bpy.props.EnumProperty(
+        name="Isolation Method",
+        description="Background removal model to use for 'Isolate Asset'",
+        items=[
+            ('SAM3',  "SAM3",  "SAM3 segmentation — uses a subject name string for targeted isolation"),
+            ('U2NET', "U2Net", "U2Net rembg — model-based, no subject string needed; good fallback"),
+        ],
+        default='SAM3',
+        options={'SKIP_SAVE'},
+    )
     # Free-form feature annotations that belong to THIS asset as seen from the
     # parent.  Mirrors the per-subject RefineFeatureItem list but lives on the
     # scene props so it persists across panel redraws in asset mode.
@@ -7675,6 +7695,26 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
             refine_row = img_gen_box.row(align=True)
             refine_row.scale_y = 1.3
             refine_row.operator("style_engine.refine_current_image", text="Refine Current Image", icon='IMAGE_REFERENCE')
+
+            # Always-visible: Explode Asset
+            explode_row = img_gen_box.row(align=True)
+            explode_row.scale_y = 1.3
+            explode_row.operator("style_engine.explode_asset", text="Explode Asset", icon='MOD_EXPLODE')
+
+            # Asset Mode only: isolation method selector + subject field + button
+            if getattr(style_props, 'asset_mode', False) and style_props.current_asset_name:
+                sam3_box = img_gen_box.box()
+                sam3_box.label(text="Isolate Asset", icon='OUTLINER_OB_FORCE_FIELD')
+                method_row = sam3_box.row(align=True)
+                method_row.prop(style_props, "isolate_method", expand=True)
+                if style_props.isolate_method == 'SAM3':
+                    subj_row = sam3_box.row(align=True)
+                    subj_row.prop(style_props, "sam3_isolate_subject", text="Subject")
+                btn_row = sam3_box.row(align=True)
+                btn_row.scale_y = 1.2
+                btn_row.operator("style_engine.sam3_isolate_asset",
+                                 text="Isolate Asset",
+                                 icon='OUTLINER_OB_FORCE_FIELD')
 
             # ── Settings (collapsible) ──────────────────────────────────
             img_gen_box.separator()

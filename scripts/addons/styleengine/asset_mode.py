@@ -363,6 +363,10 @@ class STYLEENGINE_OT_EnterAssetMode(bpy.types.Operator):
         props.asset_mode         = True
         props.current_asset_name = asset_label   # key fix: concept, not mesh iteration
         props.asset_current_3d_index = 0
+        # Pre-populate the SAM3 subject string with the human-readable asset name
+        # (underscores replaced with spaces).  The user can edit it before running
+        # "Isolate Asset" if the name is too specific (e.g. "brick_facade_left" → "brick wall").
+        props.sam3_isolate_subject = asset_label.replace("_", " ")
 
         # ── 8. Find or create the matching Refine-Image subject ──────────────
         #
@@ -950,6 +954,45 @@ class STYLEENGINE_OT_EditAsset(bpy.types.Operator):
             return bpy.ops.style_engine.enter_asset_mode('INVOKE_DEFAULT')
 
 
+class STYLEENGINE_OT_SAM3IsolateAsset(bpy.types.Operator):
+    """Run SAM3 segmentation to isolate the active asset from the current image"""
+    bl_idname  = "style_engine.sam3_isolate_asset"
+    bl_label   = "Isolate Asset"
+    bl_description = (
+        "Use SAM3 segmentation to isolate the active asset by name from the "
+        "current image. Result is saved as a history entry and becomes the "
+        "new current_ai for this asset."
+    )
+    bl_options = {'REGISTER'}
+
+    @classmethod
+    def poll(cls, context):
+        props = context.scene.style_engine_props
+        return getattr(props, 'asset_mode', False) and bool(getattr(props, 'current_asset_name', ''))
+
+    def execute(self, context):
+        from . import workspace_setup as _ws
+        props  = context.scene.style_engine_props
+        method = getattr(props, 'isolate_method', 'SAM3')
+
+        if method == 'U2NET':
+            print("[Isolate Asset] Using U2Net — no subject string needed")
+            _ws.queue_u2net_isolate_workflow(context)
+            self.report({'INFO'}, "U2Net isolation started")
+        else:
+            # SAM3: use the editable subject string
+            subject = getattr(props, 'sam3_isolate_subject', '').strip()
+            if not subject:
+                subject = props.current_asset_name.replace("_", " ")
+            if not subject:
+                self.report({'ERROR'}, "No active asset name")
+                return {'CANCELLED'}
+            print(f"[Isolate Asset] SAM3 — subject: '{subject}'")
+            _ws.queue_sam3_isolate_workflow(context, subject)
+            self.report({'INFO'}, f"SAM3 isolation started: '{subject}'")
+        return {'FINISHED'}
+
+
 class STYLEENGINE_OT_AssetHistoryPrev(bpy.types.Operator):
     """Navigate to the previous iteration in asset history"""
     bl_idname  = "style_engine.asset_history_prev"
@@ -1197,6 +1240,7 @@ _operators = (
     STYLEENGINE_OT_ExitAssetModeAll,
     STYLEENGINE_OT_ExitAssetModeToName,
     STYLEENGINE_OT_EditAsset,
+    STYLEENGINE_OT_SAM3IsolateAsset,
     STYLEENGINE_OT_AssetHistoryPrev,
     STYLEENGINE_OT_AssetHistoryNext,
 )

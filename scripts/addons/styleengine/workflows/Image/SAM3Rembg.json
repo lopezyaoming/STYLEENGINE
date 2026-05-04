@@ -1,0 +1,59 @@
+{
+  "1": {
+    "inputs": {
+      "image": "0_1-1.jpg"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "2": {
+    "inputs": {
+      "prompt": [
+        "4",
+        0
+      ],
+      "output_mode": "Merged",
+      "confidence_threshold": 0.5,
+      "max_segments": 0,
+      "segment_pick": 0,
+      "mask_blur": 0,
+      "mask_offset": 0,
+      "device": "Auto",
+      "invert_output": false,
+      "unload_model": false,
+      "background": "Alpha",
+      "background_color": "#222222",
+      "image": [
+        "1",
+        0
+      ]
+    },
+    "class_type": "SAM3Segment",
+    "_meta": {
+      "title": "SAM3 Segmentation (RMBG)"
+    }
+  },
+  "3": {
+    "inputs": {
+      "images": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "4": {
+    "inputs": {
+      "value": ""
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "ASSET_NAME"
+    }
+  }
+}

@@ -1,0 +1,142 @@
+{
+  "1": {
+    "inputs": {
+      "model_name": "gemini-3-pro-image-preview",
+      "prompt": "Task: Analyze the primary asset provided in the image (e.g., as seen in image_0.png) and generate a definitive, clear, non-schematic exploded asset view.\n\nCore Instruction: Part-First Segmentation & Visibility (CRITICAL)\nYou MUST interpret the input image not as a single flattened object, but as a dense cluster of discrete, individual physical parts that are currently in a \"collapsed\" state. Your primary goal is to physically separate every single part from its neighbors along a sequential axis, creating a comprehensive, high-fidelity visual inventory.\n\nPart Visibility and Non-Overlap (HARD MANDATE):\n\nComplete Unobstructed View: The generated view must provide an unobstructed view of every component.\n\nMinimize Overlap: You must arrange the exploded components such that no part overlaps with, or is hidden behind, another part. Each individual piece must be as distinct and visible as possible, allowing for direct examination of its form, texture, and logic. If necessary, use a \"stepped\" or spiral explosion pattern to ensure complete separation.\n\nAsset Reconstruction & Handling (CRITICAL - COMPLETION MANDATE):\n\nHandling Cropped Segmentation: The input image may contain cropped areas on its edges (e.g., the top, bottom, left, or right) as a direct result of previous image segmentation or tight framing. You must not reproduce these crops.\n\nLogical Geometric Completion: When an asset is cropped or cut off by the frame (like the bottom of the structure in image_0.png), you must logically complete the geometry. Extend the component to its full logical 3D whole, assuming standard engineering symmetry or the necessary base structure required for the asset to stand as a complete, self-contained unit.\n\nAsset Quality & Refinement:\n\nUnresolved Input: Input images may contain unresolved geometry, \"gooey\" or unpolished textures. You are mandated to refine, sharpen, and make all elements crisp and well-defined. Render logical textures (e.g., matte polymer for the chassis, brushed steel, detailed PCB textures) as high-resolution materials.\n\nExecution Steps (Strict Order):\n\nDeconstruct, Inventory, and Complete: Segment the asset into a complete inventory of individual parts (the chassis, all metal structures, the fan, wiring harnesses, the green circuit board). For any parts that are cropped, perform complete reconstruction to finalize their 3D forms. Treat EVERY distinct component and material as a separate, non-distorted object.\n\nAssign Separation Axis & Pattern: Define a clear vertical or 45-degree isometric axis and choose an explosion pattern (linear, stepped, or spiral) that guarantees no part overlap.\n\nExplode (Sequential Displacement): Sequentially displace all parts from the inventory along this axis, strictly adhering to the \"Non-Overlap\" mandate. The main body/housing (e.g., the large blue panel) remains closest to the origin, with all other components moving progressively further away in their relative order of assembly. Ensure significant, unambiguous \"air gaps\" between every part.\n\nLogical Occlusion Filler: Generate the logical geometry, texture, and shading for all newly revealed faces (e.g., the hidden side of the PCB, inner chassis walls).\n\nStyle and Formatting:\n\nViewpoint: Maintain the isometric viewpoint.\n\nNo Schematic Elements (HARD CONSTRAINT): Do NOT include dashed leader lines, arrows, bubbles, text labels, or call-outs. This is a pure asset.\n\nBackground: Solid, neutral light gray or white.\n\nResult: A clean, high-resolution, full 3D asset with significant, unambiguous spacing between every distinct, refined, and non-overlapping part.",
+      "image_count": 1,
+      "use_search": true,
+      "aspect_ratio": "1:1",
+      "image_size": "4K",
+      "temperature": 0.8,
+      "image_1": [
+        "4",
+        0
+      ]
+    },
+    "class_type": "NanoBananaAIO",
+    "_meta": {
+      "title": "Nano Banana AIO"
+    }
+  },
+  "2": {
+    "inputs": {
+      "transparency": true,
+      "model": "u2net",
+      "post_processing": false,
+      "only_mask": false,
+      "alpha_matting": false,
+      "alpha_matting_foreground_threshold": 240,
+      "alpha_matting_background_threshold": 10,
+      "alpha_matting_erode_size": 10,
+      "background_color": "none",
+      "images": [
+        "1",
+        0
+      ]
+    },
+    "class_type": "Image Rembg (Remove Background)",
+    "_meta": {
+      "title": "Image Rembg (Remove Background)"
+    }
+  },
+  "4": {
+    "inputs": {
+      "image": "StyleEngine_00168_.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "5": {
+    "inputs": {
+      "images": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "10": {
+    "inputs": {
+      "method": "default",
+      "images": [
+        "1",
+        0
+      ],
+      "mask": [
+        "16",
+        0
+      ]
+    },
+    "class_type": "AlphaChanelAddByMask",
+    "_meta": {
+      "title": "AlphaChanelAddByMask"
+    }
+  },
+  "11": {
+    "inputs": {
+      "prompt": "background\n",
+      "output_mode": "Merged",
+      "confidence_threshold": 0.5,
+      "max_segments": 0,
+      "segment_pick": 0,
+      "mask_blur": 0,
+      "mask_offset": 0,
+      "device": "Auto",
+      "invert_output": false,
+      "unload_model": false,
+      "background": "Alpha",
+      "background_color": "#222222",
+      "image": [
+        "1",
+        0
+      ]
+    },
+    "class_type": "SAM3Segment",
+    "_meta": {
+      "title": "SAM3 Segmentation (RMBG)"
+    }
+  },
+  "14": {
+    "inputs": {
+      "images": [
+        "11",
+        2
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "15": {
+    "inputs": {
+      "images": [
+        "11",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "16": {
+    "inputs": {
+      "expand": 15,
+      "tapered_corners": true,
+      "mask": [
+        "11",
+        1
+      ]
+    },
+    "class_type": "GrowMask",
+    "_meta": {
+      "title": "Grow Mask"
+    }
+  }
+}

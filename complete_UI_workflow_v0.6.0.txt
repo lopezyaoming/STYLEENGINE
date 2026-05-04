@@ -1,0 +1,1966 @@
+================================================================================
+                       STYLE ENGINE — COMPLETE UX FLOW
+                    Comprehensive User Experience Documentation
+================================================================================
+
+Version: 0.6.0
+Date: April 2026
+Purpose: Complete walkthrough of every UI element, feature, and workflow
+Audience: Designers, Developers, QA, Documentation Writers
+
+================================================================================
+WHAT CHANGED SINCE v0.5.1 (EXECUTIVE SUMMARY)
+================================================================================
+
+v0.6.0 is the "fractal scene" release. The addon gains a full hierarchical
+asset editing system layered on top of the existing image generation pipeline.
+Every subject in a scene is now a portal into its own nested Style Engine
+session, with its own camera, image history, JSON, and 3D generation path.
+
+• ASSET MODE / SCENE MODE — Two-state editing system. Scene Mode is the
+  default. Entering an asset isolates one object, switches to its dedicated
+  camera, loads its image history, and replaces the JSON with a component-level
+  breakdown. Fully nestable to arbitrary depth.
+
+• FRACTAL JSON EDITING — The entire scene is described by a single evolving
+  JSON that zooms in as you nest deeper. Scene JSON has subjects. Asset JSON
+  has components. Each level adds more detail without replacing the parent.
+  Features (free-form string tags) propagate upward through nesting.
+
+• STRUCTURED REFINE WITH AGENT — "Refine with Agent" always uses the live
+  JSON as its edit instruction. No plain-text mode. The JSON UI is the diff.
+
+• ANALYZE IMAGE → JSON — One-click AI decomposition of the active image
+  into a structured JSON. In merge mode, existing subjects are preserved and
+  updated; new ones are added. Context-hinted by the current prompt and asset.
+
+• AUTO-POPULATE SUBJECT FIELDS — Select any empty subject/component and
+  click Auto-Populate: the AI fills style, color, material, scale, and features
+  from what it can see in the current image.
+
+• APPLY TO PARENT — In asset mode, propagate changes one level up. The AI
+  visually updates the parent's current_ai.png to reflect the modified child.
+  Works recursively, level by level.
+
+• ASSET ISOLATION WORKFLOWS — Three options for removing the background from
+  an asset image: AssetNanoAlignmentRB.json (Gemini extract), SAM3 segmentation
+  (targeted by subject name), and U2Net rembg (model-based, no subject needed).
+
+• COPY SUBJECT / ASSET — Deep duplicate: JSON, image history, 3D history,
+  Blender objects, asset camera. Instantly generates a variant with no conflicts.
+
+• OLLAMA MODEL SELECTOR — Choose between gemma4:e2b (default), gemma4:31b,
+  and gemma3:4b for all Agent and text-based JSON workflows.
+
+• DATA-FIRST FILE MANAGEMENT — All mode-state flags are session-only (never
+  saved to .blend). scene_subjects_json is a persistent canonical property.
+  Files always open in Scene Mode with subjects correctly restored.
+
+• GENERATION ERROR POPUPS — IMAGE_RECITATION and other Gemini API errors
+  now surface as Blender popup dialogs with explanation and suggestions.
+
+BACKEND SERVICES (ALL PORTS):
+  8188  ComfyUI           — SDXL, UV texture, PBR, Gemini, Agent workflows
+  8189  Progress Bridge   — Realtime node-level status feed
+  8190  Hunyuan3D-Omni    — Mesh-conditioned 3D generation
+  8195  TRELLIS2          — Single-image to textured 3D
+  7860  Hunyuan3D-Part    — Mesh part segmentation (Gradio)
+  (Ollama — localhost, configured separately in Griptape nodes)
+
+
+================================================================================
+TABLE OF CONTENTS
+================================================================================
+
+PART 1:  OVERVIEW & INSTALLATION
+PART 2:  USER INTERFACE ANATOMY
+PART 3:  BASIC WORKFLOW (FIRST-TIME USER)
+PART 4:  PROMPT SYSTEM
+    4A — SDXL HTML-Tag Prompt System
+    4B — Gemini Plain-Text Prompt System
+    4C — Gemini Instructions (Style Presets)
+    4D — Ollama Agent Prompt Refinement
+PART 5:  AI MODEL SELECTION & ROUTING
+PART 6:  IMAGE GENERATION — SDXL MODE
+PART 7:  IMAGE GENERATION — GEMINI 3 PRO MODE
+PART 8:  GENERATION CONTROLS (SHARED)
+    8A — Refine Current Image
+    8B — Upload Local Image
+    8C — Generation Browser (Prev/Next History)
+    8D — Remove Background
+    8E — Generation Error Popups
+PART 9:  REFERENCE IMAGES (IPADAPTER + GEMINI)
+PART 10: PROGRESS BAR & STATUS SYSTEM
+PART 11: TEXTURE & MATERIAL OPERATIONS
+PART 12: 3D GENERATION — TRELLIS2 (Single Image)
+PART 13: 3D GENERATION — HUNYUAN3D-OMNI (Mesh Conditioned)
+PART 14: 3D GENERATION — HUNYUAN3D-PART (Mesh Segmentation)
+PART 15: SCENE MODE & ASSET MODE (NEW IN v0.6.0)
+    15A — Overview & Concepts
+    15B — Entering and Exiting Asset Mode
+    15C — Asset Mode UI Panel
+    15D — Nested Asset Mode (Arbitrary Depth)
+    15E — Asset Cameras, Directories, Histories
+    15F — Isolation Workflows (AssetNano / SAM3 / U2Net)
+    15G — Apply to Parent (Visual Cascade)
+    15H — Copy Subject / Asset
+PART 16: FRACTAL JSON EDITING (NEW IN v0.6.0)
+    16A — JSON Structure (Scene vs Asset)
+    16B — Analyze Image → JSON
+    16C — Refine with Agent
+    16D — Auto-Populate Subject Fields
+    16E — Subject & Component UI
+    16F — Features Propagation
+PART 17: PIE MENUS (SHIFT+Q / V / W / E / R / T)
+PART 18: WORKFLOW FILE INVENTORY
+PART 19: FILE ORGANIZATION & SESSION MANAGEMENT
+PART 20: BACKEND MODES (GCS / RUNCOMFY)
+PART 21: ERROR STATES & FEEDBACK
+PART 22: TECHNICAL UX DETAILS
+PART 23: CRITICAL DESIGN DECISIONS
+PART 24: APPENDIX — QUICK REFERENCE
+
+
+================================================================================
+PART 1: OVERVIEW & INSTALLATION
+================================================================================
+
+1.1 WHAT IS STYLE ENGINE
+-------------------------
+
+Style Engine is a Blender addon that bridges 3D modeling, AI image generation,
+3D generation, and structured scene description. It allows artists to:
+
+• Generate AI images from Blender renders in real-time (SDXL or Gemini 3 Pro)
+• Edit individual assets in isolation with their own camera and history
+• Describe every element of a scene in a structured, AI-editable JSON
+• Generate fully textured 3D meshes from a single image (TRELLIS2)
+• Condition 3D generation on existing geometry (Hunyuan3D-Omni)
+• Segment meshes into semantic parts (Hunyuan3D-Part)
+• Project AI textures onto 3D objects
+• Navigate through generation history with camera format memory
+• Upload external images into the generation pipeline
+
+CORE VALUE PROPOSITION:
+Instead of switching between Blender and external AI tools, Style Engine
+integrates the entire art + 3D workflow inside Blender's viewport. The fractal
+JSON system means every level of detail — from overall scene mood to the color
+of a single rivet — is editable in one continuous, interconnected structure.
+
+
+1.2 CORE CONCEPT
+----------------
+
+THE PIPELINE:
+1. Set up workspace (Setup Workspace)
+2. Write a scene description (text editor)
+3. Generate AI image (Gemini or SDXL)
+4. Analyze image → structured JSON (auto-decompose into subjects)
+5. Edit individual subjects → Refine with Agent (targeted AI edit)
+6. Enter Asset Mode for a specific subject → isolated editing with
+   its own camera, image history, and component JSON
+7. Generate 3D from the asset's image (TRELLIS2)
+8. Return to Scene Mode → Apply to Parent to update the scene image
+9. Project texture or export
+
+THE FRACTAL PRINCIPLE:
+At every level of nesting, the same set of tools applies:
+  Scene Mode   → subjects (e.g., "knight", "horse", "castle")
+  Asset Mode 1 → components of "knight" (e.g., "helmet", "chestplate")
+  Asset Mode 2 → sub-components of "helmet" (e.g., "visor", "plume")
+  ...infinitely deep
+
+Each level has its own current_ai.png, history, JSON, and 3D generation.
+
+
+1.3 INSTALLATION PROCESS
+------------------------
+
+STEP 1: Download / Clone Repository
+→ Obtain the styleengine addon folder
+
+STEP 2: Installation Methods
+
+METHOD A: Development Mode (Symlink — Windows)
+• Run scripts/addons/create_dev_link.ps1 as Administrator
+• Creates a symbolic link so source changes reflect instantly in Blender
+
+METHOD B: Manual Install
+• Copy scripts/addons/styleengine/ to Blender's addons directory:
+  Windows: C:\Users\<USER>\AppData\Roaming\Blender Foundation\Blender\<VER>\scripts\addons\
+  macOS:   ~/Library/Application Support/Blender/<VER>/scripts/addons/
+  Linux:   ~/.config/blender/<VER>/scripts/addons/
+
+METHOD C: ZIP Install
+• Package with scripts/addons/package_addon.bat (or validate_package.py)
+• Blender → Edit → Preferences → Add-ons → Install... → Select ZIP
+
+STEP 3: Enable Addon
+• Edit → Preferences → Add-ons → Search "Style Engine"
+• Check the checkbox
+• "Style Engine" tab appears in 3D Viewport N-panel
+
+
+1.4 INITIAL CONFIGURATION
+--------------------------
+
+REQUIRED (before first generation):
+
+1. Edit → Preferences → Add-ons → Style Engine → Expand
+2. Backend = GCS → enter ComfyUI server URL → Test Connection
+3. (For TRELLIS2) Verify TRELLIS2 port (default 8195) in Advanced Settings
+4. (For Omni/Part) Ensure VM services on ports 8190/7860
+5. Click "Test Connection" — green checkmark = ready
+
+
+================================================================================
+PART 2: USER INTERFACE ANATOMY
+================================================================================
+
+2.1 INTERFACE OVERVIEW
+----------------------
+
+Style Engine has FOUR main UI surfaces:
+
+A) N-PANEL — SCENE MODE (Primary Interface)
+   3D Viewport → Press 'N' → "Style Engine" tab
+   Visible when NOT in Asset Mode
+   Contains: Server status, View, File, Image Generation, Refine Image,
+             Agent, Texture, 3D Generation
+
+B) N-PANEL — ASSET MODE
+   Replaces the scene panel while in Asset Mode
+   Shows: Breadcrumb navigation, back button, Apply to Parent,
+          asset identity, active mesh, server status
+   Then mirrors all Scene Mode categories below (Image Gen, Refine, etc.)
+
+C) PIE MENUS (Quick Access)
+   Shift+Q  Workspace / File / View settings
+   Shift+W  Image generation
+   Shift+E  Agent (text/LLM workflows)
+   Shift+V  Visualization: Browse generations, opacity
+             → also contains "Edit Asset" / "Enter Asset Mode"
+   Shift+R  Refinement: Omni Mesh, Part Segmentation
+   Shift+T  Texture
+
+D) TEXT EDITOR (Prompt Input)
+   Created by Setup Workspace; shows STYLEENGINE_Prompt text block
+   In Asset Mode: swapped to the asset's prompt snapshot on entry,
+   restored to the scene prompt on exit
+
+E) PREFERENCES (Configuration)
+   Edit → Preferences → Add-ons → Style Engine
+
+
+2.2 N-PANEL LAYOUT — SCENE MODE (Top to Bottom)
+-------------------------------------------------
+
+┌─────────────────────────────────────────────┐
+│ STYLE ENGINE                                 │
+├─────────────────────────────────────────────┤
+│ ⬛ SERVER STATUS (always visible)           │
+│ 🟢 Server: Ready  /  🟡 [ ████░ ] 47%      │
+│    Node: KSampler                           │
+├─────────────────────────────────────────────┤
+│ ▼ VIEW                                     │
+│   Background Opacity: [slider]              │
+│   Visualization (SDXL only):               │
+│     [Combined] [Canny] [Depth]             │
+│   Generation Browser:                       │
+│     [◀] 12 / 18 [▶]                        │
+├─────────────────────────────────────────────┤
+│ ▼ FILE                                     │
+│   AI Model: [Gemini 3 Pro ▼]               │
+│   [Setup Workspace]                         │
+│   [Test Connection]                         │
+├─────────────────────────────────────────────┤
+│ ▼ IMAGE GENERATION                         │
+│   [Generate Image]  (large)                 │
+│   [Refine Current Image]                    │
+│   ▼ Settings (collapsible)                 │
+│     (Gemini or SDXL controls)               │
+├─────────────────────────────────────────────┤
+│ ▼ REFINE IMAGE                             │
+│   [Analyze Image → JSON]                   │
+│   ──────────────────────────────────────── │
+│   Metadata (read-only)                      │
+│   Visual Style (art_style, medium, lighting)│
+│   Composition (angle, framing)              │
+│   ▼ Subjects                               │
+│     [+ Add Subject]                         │
+│     ▼ knight                               │
+│       Style / Scale / Color / Material      │
+│       ▼ Features [+ Add]                  │
+│         butterfly emblem / engraved border  │
+│       ▼ Components [+ Add]                │
+│         ▼ helmet                          │
+│           Style / Scale / Color / Material  │
+│           ▼ Features [+ Add]             │
+│           [Edit Asset] [Auto-Populate]      │
+│           [Duplicate] [Delete]             │
+│   ▼ Thematic Tags [+ Add]                 │
+│   ──────────────────────────────────────── │
+│   [Refine with Agent]                       │
+├─────────────────────────────────────────────┤
+│ ▼ AGENT                                    │
+│   Ollama Model: [gemma4:e2b ▼]             │
+│   [Refine Prompt (LLM)]                    │
+│   [Describe Image]                          │
+│   [Describe Viewport]                       │
+├─────────────────────────────────────────────┤
+│ ▼ TEXTURE                                  │
+│   [Project Texture]                         │
+│   [PBR from Projected Texture] (cond.)      │
+│   [PBR from Text]                           │
+│   [UV Texture Generation]                   │
+│   [Retexture Mesh]                          │
+├─────────────────────────────────────────────┤
+│ ▼ 3D GENERATION                            │
+│   ▶ 3D from Single Image                   │
+│     [Generate 3D (TRELLIS2)]                │
+│     Quality / Texture / Steps / Guidance    │
+│     [Remove BG □]                           │
+│     ── Segment Mesh ──                      │
+│     [Segment Mesh (Hunyuan3D-Part)]         │
+│     ── Omni Mesh ──                         │
+│     [Omni Mesh]    Control: [BBOX ▼]       │
+│   ▶ Reference Images (15 slots)            │
+└─────────────────────────────────────────────┘
+
+
+2.3 N-PANEL LAYOUT — ASSET MODE (Top to Bottom)
+-------------------------------------------------
+
+┌─────────────────────────────────────────────┐
+│ STYLE ENGINE  [ASSET MODE]                  │
+├─────────────────────────────────────────────┤
+│ Breadcrumb: [Scene] › [facade] › window ●  │
+│ [← Scene]  (or ← parent name)              │
+│ [↑ Apply to Parent]  (if depth > 0)        │
+├─────────────────────────────────────────────┤
+│ ┌─────────────────────────────────────────┐ │
+│ │ window  •  asset_camera_facade_window   │ │
+│ │ Active mesh: window.001                 │ │
+│ └─────────────────────────────────────────┘ │
+├─────────────────────────────────────────────┤
+│ ⬛ SERVER STATUS (same as scene panel)      │
+├─────────────────────────────────────────────┤
+│ ▼ VIEW  (same as scene mode)               │
+├─────────────────────────────────────────────┤
+│ ▼ FILE  (same as scene mode)               │
+├─────────────────────────────────────────────┤
+│ ▼ IMAGE GENERATION                         │
+│   [Generate Image]  [Refine Current Image]  │
+│   ┌────────────────────────────────────┐    │
+│   │ Isolate Asset (SAM3)               │    │  ← ASSET MODE ONLY
+│   │ [SAM3]  [U2Net]                    │    │
+│   │ Subject: [window              ]    │    │  ← editable
+│   │ [Isolate Asset]                    │    │
+│   └────────────────────────────────────┘    │
+├─────────────────────────────────────────────┤
+│ ▼ REFINE IMAGE                             │
+│   [Analyze Image → JSON]                   │
+│   ──────────────────────────────────────── │
+│   Asset Identity (top, editable):           │
+│   ┌─────────────────────────────────────┐  │
+│   │ window  ← label (from parent)        │  │
+│   │ Style / Scale / Color / Material     │  │
+│   │ ▼ Features [+ Add]                 │  │
+│   └─────────────────────────────────────┘  │
+│   Metadata / Visual Style / Composition     │
+│   ▼ Components  [+ Add]                   │
+│     ▼ frame                               │
+│       Style / Scale / Color / Material      │
+│       ▼ Features [+ Add]                  │
+│       [Edit Asset] [Auto-Populate]          │
+│   ▼ Thematic Tags [+ Add]                 │
+│   [Refine with Agent]                       │
+├─────────────────────────────────────────────┤
+│ ▼ AGENT / TEXTURE / 3D GENERATION          │
+│   (identical to scene mode)                 │
+└─────────────────────────────────────────────┘
+
+Overlay text in bottom-left of ALL 3D viewports:
+  ASSET MODE — window  (white text, always visible in asset mode)
+
+
+2.4 TEXT EDITOR
+---------------
+
+The text block "STYLEENGINE_Prompt" is always the active prompt source.
+
+SCENE MODE:  The scene's main prompt (or SDXL tags)
+ASSET MODE:  Automatically replaced with the asset's last prompt snapshot.
+             On exit: restored to the scene-level prompt.
+
+Each asset's prompt is saved to its directory as a sidecar alongside its
+current_ai.png. This ensures correct prompt round-tripping across sessions.
+
+
+2.5 ADDON PREFERENCES (v0.6.0)
+-------------------------------
+
+BASIC:
+  Backend:     [GCS / RunComfy ▼]
+  Server URL:  http://styleengine2:8188
+  [Test Connection]
+
+ADVANCED:
+  Request Timeout:         [30]s
+  TRELLIS2 Port:           [8195]
+  Debug Mode:              □
+  Download Preview Images: ☑
+  ComfyUI Path:            [Browse...]
+
+
+================================================================================
+PART 3: BASIC WORKFLOW (FIRST-TIME USER)
+================================================================================
+
+3.1 SETUP (ONE-TIME)
+--------------------
+
+1. Edit → Preferences → Add-ons → Style Engine
+2. Backend = GCS → enter server URL → Test Connection
+3. Close Preferences
+
+3.2 CREATE WORKSPACE
+--------------------
+
+1. Open any .blend file
+2. Position 3D view to desired camera angle
+3. Press Shift+Q → "Setup Workspace"
+4. Wait ~2 seconds
+
+WHAT HAPPENS:
+• "AI" workspace tab created with dual viewport layout
+• ai_camera aligned to your scene camera (if one exists)
+• STYLEENGINE_Prompt text block created
+• Black placeholder current_ai.png in camera background
+
+3.3 WRITE A PROMPT & GENERATE
+------------------------------
+
+IF GEMINI (default):
+  Type naturally in the text editor.
+  Example: "a medieval knight in full plate armour, dramatic lighting"
+
+IF SDXL:
+  Use HTML tags: <p>description</p> <k>keywords</k> <n>negatives</n>
+
+Press Shift+W → "Generate Image"
+Wait 15–60 seconds. Image appears in camera background.
+
+3.4 ANALYZE IMAGE & EDIT JSON
+------------------------------
+
+1. N-panel → Refine Image → "Analyze Image → JSON"
+   AI decomposes the image into a structured JSON with subjects, styles,
+   materials, colors, and features. Takes 3–10 seconds via Ollama.
+
+2. The Refine Image section populates with editable subject cards.
+
+3. Edit any field: change color, material, style, add feature tags.
+
+4. Click "Refine with Agent" → AI re-generates the image with your changes.
+
+3.5 ENTER ASSET MODE
+--------------------
+
+1. In the Refine Image panel, find a subject (e.g., "knight")
+2. Click "Edit Asset" button next to the subject's component/label
+3. Asset Mode activates:
+   • All other objects hidden; only the asset's mesh remains visible
+   • Camera switches to asset_camera_knight
+   • Gemini extraction queued: scene image → isolated asset render
+   • JSON switches to component-level breakdown of "knight"
+   • Text editor swapped to the asset's prompt
+
+4. Iterate on the isolated asset using all the same tools (generate,
+   refine, SAM3 isolation, JSON editing, 3D generation)
+
+5. Click "← Scene" to return. Resolution, camera, and scene subjects
+   are all restored. Option to "Apply to Parent" before exiting.
+
+3.6 CREATE 3D
+-------------
+
+Once you have a current_ai.png (from scene OR asset mode):
+
+FAST PATH (TRELLIS2):
+  N-panel → 3D Generation → Generate 3D (TRELLIS2)
+  Wait 1–3 minutes → textured GLB appears in scene, parented to asset Empty
+
+GEOMETRY-CONDITIONED PATH (Omni):
+  Select mesh → N-panel → 3D Generation → Omni Mesh
+  Choose Control Mode → "Omni Mesh"
+  Wait 2–5 minutes → new mesh appears, scaled to original
+
+3.7 PROJECT TEXTURE
+-------------------
+
+After any 2D generation:
+  Select objects → N-panel → Texture → Project Texture
+  AI image projected from camera onto selected objects
+
+
+================================================================================
+PART 4: PROMPT SYSTEM
+================================================================================
+
+4A SDXL HTML-TAG PROMPT SYSTEM
+--------------------------------
+
+FORMAT:
+  # Keywords
+  <k>quality, medium, technical modifiers</k>
+  # Prompt
+  <p>main image description</p>
+  # Negative Prompt
+  <n>things to avoid</n>
+
+PARSING RULES:
+• Lines starting with # are ignored
+• Content inside tags is extracted and trimmed
+• Keywords prepended to prompt with ", "
+• If no tags found, entire text used as raw prompt
+
+DEFAULT NEGATIVE (when <n> empty):
+  "text, watermark, blurry, deformed, ugly, bad anatomy, worst quality"
+
+
+4B GEMINI PLAIN-TEXT PROMPT SYSTEM
+------------------------------------
+
+Raw text. No markup. The full content of STYLEENGINE_Prompt is sent to Gemini.
+
+BEST PRACTICES:
+• Write naturally, as you would describe the image to a colleague
+• Include material, lighting, composition, mood details
+• Long descriptions (paragraphs) are fully valid
+
+ASSET MODE PROMPT BEHAVIOR:
+• On asset entry: STYLEENGINE_Prompt content is swapped to the asset's
+  saved prompt. The asset prompt is initialized from the subject's label
+  and identity (style, material, color) on first entry.
+• On asset exit: STYLEENGINE_Prompt is restored to the scene snapshot.
+• Each asset's prompt is persisted on disk alongside its current_ai.png.
+
+
+4C GEMINI INSTRUCTIONS (STYLE PRESETS)
+---------------------------------------
+
+Dropdown in Image Generation → Settings → Instructions.
+Loads named presets from templates/instructions_*.txt.
+
+HOW IT WORKS:
+1. User selects a preset
+2. templates/instructions_<name>.txt is read and written to STYLEENGINE_Instructions
+3. Node #65 in the Gemini workflow receives the instructions text
+4. Empty selection → no style instructions
+
+ADDING PRESETS: Drop instructions_<name>.txt into the templates/ folder.
+Appears in dropdown immediately — no restart needed.
+
+
+4D OLLAMA AGENT PROMPT REFINEMENT
+-----------------------------------
+
+LOCATION: N-panel → Agent section
+MODEL SELECTOR: Ollama Model dropdown
+
+AVAILABLE MODELS (v0.6.0):
+  • gemma4:e2b    — fast, very capable (DEFAULT)
+  • gemma4:31b   — highest quality, slowest
+  • gemma3:4b    — lightest, fastest, good for testing
+
+These models are used for ALL Ollama-based workflows:
+  • Refine Prompt (LLM) — improves SDXL prompt engineering
+  • Analyze Image → JSON — decomposes image into structured JSON
+  • Refine with Agent — applies JSON changes to current_ai.png
+  • Auto-Populate Subject — fills empty subject fields from image
+  • AgentJSON.json / AgentJSONMerge.json workflows
+
+The selected model is dynamically patched into the workflow JSON at
+submission time — no workflow file editing required.
+
+
+================================================================================
+PART 5: AI MODEL SELECTION & ROUTING
+================================================================================
+
+5.1 THE MODEL SELECTOR
+-----------------------
+
+LOCATION: N-panel → File section → AI Model dropdown
+OPTIONS:
+  • GEMINI — "Gemini 3 Pro" (nano-banana model)   ← DEFAULT
+  • SDXL   — "Stable Diffusion" (SDXL + ControlNet)
+
+SWITCHING MODELS:
+  Gemini → clears STYLEENGINE_Prompt to empty
+  SDXL   → restores HTML tag template
+
+GEMINI CAMERA SYNC:
+  When Gemini is active + a non-ai_camera exists:
+  sync_ai_camera_from_scene() aligns ai_camera to the scene camera
+  (copies focal length, position, rotation, resolution).
+
+
+5.2 HOW ROUTING WORKS
+----------------------
+
+SDXL PATH:
+  Render scene → parse HTML tags → pick workflow variant →
+  patch JSON → upload → poll → download current_ai + canny + depth
+
+GEMINI PATH:
+  Read raw text → read instructions → determine aspect ratio →
+  pick workflow variant → (optionally render for alignment) →
+  patch nodes → upload → poll → download current_ai.png only
+
+AGENT / JSON PATH:
+  Build task prompt (with current JSON + image) → patch Ollama model →
+  queue AgentJSON.json or AgentJSONMerge.json → poll →
+  parse JSON from output → update Refine Image form
+
+
+================================================================================
+PART 6: IMAGE GENERATION — SDXL MODE
+================================================================================
+
+(Unchanged from v0.5.1 — see v0.5.1 documentation for full SDXL details)
+
+SDXL CONTROLS: Steps, Influence, LoRa, Resolution, Remove BG
+SDXL WORKFLOW ROUTING (reference):
+  No refs, no RB → Image.json
+  Refs, no RB   → ImageRef.json
+  No refs, RB   → ImageRB.json
+  Refs + RB     → ImageRefRB.json
+
+SDXL OUTPUT: current_ai.png + canny.png + depth.png
+
+
+================================================================================
+PART 7: IMAGE GENERATION — GEMINI 3 PRO MODE
+================================================================================
+
+7.1 GEMINI CONTROLS
+--------------------
+
+Temperature (0.0 → 1.0): divergence from input
+Size (1K / 2K / 4K): output resolution target
+Instructions: style preset from templates/instructions_*.txt
+Alignment: ON = render + text; OFF = text only
+Remove BG: routes to *RB.json workflow variant
+Aspect ratio: auto-detected from scene render resolution (read-only)
+
+
+7.2 GEMINI WORKFLOW ROUTING
+-----------------------------
+
+  Alignment | Remove BG | References | Workflow
+  ──────────┼───────────┼────────────┼────────────────────────────
+  OFF       | OFF       | No         | ImageNanoText.json
+  ON        | OFF       | No         | ImageNanoAlignment.json
+  OFF       | ON        | No         | ImageNanoTextRB.json
+  ON        | ON        | No         | ImageNanoAlignmentRB.json
+  Any       | OFF       | Yes        | ImageNanoReference.json
+  Any       | ON        | Yes        | ImageNanoReferenceRB.json
+
+NOTE: ImageNanoText.json and ImageNanoTextRB.json have use_search=false
+to prevent Gemini from entering tool-use mode when no alignment image
+is provided (avoids IMAGE_RECITATION and empty-response failures).
+
+
+7.3 ASSET ISOLATION WORKFLOW (NEW IN v0.6.0)
+---------------------------------------------
+
+On first entry into Asset Mode, AssetNanoAlignmentRB.json is queued
+automatically to extract the asset from the scene's current_ai.png.
+
+INPUT:  Scene's current_ai.png (or parent asset's image for nested entry)
+OUTPUT: Asset's own current_ai.png (saved to Models/<asset>/temp/)
+NODE:   Node 69 (ASSET_NAME) receives the subject descriptor including
+        style/material/color/scale if known.
+
+ARCHITECTURAL DETECTION:
+  If the asset label contains keywords like "facade", "wall", "brick",
+  "floor", "pavement", etc. — or the material is concrete/stone/brick etc.:
+  • Node 63 and 70 text overrides to command an axonometric/isometric view
+  • InspyrenetRembg (node 67) is removed from the workflow at runtime
+  • Python-based black-keying (numpy pixel manipulation) replaces rembg
+  This handles the common failure case where rembg mistakes a brick wall
+  or concrete surface for background.
+
+
+================================================================================
+PART 8: GENERATION CONTROLS (SHARED)
+================================================================================
+
+8A REFINE CURRENT IMAGE
+------------------------
+
+PURPOSE: Use current_ai.png as conditioning input instead of re-rendering.
+BEHAVIOR: Skips Blender render; all other pipeline steps identical.
+ASSET MODE BEHAVIOR: In asset mode, uses the ASSET's current_ai.png,
+  not the global scene image.
+
+
+8B UPLOAD LOCAL IMAGE
+----------------------
+
+File browser → any PNG/JPG → rescaled to active model's native size →
+saved as current_ai.png → camera background updated → added to history.
+
+SDXL:  Snaps to nearest SDXL-native resolution
+GEMINI: Preserves aspect ratio, caps longest side at 1920px
+
+
+8C GENERATION BROWSER (PREV / NEXT HISTORY)
+--------------------------------------------
+
+LOCATION: N-panel → View section → Generation Browser
+
+[◀] 12 / 18 [▶]
+
+Reads sorted *.png from project Images/ (scene mode) or
+Models/<asset>/Images/ (asset mode).
+Navigating restores: current_ai.png + camera background + prompt text
+Format memory: resolution embedded in filename, restored on navigate.
+
+ASSET MODE: History is per-asset (reads from the asset's Images/ folder).
+Each image history entry is independent per asset per nesting level.
+
+
+8D REMOVE BACKGROUND
+---------------------
+
+SDXL:       Toggle in Image Generation → routes to ImageRB / ImageRefRB
+GEMINI:     Toggle alongside Alignment → routes to *RB workflow variants
+TRELLIS2:   Pre-pass using UtilsImageRB.json before 3D submission
+ASSET ISO:  AssetNanoAlignmentRB.json always removes background
+REFINE:     In asset mode, "Refine with Agent" uses rembg automatically.
+            In scene mode, "Refine with Agent" does NOT use rembg.
+
+
+8E GENERATION ERROR POPUPS (NEW IN v0.6.0)
+-------------------------------------------
+
+When the Gemini API refuses a generation, a Blender popup dialog appears.
+
+IMAGE_RECITATION popup:
+  ┌─────────────────────────────────────────────────────────────┐
+  │ ⚠ Gemini: Image Refused (Copyright Filter)                  │
+  │                                                              │
+  │ Gemini refused to generate this image because it detected   │
+  │ the input too closely resembles copyrighted material         │
+  │ (FinishReason: IMAGE_RECITATION).                           │
+  │                                                              │
+  │ Suggestions:                                                 │
+  │   • Rephrase prompt more descriptively                      │
+  │   • Turn Alignment OFF (bypasses input-image check)         │
+  │   • Stylise the image first, then use as alignment input    │
+  └─────────────────────────────────────────────────────────────┘
+
+OTHER ERRORS: A generic "Generation Failed" popup shows the raw error.
+The popup is scheduled via bpy.app.timers to safely run on the main thread
+even when the failure is detected in a background polling thread.
+
+
+================================================================================
+PART 9: REFERENCE IMAGES (IPADAPTER + GEMINI)
+================================================================================
+
+(Unchanged from v0.5.1)
+
+15 reference image slots: Style (ST1–ST5), Composition (COMP1–COMP5),
+Transfer (SST1–SST5).
+
+Each slot: thumbnail, weight slider (0.0–2.0), load/clear/reload buttons.
+Each category: global strength slider.
+
+GEMINI: Empty slots are dynamically removed from the workflow JSON.
+SDXL:   Empty slots filled with blank.png.
+
+
+================================================================================
+PART 10: PROGRESS BAR & STATUS SYSTEM
+================================================================================
+
+(Unchanged from v0.5.1)
+
+LOCATION: N-panel top, always visible. Also shown in Asset Mode panel.
+
+STATES:
+  🔴 Server: Offline
+  🟢 Server: Ready
+  🟡 [████████░░░░░░] 65%  KSampler  (during generation)
+  Queue: N  (when server queue depth > 0)
+
+Progress Bridge: background timer polls port 8189 every 2 seconds.
+TRELLIS2/Omni/Part write directly to BridgePollerState during their loops.
+
+
+================================================================================
+PART 11: TEXTURE & MATERIAL OPERATIONS
+================================================================================
+
+(Unchanged from v0.5.1 — see v0.5.1 doc for details)
+
+LOCATION: N-panel → Texture section (replaced old SDXL sub-buttons)
+
+  [Project Texture]               Projects current_ai.png from camera
+  [PBR from Projected Texture]    Upgrades projection to full PBR maps
+  [PBR from Text]                 Generates PBR from text prompt
+  [UV Texture Generation]         Hunyuan 3D 2.1 UV PBR bake
+  [Retexture Mesh]                TRELLIS2 retexture of existing mesh
+
+
+================================================================================
+PART 12: 3D GENERATION — TRELLIS2 (Single Image)
+================================================================================
+
+(Unchanged from v0.5.1)
+
+ASSET MODE ADDITION:
+  In asset mode, Trellis-generated meshes are:
+  • Named after the asset label (e.g., "knight.001", "knight.002")
+  • Automatically parented to the asset's "Arrows" Empty placeholder
+  • The asset camera is also parented to the same Empty
+  This keeps the entire asset hierarchy (Empty + meshes + camera)
+  grouped under one object in the outliner.
+
+
+================================================================================
+PART 13: 3D GENERATION — HUNYUAN3D-OMNI
+================================================================================
+
+(Unchanged from v0.5.1)
+
+
+================================================================================
+PART 14: 3D GENERATION — HUNYUAN3D-PART
+================================================================================
+
+(Unchanged from v0.5.1)
+
+
+================================================================================
+PART 15: SCENE MODE & ASSET MODE (NEW IN v0.6.0)
+================================================================================
+
+15A OVERVIEW & CONCEPTS
+------------------------
+
+SCENE MODE is the default and global editing context.
+  • All objects are visible (or hidden by user choice)
+  • ai_camera is the active camera
+  • JSON describes the full scene: subjects, visual style, composition
+  • Image history = Images/ folder in project directory
+  • 3D generation produces global assets
+
+ASSET MODE is a nested editing context for a single subject.
+  • One object (and its Empty parent) is visible; all others hidden
+  • asset_camera_<name> is the active camera (1024×1024 default)
+  • JSON describes the asset's components, not the whole scene
+  • Image history = Models/<asset>/Images/
+  • 3D generation produces that asset's 3D model
+  • Text editor prompt = this asset's saved prompt
+
+THE MATRYOSHKA PRINCIPLE:
+  Asset Mode within Asset Mode = a self-similar nested session.
+  Breadcrumb navigation shows the full path:
+    [Scene] › [facade] › [window] › pane ●
+  Each level is independently accessible, with its own image, JSON,
+  and prompt. The outer levels remain frozen while an inner one is active.
+
+
+15B ENTERING AND EXITING ASSET MODE
+------------------------------------
+
+ENTERING via N-panel "Edit Asset" button:
+  1. User clicks "Edit Asset" next to a subject card (or component card)
+  2. The system resolves the linked Blender object:
+     Priority: asset_object_links map → exact name → versioned variant
+               (name.001, .002…) → create EMPTY placeholder
+     A MESH always wins over an EMPTY if both exist.
+  3. EnterAssetMode operator fires with the resolved object as active
+  4. The operator:
+     a. Pushes current state to asset_mode_stack (for nesting)
+     b. Saves all object visibility to asset_stored_visibility
+     c. Hides all objects except the resolved target + its Empty parent
+     d. Creates / retrieves asset_camera_<pathkey>
+     e. Sets scene.camera = asset_camera
+     f. Saves render resolution; snaps to 1024×1024
+     g. Sets asset_mode = True, current_asset_name = label
+     h. Populates SAM3 subject string (label, underscores → spaces)
+     i. Swaps STYLEENGINE_Prompt to asset's saved prompt
+     j. Loads asset's component JSON into Refine Image form
+     k. Queues AssetNanoAlignmentRB isolation render (first entry only)
+
+ENTERING via Shift+V pie → "Enter Asset Mode":
+  Requires active MESH or EMPTY object selected in viewport.
+  Otherwise identical to "Edit Asset" flow.
+
+EXITING via "← Scene" button or "← <parent>" button:
+  1. Saves current component JSON to asset_subjects.json on disk
+  2. Syncs any component changes back to the parent's subject entry
+  3. Restores all object visibility from asset_stored_visibility
+  4. Hides asset_camera; restores previous active camera
+  5. Restores render resolution
+  6. Restores scene subjects JSON into Refine Image form
+  7. Swaps STYLEENGINE_Prompt back to scene snapshot
+  8. Clears all mode flags (asset_mode = False, etc.)
+
+FILE SAVE WHILE IN ASSET MODE:
+  The on_blend_file_pre_save handler fires before every .blend write.
+  It copies asset_prev_subjects → scene_subjects_json so the scene
+  subjects are correctly preserved even though refine_subjects currently
+  holds the asset's components.
+  On next file load, the file always opens in Scene Mode.
+
+
+15C ASSET MODE UI PANEL
+------------------------
+
+BREADCRUMB ROW:
+  [Scene] › [facade] › window ●
+  Each ancestor label is a clickable button that exits to that level.
+  The current asset is shown with a ● indicator (non-clickable).
+
+BACK BUTTON:
+  "← Scene"  (at depth 1)
+  "← facade" (at depth 2+, shows parent name)
+
+APPLY TO PARENT (only at depth > 0):
+  "↑ Apply to Parent"
+  Queues ImageNanoAlignmentRef.json:
+    image_1 = parent's current_ai.png (the scene/parent to edit)
+    image_2 = this asset's current_ai.png (the modified child as reference)
+  Parent's current_ai.png is updated. Parent's aspect ratio is preserved.
+  rembg is applied only if the parent is itself an asset (not the scene).
+
+ASSET IDENTITY BOX:
+  Shows: asset name label + camera name (compact, non-editable header)
+
+ACTIVE MESH BOX:
+  Shows: the linked Blender object name (e.g., "knight.001")
+  Derived from the subject's linked_object_name at the active subject index.
+
+ASSET MODE OVERLAY:
+  White text "ASSET MODE — <name>" drawn in the bottom-left of all 3D
+  viewports using a SpaceView3D draw_handler. Always visible in asset mode.
+
+
+15D NESTED ASSET MODE (ARBITRARY DEPTH)
+-----------------------------------------
+
+When already in asset mode, clicking "Edit Asset" on a component pushes
+the current state to asset_mode_stack (a JSON array) and enters a new level.
+
+STATE STACK ENTRY (per level):
+  asset_name, prev_camera, prev_prompt, prev_subjects, prev_resolution,
+  stored_visibility, asset_subject_index, asset_object_links,
+  asset_current_3d_index, prev_visual_style, asset_subject_style/scale/
+  color/material/features
+
+CAMERA NAMING (ensures no collisions):
+  Top-level:   asset_camera_knight
+  Nested:      asset_camera_knight_helmet
+  Deep-nested: asset_camera_knight_helmet_visor
+
+DIRECTORY NAMING:
+  Top-level:   Models/knight/
+  Nested:      Models/knight/Models/helmet/
+  Deep-nested: Models/knight/Models/helmet/Models/visor/
+
+Each level has its own temp/, Images/, and asset_subjects.json.
+
+EXITING ONE LEVEL:
+  "← <parent>" pops one entry from the stack and restores that level's state.
+  The 3D model visible at the nested level stays as-is (the last active mesh).
+
+EXITING ALL LEVELS:
+  "Scene" button in the breadcrumb exits all levels at once.
+
+
+15E ASSET CAMERAS, DIRECTORIES, HISTORIES
+------------------------------------------
+
+ASSET CAMERA:
+  • Created on first entry for each asset at each nesting level
+  • Named using the full ancestry path (collision-free)
+  • Set to 1024×1024 resolution by default
+  • Background image = asset's current_ai.png
+  • Parented to the asset's "Arrows" Empty object
+  • Hidden in viewport when not the active asset (hide_viewport = True)
+  • Visible only while in that asset's editing context
+
+ASSET DIRECTORY STRUCTURE:
+  <project>_styleengine/
+  └── Models/
+      └── knight/
+          ├── temp/
+          │   └── current_ai.png      ← asset's canonical image
+          ├── Images/
+          │   ├── 20260409_162925_805_iter.png   ← history entries
+          │   └── ...
+          ├── asset_subjects.json     ← persisted component JSON
+          └── Models/                 ← nested asset sub-directories
+              └── helmet/
+                  ├── temp/current_ai.png
+                  └── Images/...
+
+ASSET IMAGE HISTORY:
+  Exactly like scene image history: images in Images/ are the canonical
+  history. Prev/Next navigation in asset mode reads from the asset's
+  Images/ folder. The most recent image becomes current_ai.png.
+  3D models do NOT have a separate iteration browser (simplified in v0.6.0).
+
+ASSET OBJECT LINKING:
+  asset_object_links (persistent StringProperty) stores a JSON map:
+    { "knight": "knight.001", "helmet": "helmet", "sword": "sword.002" }
+  This map is updated whenever a link is established and read at asset entry
+  to find the correct Blender object even after file reload.
+
+
+15F ISOLATION WORKFLOWS (ASSETALIGNMENT / SAM3 / U2NET)
+---------------------------------------------------------
+
+THREE METHODS for creating an asset's isolated current_ai.png:
+
+1. ASSETALIGNMENTRB (AUTOMATIC on first entry)
+   Workflow: AssetNanoAlignmentRB.json
+   Triggered: automatically when first entering an asset (if no history)
+   Source: scene's current_ai.png (or parent's for nested assets)
+   Patches: node 69 (ASSET_NAME) with descriptor,
+            node 71 (Load Image) with uploaded scene image
+   Output: saved to asset's temp/current_ai.png
+
+2. SAM3 SEGMENTATION (MANUAL)
+   Workflow: SAM3Rembg.json
+   Button: "Isolate Asset" in Image Generation (Asset Mode only)
+   Source: asset's current active current_ai.png
+   Subject string: editable by user, auto-filled with asset name
+                   (underscores → spaces for better NLP matching)
+   Patches: node 4 (ASSET_NAME) with the editable subject string,
+            node 1 (Load Image) with uploaded source image
+   Use when: AssetAlignment failed, or more precise segmentation needed
+
+3. U2NET REMBG (MANUAL, no subject string)
+   Workflow: u2netrembg.json
+   Button: same "Isolate Asset" box, method toggle → U2Net
+   Source: asset's current active current_ai.png
+   Patches: node 1 (Load Image) with uploaded source image
+   Use when: SAM3 doesn't perform well on the specific asset type
+
+UI (Image Generation section, asset mode only):
+  ┌─ Isolate Asset ──────────────────────────┐
+  │  [ SAM3 ]  [ U2Net ]                     │
+  │  Subject: [brick wall           ]        │  ← SAM3 only
+  │  [ Isolate Asset ]                        │
+  └──────────────────────────────────────────┘
+
+All three methods save the result as a history entry and update
+the asset's current_ai.png and camera background.
+
+
+15G APPLY TO PARENT (VISUAL CASCADE)
+--------------------------------------
+
+BUTTON: "↑ Apply to Parent" (Asset Mode panel, only at depth > 0)
+WORKFLOW: ImageNanoAlignmentRef.json (Gemini two-image reference workflow)
+
+FLOW:
+  1. Resolve parent's current_ai.png path (from stack)
+  2. Upload parent image as image_1 (the scene/parent to modify)
+  3. Upload this asset's current_ai.png as image_2 (the change reference)
+  4. Build prompt from the current asset's subject changes
+  5. Queue ImageNanoAlignmentRef.json
+  6. On completion: result saved to PARENT's current_ai.png + history
+  7. Parent's camera background is updated on next entry to that level
+
+ASPECT RATIO: Always uses the PARENT image's aspect ratio, not 1:1.
+rembg: Applied if the parent is an asset level. NOT applied if the parent
+       is the top-level scene (rembg would destroy the scene background).
+
+RECURSIVE USE: Apply to Parent is one-level-at-a-time by design.
+  The user can review each level's result before propagating further.
+  To cascade fully up: exit one level, review, Apply to Parent again.
+
+
+15H COPY SUBJECT / ASSET
+--------------------------
+
+BUTTON: Duplicate icon (▣) next to each subject/asset card in the JSON UI
+OPERATOR: style_engine.copy_subject
+
+WHAT IS COPIED:
+  • JSON data: all fields (label, style, scale, color, material, features,
+    components, linked_object_name) with a new unique label
+  • Asset directory: full shutil.copytree of Models/<name>/ → Models/<name>_copy/
+  • Image history: all files in Images/ duplicated into the new directory
+  • asset_subjects.json: copied and associated with new label
+  • Blender camera: asset_camera_<name> is duplicated → asset_camera_<name>_copy
+  • Blender object: if a linked object exists, it is duplicated with obj.copy()
+    and all child objects (meshes parented to the Empty) are also duplicated
+  • asset_object_links: new label → new object name entry added
+
+PURPOSE: Quickly generate variants of the same asset without history conflicts.
+  Example: knight → knight_blue_variant (change color, regenerate).
+
+
+================================================================================
+PART 16: FRACTAL JSON EDITING (NEW IN v0.6.0)
+================================================================================
+
+16A JSON STRUCTURE (SCENE VS ASSET)
+-------------------------------------
+
+SCENE JSON ("mode": "scene"):
+  Describes the full picture: who/what is in it, and how it looks overall.
+
+  {
+    "mode": "scene",
+    "metadata": {
+      "filename": "alleyway",          ← from .blend filename
+      "dimensions": "1920x1080",
+      "aspect_ratio": "16:9",
+      "focal_length_mm": 50.0,
+      "depth_of_field": { "enabled": false }
+    },
+    "visual_style": {
+      "art_style": "photorealistic",
+      "medium": "photograph",
+      "lighting_condition": "dramatic"
+    },
+    "composition": {
+      "perspective": "eye-level",
+      "focal_point": "the_alleyway_center"
+    },
+    "subject_matter": [
+      {
+        "label": "knight",
+        "style": "gothic",
+        "scale": "dominant",
+        "color": "dark steel",
+        "material": "plate armour",
+        "features": ["butterfly emblem", "engraved pauldrons"],
+        "components": [
+          {
+            "label": "helmet",
+            "style": "gothic",
+            "scale": "medium",
+            "color": "dark steel",
+            "material": "hammered iron",
+            "features": ["visor slits", "plume socket"]
+          }
+        ],
+        "_linked_object": "knight.001"
+      }
+    ],
+    "thematic_tags": ["medieval", "warrior", "dark fantasy"]
+  }
+
+ASSET JSON ("mode": "asset"):
+  Same schema. The subject_matter array holds COMPONENTS of the single asset,
+  not subjects of the whole scene.
+
+  {
+    "mode": "asset",
+    "metadata": { ... },          ← inherited from scene (same values)
+    "visual_style": { ... },      ← inherited; user can edit for this asset
+    "composition": {
+      "camera_angle": "front view",
+      "framing": "medium shot"
+    },
+    "subject_matter": [           ← components of THIS asset
+      {
+        "label": "visor",
+        "style": "gothic",
+        "scale": "small",
+        "color": "dark steel",
+        "material": "hammered iron",
+        "features": ["horizontal slits", "pivot hinge"]
+      }
+    ],
+    "thematic_tags": ["armour", "medieval"]
+  }
+
+KEY DISTINCTION:
+  • Scene JSON:  subject_matter = subjects (independent objects in the scene)
+  • Asset JSON:  subject_matter = components (parts of ONE object)
+  • Both use the same schema — the mode field determines interpretation
+  • Components can have their own components (sub-components), enabling
+    arbitrary depth without schema changes
+
+ASSET IDENTITY AT THE TOP:
+  When in asset mode, the first block in the Refine Image panel shows
+  the current asset's own style/scale/color/material/features as an
+  "identity" box — these fields correspond to this asset's entry in the
+  PARENT's subject_matter. They are editable here and written back to
+  the parent's JSON on exit.
+
+
+16B ANALYZE IMAGE → JSON
+--------------------------
+
+BUTTON: "Analyze Image → JSON" (Refine Image section)
+WORKFLOW: AgentJSON.json (fresh / no existing subjects)
+          AgentJSONMerge.json (when subjects already exist)
+
+CONTEXT-HINT SYSTEM:
+  The AI analysis prompt is prepended with context from:
+    SCENE MODE:   The current STYLEENGINE_Prompt text
+    ASSET MODE:   The asset's label and known style/material
+  Format: "This image shows '<context>'. Look at the single isolated
+          object in this image carefully. Identify and name every
+          distinct visible COMPONENT or PART..."
+
+  This anchors the model to the correct subject and prevents it from
+  returning unrelated objects (e.g., "dog" for a robot, "grass" for a knight).
+
+MERGE MODE (AgentJSONMerge.json):
+  Triggered when refine_subjects already has entries.
+  The current JSON is sent to the agent alongside the image.
+  Prompt: "Keep all existing component labels unchanged — they are
+           permanent IDs. Update their style/color/material from what
+           you see. Add new entries ONLY for visible parts not already listed."
+  This preserves user-edited subject IDs across re-analyses.
+
+FRESH MODE (AgentJSON.json):
+  Triggered when no subjects exist yet.
+  Clean decomposition from scratch.
+
+IMAGE SOURCE:
+  SCENE MODE: global temp/current_ai.png
+  ASSET MODE: asset's temp/current_ai.png
+
+AFTER ANALYSIS:
+  • Refine Image form is populated with the returned JSON
+  • In scene mode: scene_subjects_json is updated + disk backup written
+  • In asset mode: asset_subjects.json is updated
+
+
+16C REFINE WITH AGENT
+----------------------
+
+BUTTON: "Refine with Agent" (bottom of Refine Image section)
+ALWAYS uses structured JSON editing — no plain-text mode.
+ALWAYS uses rembg in asset mode. NEVER uses rembg in scene mode.
+
+FLOW:
+  1. _build_refine_json_for_agent() builds the full JSON from live form
+  2. A task prompt is constructed:
+       "Edit this image based on the following JSON modifications:\n<JSON>"
+  3. The active current_ai.png is uploaded
+  4. AgentJSONMerge.json workflow is queued with:
+       - Task prompt (the JSON diff)
+       - Image (active current_ai.png)
+       - Ollama model (from props.ollama_model)
+       - rembg: True if asset mode, False if scene mode
+  5. Result downloaded → saved to history → current_ai.png updated
+
+GEMINI ALIGNMENT:
+  In asset mode, gemini_alignment is always forced to True so the agent
+  has the current image as reference when making targeted edits.
+
+
+16D AUTO-POPULATE SUBJECT FIELDS
+----------------------------------
+
+BUTTON: "Auto-Populate" (shown per-subject and per-component in asset mode)
+OPERATOR: style_engine.auto_populate_subject
+
+PURPOSE: Fill empty or incomplete subject/component fields using AI analysis
+of the CURRENT IMAGE without replacing existing entries.
+
+BEHAVIOR:
+  1. The operator identifies the target subject label
+  2. Builds a focused prompt: "Looking at <image>, describe the <label>
+     in terms of style, color, material, scale, and specific features"
+  3. Queues a targeted AgentJSON.json pass
+  4. Updates ONLY the style/color/material/scale/features of the target entry
+  5. All other subjects are left unchanged
+
+IMAGE SOURCE: Active current_ai.png (same resolution rules as Analyze Image)
+
+
+16E SUBJECT & COMPONENT UI
+-----------------------------
+
+Each subject card in the Refine Image panel (both scene and asset mode):
+
+  ▼ [Knight                    ] [✕ Delete] [▣ Duplicate]
+    Style:    [gothic              ]
+    Scale:    [dominant            ]
+    Color:    [dark steel          ]
+    Material: [plate armour        ]
+    ▼ Features [+ Add]
+      [butterfly emblem        ] [✕]
+      [engraved pauldrons      ] [✕]
+    ▼ Components [+ Add]
+      ▼ helmet
+        Style / Scale / Color / Material
+        ▼ Features [+ Add]
+        [Edit Asset] [Auto-Populate] [▣ Duplicate] [✕]
+    [Edit Asset]  (shown for subjects with linked objects)
+    [Auto-Populate]
+
+SUBJECT FIELDS:
+  label      — the unique permanent ID. Never auto-changed by AI in merge mode.
+  style      — visual/artistic style descriptor
+  scale      — relative size ("dominant", "small", "medium", "background")
+  color      — primary color palette description
+  material   — physical material descriptor
+  features   — expandable list of short free-form strings for unstructured
+               extra context ("butterfly emblem", "engraved border")
+               These propagate upward through nesting via Apply to Parent.
+  components — sub-subjects (can themselves have components, recursively)
+
+SCALE FROM BOUNDING BOX:
+  When a Blender object is linked to a subject, the scale field is
+  automatically computed from the object's bounding box world dimensions.
+  This ensures the JSON always reflects the true geometric scale, not a
+  user-typed guess. User edits override this until the next auto-sync.
+
+EDIT ASSET BUTTON:
+  Present when a subject/component has a resolvable Blender object link.
+  Triggers the full EditAsset → EnterAssetMode flow.
+
+AUTO-POPULATE BUTTON:
+  Present for any subject/component with an empty or partial field set.
+  Uses AI to fill from the current image.
+
+
+16F FEATURES PROPAGATION
+--------------------------
+
+The features list at each subject/component level propagates upward:
+
+  When "Refine with Agent" runs at any level, the prompt includes
+  the features of all subjects/components at that level, PLUS the
+  features of the subject as seen from the parent (asset_subject_features).
+
+  When "Apply to Parent" runs:
+    The child's features are embedded in the parent's JSON subject entry
+    as an updated features array. The parent's agent then uses these
+    features in the visual cascade.
+
+  This ensures that adding "butterfly emblem" to a chestplate component
+  at asset mode depth 2 can eventually affect the scene-level render
+  after cascading up through Apply to Parent twice.
+
+
+================================================================================
+PART 17: PIE MENUS (SHIFT+Q / V / W / E / R / T)
+================================================================================
+
+The pie menus were reorganized in v0.6.0. The old single Alt+W menu
+was split into six dedicated menus, each mapped to a logical category.
+
+SHIFT+Q — WORKSPACE / FILE / VIEW
+  Setup Workspace          Create AI dual-viewport layout
+  Test Connection          Verify ComfyUI server
+  View settings            Background opacity controls
+
+SHIFT+W — IMAGE GENERATION
+  Generate Image           Full generation pipeline (Gemini or SDXL)
+  Refine Current Image     Use current_ai.png as input (skip render)
+  Generation controls      Alignment toggle (Gemini), model info
+
+SHIFT+E — AGENT
+  Refine Prompt (LLM)      Ollama-based SDXL prompt refinement
+  Describe Image           Image-to-text description
+  Describe Viewport        Viewport description generation
+
+SHIFT+V — VISUALIZATION / ASSET
+  Background Opacity       Slider for camera background visibility
+  Generation Browser       Navigate Prev/Next generation history
+  [Combined/Canny/Depth]   Visualization mode switch (SDXL only)
+  Enter Asset Mode         Enter Asset Mode for selected object
+  Edit Asset               (when in Asset Mode) edit a nested component
+
+SHIFT+R — REFINEMENT
+  Omni Mesh                Hunyuan3D-Omni mesh-conditioned 3D
+  Segment Mesh             Hunyuan3D-Part mesh segmentation
+  BBox Debug               Calculate + visualize bounding box
+
+SHIFT+T — TEXTURE
+  Project Texture          Camera projection onto selected objects
+  UV Texture               Hunyuan 3D 2.1 UV PBR bake
+  PBR from Text            PBR material from text prompt
+  Retexture Mesh           TRELLIS2 retexture existing mesh
+
+
+================================================================================
+PART 18: WORKFLOW FILE INVENTORY
+================================================================================
+
+All workflows: scripts/addons/styleengine/workflows/
+
+IMAGE WORKFLOWS:
+  Image/Image.json                SDXL base (no references, no rembg)
+  Image/ImageRef.json             SDXL with IPAdapter references
+  Image/ImageRB.json              SDXL + Remove Background
+  Image/ImageRefRB.json           SDXL + Remove Background + refs
+  Image/ImageNanoText.json        Gemini: text-only (use_search=false)
+  Image/ImageNanoAlignment.json   Gemini: text + render alignment
+  Image/ImageNanoReference.json   Gemini: text + references
+  Image/ImageNanoTextRB.json      Gemini: text-only + Remove BG
+  Image/ImageNanoAlignmentRB.json Gemini: alignment + Remove BG
+  Image/ImageNanoReferenceRB.json Gemini: references + Remove BG
+  Image/ImageNanoAlignmentRef.json Gemini: two-image reference (Apply to Parent)
+  Image/AssetNanoAlignmentRB.json Asset isolation extract (auto on asset entry)
+  Image/SAM3Rembg.json            SAM3 segmentation (subject-targeted rembg)
+  Image/u2netrembg.json           U2Net rembg (model-based, no subject string)
+  Image/UtilsImageRB.json         Standalone rembg utility (TRELLIS2 pre-pass)
+
+TEXT / AGENT WORKFLOWS:
+  Text/AgentJSON.json             JSON analysis — fresh decomposition
+  Text/AgentJSONMerge.json        JSON analysis — merge with existing subjects
+  Text/TextRefine.json            LLM prompt refinement (SDXL/Ollama)
+  Text/TextViewport.json          Viewport description
+  Text/TextImage.json             Image-to-text description
+
+OBJECT / 3D WORKFLOWS:
+  Object/objectUVTexture.json         UV PBR texture (Hunyuan 3D)
+  Object/objectPBRproject.json        PBR from projected texture
+  Object/objectPBRtext.json           SDXL PBR from text
+  Object/objectNanoPBRtext.json       Gemini PBR from text
+  Object/objectPatch.json             Patch texture generation
+
+INSTRUCTION TEMPLATES:
+  templates/instructions_claymation.txt
+  templates/instructions_salt.txt
+  (add more: instructions_<name>.txt)
+
+SPECIAL FILES:
+  templates/blank.png   5×5 white image; placeholder for empty ref slots
+
+
+================================================================================
+PART 19: FILE ORGANIZATION & SESSION MANAGEMENT
+================================================================================
+
+19.1 TEMP DIRECTORY
+--------------------
+
+Per-session volatile storage (cleared on new session):
+  C:\Users\<USER>\AppData\Local\Temp\blender_styleengine\temp\
+  Linux/macOS: /tmp/blender_styleengine/temp/
+
+  current_ai.png      — canonical latest AI image
+  combined.jpg        — last Blender render sent to AI
+  canny.png           — Canny edge map (SDXL only)
+  depth.png           — Depth map (SDXL only)
+  trellis_<id>.glb    — TRELLIS2 result
+  omni_<id>.glb       — Omni result
+  part_<id>.glb       — Hunyuan3D-Part result
+
+NOTE: scene_subjects.json is NO LONGER written to the temp directory
+(v0.6.0 fix — prevented stale subjects from bleeding between sessions).
+
+
+19.2 PROJECT LIBRARY
+---------------------
+
+Per-.blend-file persistent storage:
+  <BlendName>_styleengine/
+  ├── Images/                 ← scene-level generation history
+  │   ├── 20260409_151247_966_gcs_1920x1080.png
+  │   ├── 20260409_151832_205_gcs_1920x1080.png
+  │   └── ...
+  ├── Meshes/                 ← generated 3D assets (scene level)
+  │   ├── 20260409_xxxx_textured.glb
+  │   └── ...
+  ├── Iterations/             ← projected texture archives
+  ├── scene_subjects.json     ← disk backup of scene subject JSON
+  ├── temp/                   ← session temp (locked during session)
+  └── Models/                 ← asset-level directories (NEW in v0.6.0)
+      └── <asset_label>/
+          ├── temp/current_ai.png     ← asset's canonical image
+          ├── Images/                 ← asset image history
+          ├── asset_subjects.json     ← asset component JSON (persisted)
+          └── Models/                 ← nested asset sub-directories
+              └── <nested_label>/
+                  ├── temp/current_ai.png
+                  └── Images/
+
+UNSAVED FILES:
+  No project library exists until the .blend file is first saved.
+  While unsaved, assets write to:
+    C:\...\AppData\Local\Temp\blender_styleengine\Models\<asset>\
+  scene_subjects.json is NOT written for unsaved files (prevents stale
+  subjects bleeding between different unsaved sessions).
+
+
+19.3 PERSISTENT JSON (DATA-FIRST ARCHITECTURE)
+-----------------------------------------------
+
+scene_subjects_json (bpy.props.StringProperty, PERSISTENT):
+  The single canonical source of truth for scene subjects.
+  Stored INSIDE the .blend file (no SKIP_SAVE).
+  Updated:
+    • Every time _build_refine_json() is called in scene mode
+    • Every time _populate_refine_from_json() runs in scene mode
+    • In on_blend_file_pre_save() before every .blend write
+
+MODE STATE PROPERTIES (SKIP_SAVE — session only):
+  asset_mode, current_asset_name, asset_mode_stack, asset_mode_depth,
+  asset_prev_subjects, asset_prev_camera, asset_prev_prompt,
+  asset_current_3d_index, asset_subject_index, asset_subject_style/
+  scale/color/material, sam3_isolate_subject, isolate_method
+
+  These are NEVER written to .blend. Every file load starts with them
+  at their defaults (asset_mode = False, etc.).
+
+PERSISTENT EXCEPTIONS (still saved, despite being mode-related):
+  asset_prev_resolution_x/y  — needed to restore render resolution on load
+  asset_stored_visibility    — needed to restore object visibility on load
+  asset_object_links         — permanent label→object name map
+  scene_subjects_json        — canonical scene subjects
+
+
+19.4 FILE LOAD BEHAVIOR
+------------------------
+
+On every file load (on_blend_file_loaded handler, @persistent):
+  1. Temp directory lock is reset and re-established for new .blend
+  2. Working files migrated from old temp to new project temp
+  3. Stale scene_subjects.json deleted from system temp (if exists)
+  4. Deferred restore timer (0.2s) fires:
+
+     a. STEP 0: Unconditionally force all mode flags to defaults
+        (handles .blend files saved before the SKIP_SAVE fix was applied)
+        • asset_mode = False
+        • asset_mode_stack = "[]", asset_mode_depth = 0
+        • all prev/snap properties cleared
+
+     b. STEP 1: Check asset_prev_resolution_x/y (persistent)
+        If non-zero: restore scene.render.resolution_x/y
+        Then clear to 0 (sentinel "nothing to restore")
+
+     c. STEP 2: Restore active camera
+        If scene.camera name starts with "asset_camera_": restore ai_camera
+
+     d. STEP 3: Hide all asset_camera_* objects from viewport
+
+     e. STEP 4: Repopulate subjects
+        Priority: scene_subjects_json (in .blend) → scene_subjects.json (disk)
+        Calls _populate_refine_from_json() if either source has content
+
+Result: the file ALWAYS opens in Scene Mode with correct subjects visible.
+
+
+================================================================================
+PART 20: BACKEND MODES
+================================================================================
+
+(Unchanged from v0.5.1)
+
+GCS (Self-Hosted ComfyUI) — PRIMARY MODE
+  All features available. Required for 3D generation paths.
+
+RUNCOMFY CLOUD
+  Image generation (SDXL only). No 3D generation.
+
+
+================================================================================
+PART 21: ERROR STATES & FEEDBACK
+================================================================================
+
+21.1 CONSOLE PREFIXES
+----------------------
+
+  [Style Engine]    — core operations, session management
+  [GCS]             — image generation (Gemini/SDXL submission/download)
+  [TRELLIS]         — TRELLIS2 3D generation
+  [Omni]            — Hunyuan3D-Omni operations
+  [Part]            — Hunyuan3D-Part operations
+  [Progress Bridge] — status polling
+  [Gemini]          — Gemini-specific operations
+  [Upload]          — local image upload
+  [Server API]      — ComfyUI request polling
+  [Asset Mode]      — asset mode enter/exit, isolation workflows
+  [SAM3]            — SAM3 isolation workflow
+  [U2Net]           — U2Net rembg workflow
+  [Scene JSON]      — scene_subjects.json disk operations
+  [Asset JSON]      — asset_subjects.json disk operations
+  [RefineJSON]      — Analyze Image → JSON operations
+  [Scene Sync]      — scene object ↔ JSON subject sync
+  [ApplyToParent]   — visual cascade workflow
+
+
+21.2 COMMON MESSAGES
+---------------------
+
+"Asset Mode: <name>"
+  Info bar message on successful asset mode entry.
+
+"Returned to Scene Mode"
+  Info bar message on asset mode exit.
+
+"[Asset Mode] 🔍 Found versioned object: 'knight.001' for label 'knight'"
+  Logged when the object resolver found a versioned variant.
+
+"[Asset Mode] 📦 Created EMPTY placeholder: <name>"
+  An EMPTY was created because no matching mesh or EMPTY existed.
+
+"[Style Engine] 📐 Restored render resolution → 1920×1080"
+  Render resolution restored from asset_prev_resolution_x/y on file load.
+
+"[Style Engine] ✅ Scene subjects restored on file load"
+  Subjects successfully repopulated from scene_subjects_json or disk backup.
+
+"[Style Engine] ℹ No scene subjects found to restore"
+  Normal for brand-new .blend files. Not an error.
+
+"IMAGE_RECITATION popup"
+  Gemini copyright filter triggered. See Part 8E for popup contents.
+
+
+21.3 TIMEOUT VALUES
+--------------------
+
+  Operation                  | Timeout  | Notes
+  ───────────────────────────┼──────────┼──────────────────────────────
+  ComfyUI image generation   | 15 min   | Global timeout
+  TRELLIS2 poll_status       | 30s      | Per HTTP request
+  TRELLIS2 download_glb      | 600s     | 10 min for large files
+  TRELLIS2 import retries    | 120s     | 60 × 2s retry window
+  Omni import retries        | 120s     | 60 × 2s retry window
+  Hunyuan3D-Part predict     | 360s     | Synchronous in thread
+  AssetNanoAlignmentRB       | 15 min   | Same as standard Gemini
+  SAM3 / U2Net isolation     | 15 min   | Same as standard Gemini
+  Apply to Parent cascade    | 15 min   | Two-image Gemini reference
+
+
+================================================================================
+PART 22: TECHNICAL UX DETAILS
+================================================================================
+
+22.1 PROPERTY SYSTEM (v0.6.0 ADDITIONS)
+-----------------------------------------
+
+NEW PERSISTENT PROPERTIES:
+  scene_subjects_json         StringProperty — canonical scene subjects JSON
+  asset_prev_resolution_x/y   IntProperty (default 0) — save/restore render res
+  asset_stored_visibility     StringProperty — {obj: [hv, hr]} before isolation
+  asset_object_links          StringProperty — JSON {label: object_name} map
+
+NEW SKIP_SAVE PROPERTIES (session-only):
+  asset_mode                  BoolProperty
+  current_asset_name          StringProperty
+  asset_mode_stack            StringProperty (JSON array)
+  asset_mode_depth            IntProperty
+  asset_prev_subjects         StringProperty
+  asset_prev_camera           StringProperty
+  asset_current_3d_index      IntProperty
+  asset_prev_prompt           StringProperty
+  asset_subject_index         IntProperty
+  asset_subject_style/scale/color/material  StringProperty × 4
+  sam3_isolate_subject        StringProperty
+  isolate_method              EnumProperty ('SAM3' / 'U2NET')
+  ollama_model                EnumProperty ('gemma4:e2b' / 'gemma4:31b' / 'gemma3:4b')
+
+JSON COLLECTION PROPERTIES:
+  refine_subjects             CollectionProperty(RefineSubjectItem)
+  RefineSubjectItem fields:
+    label, style, scale, color, material
+    features (CollectionProperty(RefineFeatureItem))
+    components (CollectionProperty(RefineSubjectItem)) — recursive
+    linked_object_name, show_expanded, show_features, show_components
+    nested_subjects (read-only view of nested data in parent JSON)
+
+
+22.2 MODULES (v0.6.0)
+-----------------------
+
+  ui_panel.py          — All operators, properties, UI draw, JSON build/parse
+  asset_mode.py        — Asset Mode operators, panel, object resolver,
+                         isolation queue triggers, Apply to Parent, Copy
+  workspace_setup.py   — Core generation, session, temp management,
+                         all workflow queue functions including SAM3/U2Net/
+                         AssetAlignment, on_blend_file_pre_save handler
+  trellis_client.py    — TRELLIS2 HTTP client
+  progress_bar.py      — Unified progress state singleton
+  runcomfy_polling.py  — Async ComfyUI request polling
+  runcomfy_server_client.py — Direct ComfyUI API client
+  pie_menu.py          — Shift+Q/V/W/E/R/T pie menus
+  prefs.py             — Addon preferences
+  utils.py             — Prompt parsing, file operations, helpers
+
+
+22.3 KEY OPERATORS (v0.6.0 ADDITIONS)
+---------------------------------------
+
+  style_engine.enter_asset_mode       Enter Asset Mode (selected object)
+  style_engine.exit_asset_mode        Exit one nesting level
+  style_engine.exit_asset_mode_all    Exit all levels → Scene Mode
+  style_engine.exit_asset_mode_to_name Exit to named ancestor level
+  style_engine.edit_asset             Enter Asset Mode from JSON subject card
+  style_engine.apply_to_parent        Visual cascade via ImageNanoAlignmentRef
+  style_engine.copy_subject           Deep duplicate subject/asset
+  style_engine.sam3_isolate_asset     SAM3 or U2Net isolation (asset mode)
+  style_engine.auto_populate_subject  AI-fill empty subject fields
+  style_engine.refine_image_analyze_json  Analyze Image → JSON
+  style_engine.refine_with_agent      Refine with Agent (always structured)
+  style_engine.add_refine_subject     Add empty subject/component
+  style_engine.remove_refine_subject  Remove subject/component
+  style_engine.add_refine_feature     Add feature string to subject
+
+
+22.4 ASYNC ARCHITECTURE
+------------------------
+
+All long-running operations: threading.Thread + bpy.app.timers.
+
+Thread:  network I/O (upload, download, API calls, polling)
+Timer:   Blender-side operations (import, UI update, popup display)
+
+Error popups use bpy.app.timers.register(_show, first_interval=0.05)
+to safely display dialogs from background polling callbacks.
+
+
+================================================================================
+PART 23: CRITICAL DESIGN DECISIONS
+================================================================================
+
+23.1 DATA-FIRST ARCHITECTURE
+-----------------------------
+
+DECISION: Mode properties use SKIP_SAVE; scene_subjects_json is canonical.
+RATIONALE:
+  Saving in asset mode wrote asset_mode=True, refine_subjects=components into
+  the .blend. On reload, the addon couldn't tell "was this scene mode or asset
+  mode when saved?" and restoration logic was error-prone and inconsistent.
+  By removing all mode state from persistence, every load is unconditional:
+  always scene mode, always populate from scene_subjects_json.
+TRADE-OFF: Old .blend files (before v0.6.0) have mode flags baked in.
+  Handled by a force-reset in _deferred_restore that overwrites those values
+  regardless of what the file contains.
+
+23.2 MESH-OVER-EMPTY OBJECT RESOLUTION
+----------------------------------------
+
+DECISION: When resolving which Blender object to isolate for a subject,
+  always prefer a MESH over an EMPTY placeholder.
+RATIONALE:
+  asset_object_links may have a stale "label → label" entry (from before
+  v0.6.0), or a leftover EMPTY placeholder may exist from a previous session.
+  If a MESH with a versioned name (label.001) also exists, that is the real
+  asset. The EMPTY was only created as a fallback and should never win.
+TRADE-OFF: If the user genuinely wants to edit an EMPTY (as an anchor point
+  with no geometry), they should delete any same-named MESH first.
+
+23.3 ASSET_PREV_RESOLUTION AS PERSISTENT
+-----------------------------------------
+
+DECISION: asset_prev_resolution_x/y are PERSISTENT (not SKIP_SAVE).
+RATIONALE:
+  These hold the SCENE's resolution at the moment asset mode was entered.
+  If the user saves while in asset mode (scene.render = 1024×1024) and
+  reopens, the correct scene resolution must be restored. Making them
+  SKIP_SAVE would mean the restore target is lost on reload.
+SENTINEL VALUE: 0 means "no restoration needed" (default). Non-zero means
+  "this resolution must be restored on next load."
+
+23.4 SAM3 SUBJECT STRING DEFAULTS
+-----------------------------------
+
+DECISION: The SAM3 subject string defaults to the asset label with
+  underscores replaced by spaces.
+RATIONALE:
+  SAM3 uses natural language for segmentation. "brick facade left" performs
+  far better than "brick_facade_left" (NLP tokenization). The user can further
+  simplify to "brick wall" before running, which avoids over-specific matching
+  (e.g., "left" causing SAM3 to isolate only the left side of the facade).
+EDITABILITY: The string is always editable before isolation is triggered.
+
+23.5 NO 3D ITERATION BROWSER IN ASSET MODE
+--------------------------------------------
+
+DECISION: Asset mode has no prev/next 3D model browser.
+RATIONALE:
+  The user can freely create, delete, duplicate, and parent 3D meshes while
+  in asset mode. When they exit, whatever exists in the scene IS the asset.
+  Managing a separate "active iteration" state alongside free-form editing
+  created conflicts and confusion (e.g., duplicating an asset broke the
+  iteration history pointers).
+APPROACH: The "current" 3D model is simply whatever mesh is visible and
+  linked to the asset. History of images (2D) is fully preserved.
+
+23.6 APPLY TO PARENT IS ONE-LEVEL-AT-A-TIME
+---------------------------------------------
+
+DECISION: Apply to Parent propagates only one level up, not all the way.
+RATIONALE:
+  The user should be able to review and approve each level's visual result
+  before propagating further. An automatic full cascade could produce
+  unexpected results at intermediate levels that the user would want to correct.
+  One-level-at-a-time gives full control with minimal additional steps.
+
+23.7 FEATURES AS FREE-FORM STRINGS (NOT REMOVED)
+--------------------------------------------------
+
+DECISION: The features array (list of short strings) is reinstated and
+  preserved alongside the structured SSCM (style/scale/color/material) fields.
+RATIONALE:
+  SSCM covers the primary visual properties. But fine-grained details like
+  "butterfly emblem", "engraved border", "pivot hinge" cannot be expressed
+  in four fields. Features provide the unstructured escape hatch for any
+  detail that matters to the user but doesn't fit a schema slot.
+  They propagate upward through Apply to Parent for end-to-end effect.
+
+
+================================================================================
+PART 24: APPENDIX — QUICK REFERENCE
+================================================================================
+
+24.1 PIE MENU QUICK MAP
+------------------------
+
+  Shift+Q    Workspace / File / View
+  Shift+W    Image generation
+  Shift+E    Agent (LLM / description)
+  Shift+V    Visualization / Asset Mode entry
+  Shift+R    Refinement (Omni, Part)
+  Shift+T    Texture operations
+
+
+24.2 ASSET MODE FLOW (SUMMARY)
+--------------------------------
+
+  Scene mode → [Edit Asset] or [Shift+V → Enter Asset Mode]
+    → Object hidden isolation
+    → asset_camera active
+    → Isolation render queued (AssetNanoAlignmentRB)
+    → Asset Mode panel appears (breadcrumb + back button)
+    → Full editing with component JSON
+    → Optional: [Isolate Asset (SAM3/U2Net)] for better isolation
+    → Optional: [↑ Apply to Parent] to push changes up
+    → [← Scene] to return
+  Scene mode restored, camera + resolution + subjects all correct.
+
+
+24.3 JSON WORKFLOW (SUMMARY)
+------------------------------
+
+  1. Generate image
+  2. [Analyze Image → JSON]  →  subjects populated
+  3. Edit subject fields (style, color, material, features)
+  4. [Refine with Agent]  →  AI applies edits
+  5. [Edit Asset] on a subject  →  enter asset mode
+  6. [Analyze Image → JSON]  →  components populated
+  7. Edit component fields
+  8. [Refine with Agent]  →  asset image updated
+  9. [↑ Apply to Parent]  →  scene image updated
+  10. [← Scene]  →  return with all changes applied
+
+
+24.4 GENERATION TIME ESTIMATES
+--------------------------------
+
+  Operation                  | Time      | Notes
+  ───────────────────────────┼───────────┼──────────────────────────────
+  SDXL image                 | 10–30s    | Steps + server load
+  Gemini image               | 15–60s    | Size + API load
+  Analyze Image → JSON       | 3–10s     | Ollama local, model-dependent
+  Refine with Agent          | 15–45s    | Gemini + Ollama
+  Auto-Populate Subject      | 5–15s     | Targeted Ollama analysis
+  Apply to Parent (cascade)  | 15–60s    | Gemini two-image reference
+  Asset Isolation (AssetNano)| 20–60s    | Gemini extract
+  SAM3 Isolation             | 5–20s     | Local SAM3 model
+  U2Net Isolation            | 3–10s     | Local U2Net model
+  TRELLIS2 Balanced          | 60–90s    | 1024_cascade
+  UV Texture (Hunyuan)       | 1–4 min   | Full PBR bake
+  Hunyuan3D-Omni             | 2–5 min   | Depends on control mode
+  Hunyuan3D-Part             | 2–5 min   | CPU-intensive
+
+
+24.5 FILE TYPE REFERENCE
+-------------------------
+
+  .blend — Blender project (contains scene_subjects_json, asset_object_links)
+  .png   — current_ai.png, all generation images, reference images
+  .jpg   — combined.jpg (Blender render sent to AI)
+  .glb   — 3D outputs (TRELLIS2, UV Texture, Part, Omni)
+  .ply   — Omni export (point cloud or watertight mesh)
+  .obj   — Hunyuan3D-Part mesh export
+  .json  — ComfyUI workflow definitions, scene_subjects.json, asset_subjects.json
+  .txt   — Gemini instruction presets
+
+
+24.6 FOR END USERS (ARTISTS)
+------------------------------
+
+Style Engine lets you generate AI images and 3D assets directly in Blender,
+with a fractal JSON editing system that lets you control every detail of
+every element at every level of nesting.
+
+QUICK START:
+  1. Install, enable, configure ComfyUI backend
+  2. Shift+Q → Setup Workspace
+  3. Write description in text editor
+  4. Shift+W → Generate Image
+  5. Analyze Image → JSON to decompose the scene
+  6. Edit any subject → Refine with Agent to apply changes
+  7. Edit Asset to dive into any subject and edit it in isolation
+  8. Generate 3D from the asset's image
+
+KEY FEATURES v0.6.0:
+  • Asset Mode — edit any element in isolation with its own camera + history
+  • Fractal nesting — assets within assets, arbitrarily deep
+  • Fractal JSON — one interconnected structure that zooms in as you nest
+  • Apply to Parent — cascade visual changes upward through nesting levels
+  • SAM3 / U2Net isolation — two additional background removal paths
+  • Ollama model selector — choose quality/speed tradeoff for agent workflows
+  • Robust file management — always opens in Scene Mode, subjects never lost
+
+
+24.7 FOR DEVELOPERS (TECHNICAL)
+---------------------------------
+
+Architecture:
+  Blender Python addon (4.2+), Python 3.10+
+  Pure stdlib HTTP clients (no requests, no PIL)
+  Async: threading.Thread + bpy.app.timers pattern throughout
+
+Key design patterns (v0.6.0):
+  • SKIP_SAVE for session state, PERSISTENT for document data
+  • scene_subjects_json StringProperty as single source of truth
+  • Deferred restore on load (0.2s timer, always unconditional)
+  • Pre-save handler snapshots subjects before every .blend write
+  • MESH-over-EMPTY object resolver with 4-tier priority chain
+  • Error popups via timers to reach main thread from polling threads
+  • Dynamic workflow patching (Ollama model, arch detection, rembg bypass)
+  • asset_prev_resolution as persistent sentinel (0 = nothing to restore)
+
+Data flows (v0.6.0 additions):
+  Asset isolation:
+    AssetNanoAlignmentRB → upload scene_current_ai → patch node 69/71 →
+    poll → download → save to asset temp/ → update asset camera background
+
+  Analyze Image → JSON:
+    Build context-hint → select AgentJSON/AgentJSONMerge → upload active
+    current_ai → queue → poll → parse JSON output → populate form →
+    update scene_subjects_json + disk backup
+
+  Refine with Agent:
+    _build_refine_json_for_agent → task prompt →
+    upload active current_ai → queue (rembg: True in asset mode) →
+    poll → download → save history → update current_ai
+
+  Apply to Parent:
+    Resolve parent current_ai → upload (image_1) → upload child (image_2) →
+    queue ImageNanoAlignmentRef → poll → save to parent history →
+    parent camera background updated
+
+================================================================================
+END OF DOCUMENT
+================================================================================
+
+Style Engine v0.6.0 — April 2026
+This document supersedes complete_UI_workflow_v0.5.1.txt.

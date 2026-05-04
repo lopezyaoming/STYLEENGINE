@@ -4511,6 +4511,236 @@ def queue_asset_isolation_workflow(context, object_name):
 
 # ----------------------------------------------------------------
 
+def queue_sam3_isolate_workflow(context, asset_name):
+    """
+    Queue SAM3Rembg.json to isolate a named asset from the active current_ai.png
+    using SAM3 segmentation.
+
+    The asset_name string is passed to node 4 (PrimitiveString / ASSET_NAME).
+    The source image is always the ACTIVE current_ai for the current mode:
+      - Scene mode  → global temp/current_ai.png
+      - Asset mode  → asset's temp/current_ai.png
+    Result is saved as a history entry and becomes the new current_ai.
+    """
+    import time as _time
+    from . import runcomfy_deployment, runcomfy_polling
+
+    if runcomfy_polling.RunComfyPoller.active_requests:
+        print("[SAM3] Generation already in progress — skipping")
+        return
+
+    try:
+        server_client = runcomfy_deployment.get_server_client()
+    except Exception as e:
+        print(f"[SAM3] ⚠ Could not get server client: {e}")
+        return
+
+    # Source image = active current_ai for whichever mode is active
+    source_image = get_active_ai_output_path(context)
+    if not source_image.exists():
+        print(f"[SAM3] ⚠ Source image not found: {source_image}")
+        return
+
+    print(f"[SAM3] Uploading source image: {source_image.name}")
+    try:
+        upload_response = server_client.upload_image(str(source_image))
+        uploaded_filename = upload_response['name']
+        print(f"[SAM3] ✓ Uploaded: {uploaded_filename}")
+    except Exception as e:
+        print(f"[SAM3] ⚠ Upload failed: {e}")
+        return
+
+    addon_dir = Path(__file__).parent
+    wf_path = addon_dir / "workflows" / "Image" / "SAM3Rembg.json"
+    if not wf_path.exists():
+        print(f"[SAM3] ⚠ SAM3Rembg.json not found at {wf_path}")
+        return
+
+    with open(wf_path, 'r') as f:
+        workflow = json.load(f)
+
+    # Patch node 4 (ASSET_NAME) with the active asset name
+    workflow["4"]["inputs"]["value"] = asset_name
+    # Patch node 1 (Load Image) with the uploaded filename
+    workflow["1"]["inputs"]["image"] = uploaded_filename
+
+    print(f"[SAM3] Patched workflow — asset_name='{asset_name}' image='{uploaded_filename}'")
+
+    from . import progress_bar
+    try:
+        queue_response = server_client.queue_prompt(workflow)
+        prompt_id = queue_response.get('prompt_id')
+        progress_bar.set_current_workflow(workflow)
+        print(f"[SAM3] 🎨 Queued (ID: {prompt_id[:8]}…)")
+    except Exception as e:
+        print(f"[SAM3] ⚠ queue_prompt failed: {e}")
+        return
+
+    runcomfy_polling.RunComfyPoller.start_polling(
+        deployment_id='server',
+        request_id=prompt_id,
+        callback=lambda success, result=None, error=None, workflow_type=None:
+            on_generation_complete_server(
+                context, success, result, error,
+                workflow_type or 'gemini', server_client
+            ),
+        workflow_type='gemini',
+    )
+    print("[SAM3] 🎨 SAM3 isolation started!")
+
+
+# ----------------------------------------------------------------
+
+def queue_explode_workflow(context):
+    """
+    Queue ImageExplode.json to generate an exploded-view diagram of the
+    active current_ai.png using Gemini.
+
+    Gemini physically separates every component of the asset along a
+    sequential axis, completes any cropped geometry, and sharpens
+    unresolved textures.  Output is 4K 1:1 with U2Net background removed.
+
+    The source image is always the ACTIVE current_ai for the current mode
+    (scene or asset), so it works correctly in both contexts.
+    """
+    import time as _time
+    from . import runcomfy_deployment, runcomfy_polling
+
+    if runcomfy_polling.RunComfyPoller.active_requests:
+        print("[Explode] Generation already in progress — skipping")
+        return
+
+    try:
+        server_client = runcomfy_deployment.get_server_client()
+    except Exception as e:
+        print(f"[Explode] ⚠ Could not get server client: {e}")
+        return
+
+    source_image = get_active_ai_output_path(context)
+    if not source_image.exists():
+        print(f"[Explode] ⚠ Source image not found: {source_image}")
+        return
+
+    print(f"[Explode] Uploading source image: {source_image.name}")
+    try:
+        upload_response = server_client.upload_image(str(source_image))
+        uploaded_filename = upload_response['name']
+        print(f"[Explode] ✓ Uploaded: {uploaded_filename}")
+    except Exception as e:
+        print(f"[Explode] ⚠ Upload failed: {e}")
+        return
+
+    addon_dir = Path(__file__).parent
+    wf_path = addon_dir / "workflows" / "Image" / "ImageExplode.json"
+    if not wf_path.exists():
+        print(f"[Explode] ⚠ ImageExplode.json not found at {wf_path}")
+        return
+
+    with open(wf_path, 'r') as f:
+        workflow = json.load(f)
+
+    # Patch node 4 (Load Image) with the uploaded source image
+    workflow["4"]["inputs"]["image"] = uploaded_filename
+
+    print(f"[Explode] Patched workflow — image='{uploaded_filename}'")
+
+    from . import progress_bar
+    try:
+        queue_response = server_client.queue_prompt(workflow)
+        prompt_id = queue_response.get('prompt_id')
+        progress_bar.set_current_workflow(workflow)
+        print(f"[Explode] 🎨 Queued (ID: {prompt_id[:8]}…)")
+    except Exception as e:
+        print(f"[Explode] ⚠ queue_prompt failed: {e}")
+        return
+
+    runcomfy_polling.RunComfyPoller.start_polling(
+        deployment_id='server',
+        request_id=prompt_id,
+        callback=lambda success, result=None, error=None, workflow_type=None:
+            on_generation_complete_server(
+                context, success, result, error,
+                workflow_type or 'gemini', server_client
+            ),
+        workflow_type='gemini',
+    )
+    print("[Explode] 🎨 Explode generation started!")
+
+
+def queue_u2net_isolate_workflow(context):
+    """
+    Queue u2netrembg.json to remove the background from the active current_ai.png
+    using the U2Net model.  No subject string required.
+
+    The source image is always the ACTIVE current_ai for the current mode.
+    Result is saved as a history entry and becomes the new current_ai.
+    """
+    import time as _time
+    from . import runcomfy_deployment, runcomfy_polling
+
+    if runcomfy_polling.RunComfyPoller.active_requests:
+        print("[U2Net] Generation already in progress — skipping")
+        return
+
+    try:
+        server_client = runcomfy_deployment.get_server_client()
+    except Exception as e:
+        print(f"[U2Net] ⚠ Could not get server client: {e}")
+        return
+
+    source_image = get_active_ai_output_path(context)
+    if not source_image.exists():
+        print(f"[U2Net] ⚠ Source image not found: {source_image}")
+        return
+
+    print(f"[U2Net] Uploading source image: {source_image.name}")
+    try:
+        upload_response = server_client.upload_image(str(source_image))
+        uploaded_filename = upload_response['name']
+        print(f"[U2Net] ✓ Uploaded: {uploaded_filename}")
+    except Exception as e:
+        print(f"[U2Net] ⚠ Upload failed: {e}")
+        return
+
+    addon_dir = Path(__file__).parent
+    wf_path = addon_dir / "workflows" / "Image" / "u2netrembg.json"
+    if not wf_path.exists():
+        print(f"[U2Net] ⚠ u2netrembg.json not found at {wf_path}")
+        return
+
+    with open(wf_path, 'r') as f:
+        workflow = json.load(f)
+
+    # Patch node 1 (Load Image) with the uploaded filename
+    workflow["1"]["inputs"]["image"] = uploaded_filename
+
+    print(f"[U2Net] Patched workflow — image='{uploaded_filename}'")
+
+    from . import progress_bar
+    try:
+        queue_response = server_client.queue_prompt(workflow)
+        prompt_id = queue_response.get('prompt_id')
+        progress_bar.set_current_workflow(workflow)
+        print(f"[U2Net] 🎨 Queued (ID: {prompt_id[:8]}…)")
+    except Exception as e:
+        print(f"[U2Net] ⚠ queue_prompt failed: {e}")
+        return
+
+    runcomfy_polling.RunComfyPoller.start_polling(
+        deployment_id='server',
+        request_id=prompt_id,
+        callback=lambda success, result=None, error=None, workflow_type=None:
+            on_generation_complete_server(
+                context, success, result, error,
+                workflow_type or 'gemini', server_client
+            ),
+        workflow_type='gemini',
+    )
+    print("[U2Net] 🎨 U2Net isolation started!")
+
+
+# ----------------------------------------------------------------
+
 def queue_apply_to_parent_workflow(context, child_label, prompt_str):
     """
     Queue ImageNanoAlignmentRef.json to visually update the parent's current_ai.png
@@ -5735,6 +5965,7 @@ def on_generation_complete_server(context, success, result, error, workflow_type
     
     if not success:
         print(f"[Server API] ❌ Generation failed: {error}")
+        _show_generation_error_popup(error)
         return
     
     try:
@@ -6017,6 +6248,56 @@ def on_generation_complete(context, success, result, error, workflow_type='sdxl'
     
     # ✅ CYCLICAL AUTO-GENERATION: Trigger next cycle if auto-generate is enabled
     trigger_next_generation_cycle(context)
+
+
+def _show_generation_error_popup(error_str):
+    """
+    Show a Blender popup dialog with a human-readable explanation of a
+    ComfyUI/Gemini generation failure.
+
+    Currently handles:
+      - IMAGE_RECITATION  — Gemini copyright/IP filter
+      - Generic fallback  — show the raw error string
+    """
+    error_str = str(error_str or "")
+
+    if "IMAGE_RECITATION" in error_str.upper():
+        title   = "Gemini: Image Refused (Copyright Filter)"
+        lines   = [
+            "Gemini refused to generate this image because it detected",
+            "the input too closely resembles copyrighted material",
+            "(FinishReason: IMAGE_RECITATION).",
+            "",
+            "Suggestions:",
+            "  • Rephrase your prompt more descriptively",
+            "    e.g. 'helmet at three-quarter angle' instead of",
+            "    'give me a 3/4 view of this helmet'",
+            "  • Turn Alignment OFF to use text-only generation",
+            "    (bypasses the input-image recitation check)",
+            "  • Stylise the image first, then use it as alignment input",
+        ]
+        icon = 'ERROR'
+    else:
+        title = "Generation Failed"
+        lines = [f"Error: {error_str[:200]}"]
+        icon  = 'CANCEL'
+
+    def _draw_popup(self, context):
+        col = self.layout.column(align=True)
+        for line in lines:
+            col.label(text=line)
+
+    def _show():
+        try:
+            bpy.context.window_manager.popup_menu(
+                _draw_popup, title=title, icon=icon
+            )
+        except Exception as _pe:
+            print(f"[Style Engine] ⚠ Could not show error popup: {_pe}")
+
+    # popup_menu must run on the main thread; schedule via timer if we're
+    # inside a polling callback (which runs on a background thread).
+    bpy.app.timers.register(_show, first_interval=0.05)
 
 
 def trigger_next_generation_cycle(context):

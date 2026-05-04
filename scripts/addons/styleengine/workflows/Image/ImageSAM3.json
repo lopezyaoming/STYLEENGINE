@@ -1,0 +1,994 @@
+{
+  "687": {
+    "inputs": {
+      "anything": [
+        "701",
+        0
+      ]
+    },
+    "class_type": "Anything Everywhere",
+    "_meta": {
+      "title": "Anything Everywhere"
+    }
+  },
+  "690": {
+    "inputs": {
+      "mask": [
+        "691",
+        0
+      ]
+    },
+    "class_type": "MaskPreview",
+    "_meta": {
+      "title": "Preview Mask"
+    }
+  },
+  "691": {
+    "inputs": {
+      "refinement_iterations": 10,
+      "use_multimask": true,
+      "sam3_model": [
+        "692",
+        0
+      ],
+      "image": [
+        "702",
+        0
+      ],
+      "multi_prompts": [
+        "703",
+        0
+      ]
+    },
+    "class_type": "SAM3MultipromptSegmentation",
+    "_meta": {
+      "title": "SAM3 Multiprompt Segmentation"
+    }
+  },
+  "692": {
+    "inputs": {
+      "precision": "fp32",
+      "attention": "flash_attn",
+      "compile": false
+    },
+    "class_type": "LoadSAM3Model",
+    "_meta": {
+      "title": "(down)Load SAM3 Model"
+    }
+  },
+  "693": {
+    "inputs": {
+      "masks": [
+        "691",
+        0
+      ]
+    },
+    "class_type": "Convert Masks to Images",
+    "_meta": {
+      "title": "Convert Masks to Images"
+    }
+  },
+  "694": {
+    "inputs": {
+      "value": [
+        "693",
+        0
+      ]
+    },
+    "class_type": "UnloadAllModels",
+    "_meta": {
+      "title": "UnloadAllModels"
+    }
+  },
+  "701": {
+    "inputs": {
+      "model_name": "4x-UltraSharp.pth"
+    },
+    "class_type": "UpscaleModelLoader",
+    "_meta": {
+      "title": "Load Upscale Model"
+    }
+  },
+  "702": {
+    "inputs": {
+      "image": "ComfyUI_temp_soivg_00001_.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Image"
+    }
+  },
+  "703": {
+    "inputs": {
+      "multi_prompts_store": "[{\"positive_points\":[{\"x\":2306.684903305764,\"y\":1740.0012761948253},{\"x\":3244.392767891813,\"y\":1991.4157036563022},{\"x\":3230.802798839841,\"y\":3635.8019589448813},{\"x\":2306.684903305764,\"y\":3350.412608853475},{\"x\":2693.999021286958,\"y\":3071.8182432880544},{\"x\":2673.6140677090007,\"y\":2256.420100169751},{\"x\":2945.413448748435,\"y\":2290.39502279968},{\"x\":2836.693696332661,\"y\":2779.6339086706625},{\"x\":2904.64354159252,\"y\":3343.617624327489},{\"x\":2972.5933868523784,\"y\":3486.312299373192},{\"x\":2714.3839748649157,\"y\":3418.3624541133336},{\"x\":3176.4429226319544,\"y\":2901.943630138408},{\"x\":3190.032891683926,\"y\":2467.0646204753125},{\"x\":2361.0447795136506,\"y\":2236.0351465917934},{\"x\":2333.8648414097074,\"y\":2786.4288931966485},{\"x\":3353.1125203075867,\"y\":3513.492237477136},{\"x\":3278.367690521742,\"y\":3309.64270169756},{\"x\":2286.299949727806,\"y\":3126.1781194959417},{\"x\":2464.200298563417,\"y\":739.8037663778601},{\"x\":3996.2748234755413,\"y\":1691.878882597315}],\"negative_points\":[{\"x\":2197.96515088999,\"y\":1903.080904818486},{\"x\":2197.96515088999,\"y\":1903.080904818486},{\"x\":2157.1952437340747,\"y\":2670.9141562548884},{\"x\":2157.1952437340747,\"y\":2670.9141562548884},{\"x\":2170.7852127860465,\"y\":3098.998181391998},{\"x\":2170.7852127860465,\"y\":3098.998181391998},{\"x\":2170.7852127860465,\"y\":3445.542392217277},{\"x\":2170.7852127860465,\"y\":3445.542392217277},{\"x\":2925.0284951704775,\"y\":3887.216386406358},{\"x\":2870.6686189625907,\"y\":3955.166231666217},{\"x\":3020.1582785342794,\"y\":3758.111680412627},{\"x\":3020.1582785342794,\"y\":3758.111680412627},{\"x\":2673.6140677090007,\"y\":3595.0320517889663},{\"x\":2673.6140677090007,\"y\":3595.0320517889663}],\"positive_boxes\":[],\"negative_boxes\":[]},{\"positive_points\":[{\"x\":3798.2054333764554,\"y\":3243.325409496909},{\"x\":823.3610572936477,\"y\":791.6948684035399},{\"x\":928.0038242915354,\"y\":657.1541679776842},{\"x\":3977.593033944263,\"y\":1352.2811201779382},{\"x\":3843.052333518407,\"y\":1494.296303960786},{\"x\":898.1058908635675,\"y\":2443.5556902987673},{\"x\":1047.5955580034072,\"y\":2451.030173655759},{\"x\":1316.6769588551183,\"y\":2525.775007225679},{\"x\":1301.7279921411343,\"y\":2346.3874066578715},{\"x\":890.6314075065756,\"y\":1785.8011548834731},{\"x\":1294.2535087841425,\"y\":1726.0052880275373},{\"x\":1503.5390427799177,\"y\":2630.4177742235665},{\"x\":1750.196993560653,\"y\":2697.6881244364945},{\"x\":2206.140478337164,\"y\":2847.177791576334},{\"x\":3491.751615739784,\"y\":3213.427476068941},{\"x\":3708.5116330925516,\"y\":2495.877073797711},{\"x\":3641.2412828796237,\"y\":1793.275638240465},{\"x\":3282.466081744009,\"y\":1539.1432041027376},{\"x\":2564.9156794727787,\"y\":1374.7045702489143},{\"x\":2034.2273611263483,\"y\":1210.2659363950906},{\"x\":1720.299060132685,\"y\":1113.097652754195},{\"x\":1331.6259255691023,\"y\":1075.725235969235},{\"x\":1144.7638416443028,\"y\":1217.7404197520827},{\"x\":1974.4314942704125,\"y\":1367.2300868919222},{\"x\":2221.089445051148,\"y\":1509.24527067477}],\"negative_points\":[{\"x\":2288.3597952640757,\"y\":1673.6839045285933},{\"x\":2288.3597952640757,\"y\":1673.6839045285933},{\"x\":3252.568148316041,\"y\":1980.1377221652644},{\"x\":3252.568148316041,\"y\":1980.1377221652644},{\"x\":3215.195731531081,\"y\":3631.998544060492},{\"x\":3215.195731531081,\"y\":3631.998544060492},{\"x\":2318.2577286920437,\"y\":3333.0192097808126},{\"x\":2318.2577286920437,\"y\":3333.0192097808126},{\"x\":2041.7018444833402,\"y\":3235.850926139917},{\"x\":2041.7018444833402,\"y\":3235.850926139917},{\"x\":1167.1872917152787,\"y\":2921.9226251462537},{\"x\":1167.1872917152787,\"y\":2921.9226251462537},{\"x\":1159.7128083582868,\"y\":1337.3321534639542},{\"x\":1159.7128083582868,\"y\":1337.3321534639542},{\"x\":1219.5086752142226,\"y\":2757.4839912924303},{\"x\":1219.5086752142226,\"y\":2757.4839912924303},{\"x\":2011.8039110553723,\"y\":3034.0398755011333},{\"x\":1989.3804609843964,\"y\":3034.0398755011333},{\"x\":1974.4314942704125,\"y\":1726.0052880275373},{\"x\":1974.4314942704125,\"y\":1726.0052880275373},{\"x\":1144.7638416443028,\"y\":1524.194237388754},{\"x\":1167.1872917152787,\"y\":1524.194237388754},{\"x\":2064.125294554316,\"y\":1621.3625210296495},{\"x\":2071.599777911308,\"y\":1621.3625210296495},{\"x\":2318.2577286920437,\"y\":2181.948772804048},{\"x\":2318.2577286920437,\"y\":2181.948772804048},{\"x\":2295.8342786210674,\"y\":2645.3667409375507},{\"x\":2295.8342786210674,\"y\":2645.3667409375507},{\"x\":2355.630145477003,\"y\":3004.141942073166},{\"x\":2355.630145477003,\"y\":3004.141942073166}],\"positive_boxes\":[],\"negative_boxes\":[]},{\"positive_points\":[{\"x\":349.276074398598,\"y\":1423.2109289021034},{\"x\":723.000242248197,\"y\":1161.604011407384},{\"x\":887.4388761020205,\"y\":1385.8385121171434},{\"x\":551.0871250373814,\"y\":1774.5116466807262}],\"negative_points\":[{\"x\":872.4899093880365,\"y\":1722.1902631817825},{\"x\":872.4899093880365,\"y\":1722.1902631817825},{\"x\":1081.775443383812,\"y\":1169.078494764376},{\"x\":1081.775443383812,\"y\":1169.078494764376},{\"x\":872.4899093880365,\"y\":929.8950273406327},{\"x\":872.4899093880365,\"y\":929.8950273406327},{\"x\":229.6843406867263,\"y\":1311.0936785472236},{\"x\":229.6843406867263,\"y\":1311.0936785472236},{\"x\":244.63330740071027,\"y\":1722.1902631817825},{\"x\":244.63330740071027,\"y\":1722.1902631817825},{\"x\":424.02090796851775,\"y\":1849.256480250646},{\"x\":424.02090796851775,\"y\":1849.256480250646},{\"x\":102.61812361786266,\"y\":1789.4606133947102},{\"x\":102.61812361786266,\"y\":1789.4606133947102},{\"x\":117.56709033184661,\"y\":1385.8385121171434},{\"x\":117.56709033184661,\"y\":1385.8385121171434},{\"x\":117.56709033184661,\"y\":1602.5985294699108},{\"x\":117.56709033184661,\"y\":1602.5985294699108},{\"x\":267.0567574716862,\"y\":1056.9612444094964},{\"x\":267.0567574716862,\"y\":1056.9612444094964}],\"positive_boxes\":[],\"negative_boxes\":[]}]",
+      "canvas": "",
+      "image": [
+        "702",
+        0
+      ]
+    },
+    "class_type": "SAM3MultiRegionCollector",
+    "_meta": {
+      "title": "SAM3 Multi-Region Collector"
+    }
+  },
+  "704": {
+    "inputs": {
+      "images": [
+        "691",
+        1
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "705": {
+    "inputs": {
+      "images": [
+        "724",
+        0
+      ]
+    },
+    "class_type": "AlphaChanelRemove",
+    "_meta": {
+      "title": "AlphaChanelRemove"
+    }
+  },
+  "706": {
+    "inputs": {
+      "target_width": 512,
+      "target_height": 512,
+      "padding_color": "black",
+      "interpolation": "lanczos",
+      "image": [
+        "705",
+        0
+      ]
+    },
+    "class_type": "ResizeAndPadImage",
+    "_meta": {
+      "title": "ResizeAndPadImage"
+    }
+  },
+  "707": {
+    "inputs": {
+      "images": [
+        "695:234:222",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "708": {
+    "inputs": {
+      "image": [
+        "706",
+        0
+      ]
+    },
+    "class_type": "ImageUpscaleWithModel",
+    "_meta": {
+      "title": "Upscale Image (using Model)"
+    }
+  },
+  "718": {
+    "inputs": {
+      "model_name": "gemini-3-pro-image-preview",
+      "prompt": "Render this in high definition as a 3D asset, in isometric projection.\n\nUnresolved Input Geometry: Input images may contain unresolved geometry, \"gooey\" textures, or unpolished detailing (e.g., blurred components or merged edges). You must not reproduce these flaws. Instead, you are mandated to refine, sharpen, and make all elements crisp and well-defined.\n\nLogical Geometric Completion: When an asset is cropped or cut off by the frame , you must logically complete the geometry. Extend the component to its full logical 3D whole, assuming standard engineering symmetry or the necessary base structure required for the asset to stand as a complete, self-contained unit.",
+      "image_count": 1,
+      "use_search": true,
+      "aspect_ratio": "1:1",
+      "image_size": "4K",
+      "temperature": 0,
+      "image_1": [
+        "708",
+        0
+      ]
+    },
+    "class_type": "NanoBananaAIO",
+    "_meta": {
+      "title": "Nano Banana AIO"
+    }
+  },
+  "719": {
+    "inputs": {
+      "images": [
+        "729",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "724": {
+    "inputs": {
+      "select": 3,
+      "sel_mode": false,
+      "input1": [
+        "695:234:222",
+        0
+      ],
+      "input2": [
+        "695:245:656",
+        0
+      ],
+      "input3": [
+        "695:246:662",
+        0
+      ],
+      "input4": [
+        "695:247:670",
+        0
+      ],
+      "input5": [
+        "695:248:677",
+        0
+      ],
+      "input6": [
+        "695:249:683",
+        0
+      ]
+    },
+    "class_type": "ImpactSwitch",
+    "_meta": {
+      "title": "Switch (Any)"
+    }
+  },
+  "726": {
+    "inputs": {
+      "preview_markdown": "",
+      "preview_text": "",
+      "previewMode": null,
+      "source": [
+        "703",
+        0
+      ]
+    },
+    "class_type": "PreviewAny",
+    "_meta": {
+      "title": "Preview as Text"
+    }
+  },
+  "728": {
+    "inputs": {
+      "images": [
+        "708",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "729": {
+    "inputs": {
+      "transparency": true,
+      "model": "u2net",
+      "post_processing": false,
+      "only_mask": false,
+      "alpha_matting": false,
+      "alpha_matting_foreground_threshold": 240,
+      "alpha_matting_background_threshold": 10,
+      "alpha_matting_erode_size": 10,
+      "background_color": "none",
+      "images": [
+        "718",
+        0
+      ]
+    },
+    "class_type": "Image Rembg (Remove Background)",
+    "_meta": {
+      "title": "Image Rembg (Remove Background)"
+    }
+  },
+  "695:49": {
+    "inputs": {
+      "upscale_method": "bicubic",
+      "megapixels": 1,
+      "resolution_steps": 1,
+      "image": [
+        "694",
+        0
+      ]
+    },
+    "class_type": "ImageScaleToTotalPixels",
+    "_meta": {
+      "title": "ImageScaleToTotalPixels"
+    }
+  },
+  "695:245:650": {
+    "inputs": {
+      "mode": "extract_masked_area",
+      "background": "Alpha",
+      "background_color": "#FFFFFF",
+      "image": [
+        "695:200",
+        0
+      ],
+      "mask": [
+        "695:245:651",
+        0
+      ]
+    },
+    "class_type": "AILab_MaskExtractor",
+    "_meta": {
+      "title": "Mask Extractor (RMBG) 🎭"
+    }
+  },
+  "695:245:651": {
+    "inputs": {
+      "amount": 6,
+      "device": "auto",
+      "mask": [
+        "695:245:654",
+        0
+      ]
+    },
+    "class_type": "MaskBlur+",
+    "_meta": {
+      "title": "🔧 Mask Blur"
+    }
+  },
+  "695:245:652": {
+    "inputs": {
+      "images": [
+        "695:245:656",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "695:245:653": {
+    "inputs": {
+      "padding": 2,
+      "image": [
+        "695:245:650",
+        0
+      ],
+      "mask": [
+        "695:245:651",
+        0
+      ]
+    },
+    "class_type": "AILab_CropObject",
+    "_meta": {
+      "title": "Crop To Object (RMBG) 🖼️🎭"
+    }
+  },
+  "695:245:654": {
+    "inputs": {
+      "channel": "red",
+      "image": [
+        "695:245:655",
+        0
+      ]
+    },
+    "class_type": "ImageToMask",
+    "_meta": {
+      "title": "Convert Image to Mask"
+    }
+  },
+  "695:245:655": {
+    "inputs": {
+      "index": 2,
+      "images": [
+        "695:49",
+        0
+      ]
+    },
+    "class_type": "ImageBatchGet",
+    "_meta": {
+      "title": "ImageBatchGet"
+    }
+  },
+  "695:245:656": {
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "upscale_method": "lanczos",
+      "keep_proportion": "resize",
+      "pad_color": "0, 0, 0",
+      "crop_position": "center",
+      "divisible_by": 2,
+      "device": "cpu",
+      "image": [
+        "695:245:653",
+        0
+      ],
+      "mask": [
+        "695:245:653",
+        1
+      ]
+    },
+    "class_type": "ImageResizeKJv2",
+    "_meta": {
+      "title": "Resize Image v2"
+    }
+  },
+  "695:247:664": {
+    "inputs": {
+      "mode": "extract_masked_area",
+      "background": "Alpha",
+      "background_color": "#FFFFFF",
+      "image": [
+        "695:200",
+        0
+      ],
+      "mask": [
+        "695:247:665",
+        0
+      ]
+    },
+    "class_type": "AILab_MaskExtractor",
+    "_meta": {
+      "title": "Mask Extractor (RMBG) 🎭"
+    }
+  },
+  "695:247:665": {
+    "inputs": {
+      "amount": 6,
+      "device": "auto",
+      "mask": [
+        "695:247:668",
+        0
+      ]
+    },
+    "class_type": "MaskBlur+",
+    "_meta": {
+      "title": "🔧 Mask Blur"
+    }
+  },
+  "695:247:666": {
+    "inputs": {
+      "images": [
+        "695:247:670",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "695:247:667": {
+    "inputs": {
+      "padding": 2,
+      "image": [
+        "695:247:664",
+        0
+      ],
+      "mask": [
+        "695:247:665",
+        0
+      ]
+    },
+    "class_type": "AILab_CropObject",
+    "_meta": {
+      "title": "Crop To Object (RMBG) 🖼️🎭"
+    }
+  },
+  "695:247:668": {
+    "inputs": {
+      "channel": "red",
+      "image": [
+        "695:247:669",
+        0
+      ]
+    },
+    "class_type": "ImageToMask",
+    "_meta": {
+      "title": "Convert Image to Mask"
+    }
+  },
+  "695:247:669": {
+    "inputs": {
+      "index": 4,
+      "images": [
+        "695:49",
+        0
+      ]
+    },
+    "class_type": "ImageBatchGet",
+    "_meta": {
+      "title": "ImageBatchGet"
+    }
+  },
+  "695:247:670": {
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "upscale_method": "lanczos",
+      "keep_proportion": "resize",
+      "pad_color": "0, 0, 0",
+      "crop_position": "center",
+      "divisible_by": 2,
+      "device": "cpu",
+      "image": [
+        "695:247:667",
+        0
+      ],
+      "mask": [
+        "695:247:667",
+        1
+      ]
+    },
+    "class_type": "ImageResizeKJv2",
+    "_meta": {
+      "title": "Resize Image v2"
+    }
+  },
+  "695:246:657": {
+    "inputs": {
+      "mode": "extract_masked_area",
+      "background": "Alpha",
+      "background_color": "#FFFFFF",
+      "image": [
+        "695:200",
+        0
+      ],
+      "mask": [
+        "695:246:658",
+        0
+      ]
+    },
+    "class_type": "AILab_MaskExtractor",
+    "_meta": {
+      "title": "Mask Extractor (RMBG) 🎭"
+    }
+  },
+  "695:246:658": {
+    "inputs": {
+      "amount": 6,
+      "device": "auto",
+      "mask": [
+        "695:246:660",
+        0
+      ]
+    },
+    "class_type": "MaskBlur+",
+    "_meta": {
+      "title": "🔧 Mask Blur"
+    }
+  },
+  "695:246:659": {
+    "inputs": {
+      "padding": 2,
+      "image": [
+        "695:246:657",
+        0
+      ],
+      "mask": [
+        "695:246:658",
+        0
+      ]
+    },
+    "class_type": "AILab_CropObject",
+    "_meta": {
+      "title": "Crop To Object (RMBG) 🖼️🎭"
+    }
+  },
+  "695:246:660": {
+    "inputs": {
+      "channel": "red",
+      "image": [
+        "695:246:661",
+        0
+      ]
+    },
+    "class_type": "ImageToMask",
+    "_meta": {
+      "title": "Convert Image to Mask"
+    }
+  },
+  "695:246:661": {
+    "inputs": {
+      "index": 3,
+      "images": [
+        "695:49",
+        0
+      ]
+    },
+    "class_type": "ImageBatchGet",
+    "_meta": {
+      "title": "ImageBatchGet"
+    }
+  },
+  "695:246:662": {
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "upscale_method": "lanczos",
+      "keep_proportion": "resize",
+      "pad_color": "0, 0, 0",
+      "crop_position": "center",
+      "divisible_by": 2,
+      "device": "cpu",
+      "image": [
+        "695:246:659",
+        0
+      ],
+      "mask": [
+        "695:246:659",
+        1
+      ]
+    },
+    "class_type": "ImageResizeKJv2",
+    "_meta": {
+      "title": "Resize Image v2"
+    }
+  },
+  "695:246:663": {
+    "inputs": {
+      "images": [
+        "695:246:662",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "695:248:671": {
+    "inputs": {
+      "mode": "extract_masked_area",
+      "background": "Alpha",
+      "background_color": "#FFFFFF",
+      "image": [
+        "695:200",
+        0
+      ],
+      "mask": [
+        "695:248:672",
+        0
+      ]
+    },
+    "class_type": "AILab_MaskExtractor",
+    "_meta": {
+      "title": "Mask Extractor (RMBG) 🎭"
+    }
+  },
+  "695:248:672": {
+    "inputs": {
+      "amount": 6,
+      "device": "auto",
+      "mask": [
+        "695:248:675",
+        0
+      ]
+    },
+    "class_type": "MaskBlur+",
+    "_meta": {
+      "title": "🔧 Mask Blur"
+    }
+  },
+  "695:248:673": {
+    "inputs": {
+      "images": [
+        "695:248:677",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "695:248:674": {
+    "inputs": {
+      "padding": 2,
+      "image": [
+        "695:248:671",
+        0
+      ],
+      "mask": [
+        "695:248:672",
+        0
+      ]
+    },
+    "class_type": "AILab_CropObject",
+    "_meta": {
+      "title": "Crop To Object (RMBG) 🖼️🎭"
+    }
+  },
+  "695:248:675": {
+    "inputs": {
+      "channel": "red",
+      "image": [
+        "695:248:676",
+        0
+      ]
+    },
+    "class_type": "ImageToMask",
+    "_meta": {
+      "title": "Convert Image to Mask"
+    }
+  },
+  "695:248:676": {
+    "inputs": {
+      "index": 5,
+      "images": [
+        "695:49",
+        0
+      ]
+    },
+    "class_type": "ImageBatchGet",
+    "_meta": {
+      "title": "ImageBatchGet"
+    }
+  },
+  "695:248:677": {
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "upscale_method": "lanczos",
+      "keep_proportion": "resize",
+      "pad_color": "0, 0, 0",
+      "crop_position": "center",
+      "divisible_by": 2,
+      "device": "cpu",
+      "image": [
+        "695:248:674",
+        0
+      ],
+      "mask": [
+        "695:248:674",
+        1
+      ]
+    },
+    "class_type": "ImageResizeKJv2",
+    "_meta": {
+      "title": "Resize Image v2"
+    }
+  },
+  "695:249:678": {
+    "inputs": {
+      "mode": "extract_masked_area",
+      "background": "Alpha",
+      "background_color": "#FFFFFF",
+      "image": [
+        "695:200",
+        0
+      ],
+      "mask": [
+        "695:249:679",
+        0
+      ]
+    },
+    "class_type": "AILab_MaskExtractor",
+    "_meta": {
+      "title": "Mask Extractor (RMBG) 🎭"
+    }
+  },
+  "695:249:679": {
+    "inputs": {
+      "amount": 6,
+      "device": "auto",
+      "mask": [
+        "695:249:682",
+        0
+      ]
+    },
+    "class_type": "MaskBlur+",
+    "_meta": {
+      "title": "🔧 Mask Blur"
+    }
+  },
+  "695:249:680": {
+    "inputs": {
+      "images": [
+        "695:249:683",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "695:249:681": {
+    "inputs": {
+      "padding": 2,
+      "image": [
+        "695:249:678",
+        0
+      ],
+      "mask": [
+        "695:249:679",
+        0
+      ]
+    },
+    "class_type": "AILab_CropObject",
+    "_meta": {
+      "title": "Crop To Object (RMBG) 🖼️🎭"
+    }
+  },
+  "695:249:682": {
+    "inputs": {
+      "channel": "red",
+      "image": [
+        "695:249:684",
+        0
+      ]
+    },
+    "class_type": "ImageToMask",
+    "_meta": {
+      "title": "Convert Image to Mask"
+    }
+  },
+  "695:249:683": {
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "upscale_method": "lanczos",
+      "keep_proportion": "resize",
+      "pad_color": "0, 0, 0",
+      "crop_position": "center",
+      "divisible_by": 2,
+      "device": "cpu",
+      "image": [
+        "695:249:681",
+        0
+      ],
+      "mask": [
+        "695:249:681",
+        1
+      ]
+    },
+    "class_type": "ImageResizeKJv2",
+    "_meta": {
+      "title": "Resize Image v2"
+    }
+  },
+  "695:249:684": {
+    "inputs": {
+      "index": 6,
+      "images": [
+        "695:49",
+        0
+      ]
+    },
+    "class_type": "ImageBatchGet",
+    "_meta": {
+      "title": "ImageBatchGet"
+    }
+  },
+  "695:200": {
+    "inputs": {
+      "upscale_method": "bicubic",
+      "megapixels": 1,
+      "resolution_steps": 1,
+      "image": [
+        "702",
+        0
+      ]
+    },
+    "class_type": "ImageScaleToTotalPixels",
+    "_meta": {
+      "title": "ImageScaleToTotalPixels"
+    }
+  },
+  "695:234:201": {
+    "inputs": {
+      "mode": "extract_masked_area",
+      "background": "Alpha",
+      "background_color": "#FFFFFF",
+      "image": [
+        "695:200",
+        0
+      ],
+      "mask": [
+        "695:234:221",
+        0
+      ]
+    },
+    "class_type": "AILab_MaskExtractor",
+    "_meta": {
+      "title": "Mask Extractor (RMBG) 🎭"
+    }
+  },
+  "695:234:221": {
+    "inputs": {
+      "amount": 6,
+      "device": "auto",
+      "mask": [
+        "695:234:202",
+        0
+      ]
+    },
+    "class_type": "MaskBlur+",
+    "_meta": {
+      "title": "🔧 Mask Blur"
+    }
+  },
+  "695:234:227": {
+    "inputs": {
+      "images": [
+        "695:234:222",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "695:234:226": {
+    "inputs": {
+      "padding": 2,
+      "image": [
+        "695:234:201",
+        0
+      ],
+      "mask": [
+        "695:234:221",
+        0
+      ]
+    },
+    "class_type": "AILab_CropObject",
+    "_meta": {
+      "title": "Crop To Object (RMBG) 🖼️🎭"
+    }
+  },
+  "695:234:202": {
+    "inputs": {
+      "channel": "red",
+      "image": [
+        "695:234:48",
+        0
+      ]
+    },
+    "class_type": "ImageToMask",
+    "_meta": {
+      "title": "Convert Image to Mask"
+    }
+  },
+  "695:234:48": {
+    "inputs": {
+      "index": 1,
+      "images": [
+        "695:49",
+        0
+      ]
+    },
+    "class_type": "ImageBatchGet",
+    "_meta": {
+      "title": "ImageBatchGet"
+    }
+  },
+  "695:234:222": {
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "upscale_method": "lanczos",
+      "keep_proportion": "resize",
+      "pad_color": "0, 0, 0",
+      "crop_position": "center",
+      "divisible_by": 2,
+      "device": "cpu",
+      "image": [
+        "695:234:226",
+        0
+      ],
+      "mask": [
+        "695:234:226",
+        1
+      ]
+    },
+    "class_type": "ImageResizeKJv2",
+    "_meta": {
+      "title": "Resize Image v2"
+    }
+  }
+}

@@ -95,6 +95,37 @@ class SE_OT_refine_current_image(Operator):
             return {'CANCELLED'}
 
 
+class SE_OT_explode_asset(Operator):
+    """Generate an exploded-view diagram of the current image using Gemini"""
+    bl_idname = "style_engine.explode_asset"
+    bl_label = "Explode Asset"
+    bl_description = (
+        "Use Gemini to generate an exploded view of the current image — "
+        "every component physically separated along an axis, geometry "
+        "completed, textures sharpened, background removed. "
+        "Works in both Scene and Asset Mode."
+    )
+    bl_options = {'REGISTER'}
+
+    @classmethod
+    def poll(cls, context):
+        try:
+            from . import workspace_setup
+            return workspace_setup.get_active_ai_output_path(context).exists()
+        except Exception:
+            return False
+
+    def execute(self, context):
+        try:
+            from . import workspace_setup
+            workspace_setup.queue_explode_workflow(context)
+            self.report({'INFO'}, "Explode generation started!")
+            return {'FINISHED'}
+        except Exception as e:
+            self.report({'ERROR'}, f"Explode failed: {e}")
+            return {'CANCELLED'}
+
+
 # ----------------------------------------------------------------
 # Paratrooper Injection into HeavyPoly's Z Pie (Shading)
 # ----------------------------------------------------------------
@@ -144,6 +175,7 @@ classes = (
     SE_OT_render_ai_passes_quick,
     SE_OT_generate_ai_quick,
     SE_OT_refine_current_image,
+    SE_OT_explode_asset,
 )
 
 # Store draw handlers for clean unregister
