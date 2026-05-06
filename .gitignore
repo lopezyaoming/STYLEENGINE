@@ -185,3 +185,4 @@ cython_debug/
 data/temp/
 scripts/agent/gemma_bh_v_0_0_1/model-00001-of-00002.safetensors
 scripts/agent/gemma_bh_v_0_0_1/model-00002-of-00002.safetensors
+agent/
