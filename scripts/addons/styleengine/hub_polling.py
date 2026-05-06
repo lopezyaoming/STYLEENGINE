@@ -93,7 +93,6 @@ def _on_result_ready(hub_url: str, session_id: str, peek_data: dict):
                     area.tag_redraw()
 
         # ── Step 2: save enriched PNG to local Images/ library ───────────
-        # Check cloud sync toggle before spawning the thread
         if gen_id:
             try:
                 cloud_sync = getattr(
@@ -101,11 +100,21 @@ def _on_result_ready(hub_url: str, session_id: str, peek_data: dict):
                 )
             except Exception:
                 cloud_sync = True
+            # Resolve the library path on the main thread — bpy.data is not
+            # thread-safe and must not be accessed inside the daemon thread.
+            library_dir = ""
             if cloud_sync:
+                try:
+                    lib = workspace_setup.get_project_library()
+                    if lib is not None:
+                        library_dir = str(lib / "Images")
+                except Exception:
+                    library_dir = ""
+            if cloud_sync and library_dir:
                 import threading
                 threading.Thread(
                     target=_save_enriched_to_library,
-                    args=(hub_url, session_id, gen_id),
+                    args=(hub_url, session_id, gen_id, library_dir),
                     daemon=True,
                 ).start()
 
@@ -115,20 +124,22 @@ def _on_result_ready(hub_url: str, session_id: str, peek_data: dict):
         traceback.print_exc()
 
 
-def _save_enriched_to_library(hub_url: str, session_id: str, gen_id: str) -> None:
+def _save_enriched_to_library(hub_url: str, session_id: str, gen_id: str,
+                               library_dir: str) -> None:
     """
     Fetch the hub's metadata-embedded PNG and save it to the local Images/ folder.
     Skips silently if the file already exists.  Runs in a daemon thread.
+
+    `library_dir` must be resolved on the main thread before this is called —
+    no bpy.data access is performed here.
     """
     try:
-        import bpy as _bpy
         from pathlib import Path as _Path
-        from . import workspace_setup as _ws
 
-        library_dir = _Path(_ws.get_project_library()) / "Images"
-        library_dir.mkdir(parents=True, exist_ok=True)
+        dest_dir = _Path(library_dir)
+        dest_dir.mkdir(parents=True, exist_ok=True)
 
-        dest = library_dir / f"{gen_id}.png"
+        dest = dest_dir / f"{gen_id}.png"
         if dest.exists():
             return
 

@@ -222,22 +222,23 @@ def _sync_library_to_hub(hub_url: str, session_id: str) -> None:
     doesn't already have.  The hub deduplicates by embedded id and sha256,
     so this is safe to call unconditionally on every registration.
 
-    Runs in a daemon thread — never blocks Blender.
-    Only runs when 'hub_cloud_sync' is enabled in scene props.
+    The library path is resolved on the main thread before the daemon thread
+    is spawned — bpy.data must never be accessed inside the thread.
     """
     import threading
     from pathlib import Path as _Path
-    import bpy as _bpy
     from . import hub_client as _hc, workspace_setup as _ws
 
-    def _run():
-        try:
-            # Check toggle on main-thread snapshot is fine; we read it now
-            # before the thread starts, so no bpy access inside the thread.
-            library_dir = _Path(_ws.get_project_library()) / "Images"
-        except Exception:
+    # ── Resolve path on the main thread ──────────────────────────────────
+    try:
+        lib = _ws.get_project_library()
+        if lib is None:
             return
+        library_dir = _Path(lib) / "Images"
+    except Exception:
+        return
 
+    def _run(library_dir: _Path):
         if not library_dir.exists():
             return
 
@@ -257,7 +258,7 @@ def _sync_library_to_hub(hub_url: str, session_id: str) -> None:
         print(f"[Hub Sync] Library sync complete: {imported} imported, "
               f"{skipped} skipped, {errors} errors")
 
-    threading.Thread(target=_run, daemon=True).start()
+    threading.Thread(target=_run, args=(library_dir,), daemon=True).start()
 
 
 def _do_hub_register():
