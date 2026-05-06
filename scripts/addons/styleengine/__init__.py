@@ -216,6 +216,50 @@ modules = [
     hub_polling,      # Hub image delivery polling
 ]
 
+def _sync_library_to_hub(hub_url: str, session_id: str) -> None:
+    """
+    Walk the session's local Images/ library and upload any PNGs the hub
+    doesn't already have.  The hub deduplicates by embedded id and sha256,
+    so this is safe to call unconditionally on every registration.
+
+    Runs in a daemon thread — never blocks Blender.
+    Only runs when 'hub_cloud_sync' is enabled in scene props.
+    """
+    import threading
+    from pathlib import Path as _Path
+    import bpy as _bpy
+    from . import hub_client as _hc, workspace_setup as _ws
+
+    def _run():
+        try:
+            # Check toggle on main-thread snapshot is fine; we read it now
+            # before the thread starts, so no bpy access inside the thread.
+            library_dir = _Path(_ws.get_project_library()) / "Images"
+        except Exception:
+            return
+
+        if not library_dir.exists():
+            return
+
+        imported = skipped = errors = 0
+        for png in sorted(library_dir.glob("*.png")):
+            try:
+                data   = png.read_bytes()
+                result = _hc.import_image(hub_url, session_id, data, png.name)
+                if result.get("imported"):
+                    imported += 1
+                else:
+                    skipped += 1
+            except Exception as e:
+                errors += 1
+                print(f"[Hub Sync] Failed for {png.name}: {e}")
+
+        print(f"[Hub Sync] Library sync complete: {imported} imported, "
+              f"{skipped} skipped, {errors} errors")
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
 def _do_hub_register():
     """Register this Blender session with the Hub."""
     from pathlib import Path
@@ -232,6 +276,17 @@ def _do_hub_register():
     except Exception:
         current_ai = ""
     hub_client.register_session(hub_url, session_id, blend_name, blend_path, current_ai)
+
+    # Kick off background library sync when cloud sync is enabled
+    if hub_url and not session_id.startswith("unsaved"):
+        try:
+            cloud_sync = getattr(
+                _bpy.context.scene.style_engine_props, "hub_cloud_sync", True
+            )
+        except Exception:
+            cloud_sync = True
+        if cloud_sync:
+            _sync_library_to_hub(hub_url, session_id)
 
 
 def _delayed_hub_register():

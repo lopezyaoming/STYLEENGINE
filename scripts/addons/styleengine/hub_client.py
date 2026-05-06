@@ -208,6 +208,59 @@ def push_config(hub_url: str, session_id: str, generation_id: str,
         print(f"[Hub Client] push_config failed (gen_id={generation_id}): {e}")
 
 
+def import_image(hub_url: str, session_id: str, png_bytes: bytes,
+                 filename: str = "import.png") -> dict:
+    """
+    Import a single PNG into the hub's session history.
+
+    The hub deduplicates by embedded `id` and `sha256` — safe to call
+    repeatedly with the same file.
+
+    Returns the server response dict, or {"imported": False, "reason": "network_error"}
+    on any failure.
+    """
+    try:
+        url = f"{hub_url}/api/sessions/{session_id}/history/import"
+        req = urllib.request.Request(
+            url,
+            data=png_bytes,
+            headers={
+                "Content-Type": "image/png",
+                "X-Filename":   filename,
+                "User-Agent":   "StyleEngine-Blender/1.0",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read())
+    except Exception as e:
+        print(f"[Hub Client] import_image failed for {filename}: {e}")
+        return {"imported": False, "reason": "network_error"}
+
+
+def download_enriched_png(hub_url: str, session_id: str,
+                          generation_id: str, timeout: int = 30) -> bytes:
+    """
+    Download the hub's metadata-embedded PNG for a generation.
+
+    Endpoint: GET /api/sessions/{session_id}/history/{generation_id}/image
+    The server returns a 307 redirect to a GCS signed URL; urllib follows it
+    automatically.
+
+    Returns raw bytes, or b'' on any error.
+    """
+    try:
+        url = f"{hub_url}/api/sessions/{session_id}/history/{generation_id}/image"
+        req = urllib.request.Request(
+            url, headers={"User-Agent": "StyleEngine-Blender/1.0"}
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.read()
+    except Exception as e:
+        print(f"[Hub Client] download_enriched_png failed ({generation_id}): {e}")
+        return b""
+
+
 def download_result_image(hub_url: str, filename: str, save_path: str,
                           timeout: int = 30) -> bool:
     """

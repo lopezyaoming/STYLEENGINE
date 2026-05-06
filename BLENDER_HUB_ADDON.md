@@ -229,6 +229,104 @@ if gen_id:
 
 ---
 
+### `POST /api/sessions/{session_id}/history/import` — Library Sync
+
+Idempotent endpoint for bulk-importing Blender's existing library to the hub.
+Use this on registration (or on a manual sync) to bring the hub's history up to
+date with images that were generated before the hub integration existed.
+
+**Request:**
+```
+Content-Type: image/png
+X-Filename: 20260505_152229_142_gcs_1920x1080.png   (optional, ignored by server)
+<raw PNG bytes>
+```
+
+**Response:**
+```json
+{ "imported": true,  "generation_id": "uuid", "reason": null }
+{ "imported": false, "generation_id": "uuid", "reason": "duplicate_id" }
+{ "imported": false, "generation_id": null,   "reason": "duplicate_sha256" }
+```
+
+**Deduplication:** The server deduplicates by embedded `StyleEngine:config` id first,
+then by sha256 of the raw bytes. Safe to call for the entire library on every
+registration — the server will skip anything it already has.
+
+**Add to `hub_client.py`:**
+```python
+def import_image(hub_url: str, session_id: str, png_bytes: bytes,
+                 filename: str = "import.png") -> dict:
+    """
+    Import a single PNG into the hub's session history.
+    Returns the server response dict.
+    On network error returns {"imported": False, "reason": "network_error"}.
+    """
+    try:
+        req = urllib.request.Request(
+            f"{hub_url}/api/sessions/{session_id}/history/import",
+            data=png_bytes,
+            headers={
+                "Content-Type": "image/png",
+                "X-Filename":   filename,
+                "User-Agent":   "StyleEngine-Blender/1.0",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read())
+    except Exception as e:
+        print(f"[Hub Client] import_image failed for {filename}: {e}")
+        return {"imported": False, "reason": "network_error"}
+```
+
+**Library sync call site (in `__init__.py` or a background thread on registration):**
+```python
+def _sync_library_to_hub(hub_url: str, session_id: str) -> None:
+    """
+    Walk the session's generation library and import any images the hub doesn't have.
+    Runs in a daemon thread — never blocks the main thread.
+    """
+    from pathlib import Path
+    import bpy
+    from . import hub_client, workspace_setup
+
+    try:
+        library_dir = Path(workspace_setup.get_project_library(bpy.context))
+    except Exception:
+        return
+
+    if not library_dir.exists():
+        return
+
+    imported = skipped = 0
+    for png in sorted(library_dir.glob("*.png")):
+        try:
+            data = png.read_bytes()
+            result = hub_client.import_image(hub_url, session_id, data, png.name)
+            if result.get("imported"):
+                imported += 1
+            else:
+                skipped += 1
+        except Exception as e:
+            print(f"[Hub Client] Sync failed for {png.name}: {e}")
+
+    print(f"[Hub Client] Library sync complete: {imported} imported, {skipped} skipped")
+```
+
+Call `_sync_library_to_hub` in a daemon thread inside `_do_hub_register()`:
+```python
+import threading
+t = threading.Thread(
+    target=_sync_library_to_hub,
+    args=(hub_url, session_id),
+    daemon=True,
+)
+t.start()
+```
+
+---
+
 ## Files to Create
 
 ### `scripts/addons/styleengine/hub_client.py`

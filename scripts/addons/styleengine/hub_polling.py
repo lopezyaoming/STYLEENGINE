@@ -59,23 +59,22 @@ def _on_result_ready(hub_url: str, session_id: str, peek_data: dict):
     """
     Called on the main thread when the hub signals a new result.
 
-    The hub stores the image server-side and Blender must download it via
-    GET /api/comfy/view?filename=<name> before reloading the datablock.
-
-    peek_data may contain 'filename' (or 'result_filename') with the name of
-    the generated image on the hub's ComfyUI output directory.
-    Falls back to a plain disk-reload if no filename is provided (e.g. the hub
-    wrote directly to current_ai_path as per the original spec).
+    Step 1 — download the raw image via /api/comfy/view, write to current_ai.png,
+              and reload the Blender viewport.
+    Step 2 — if a result_generation_id is present, spawn a background thread to
+              fetch the hub's metadata-embedded PNG and save it to the local
+              Images/ library (so it appears in the history panel).
     """
     try:
-        # Resolve the local path where current_ai.png lives
         ctx        = bpy.context
         ai_path    = workspace_setup.get_active_ai_output_path(ctx)
 
-        # Look for the filename in common field names the hub might use
-        filename = (peek_data.get("filename")
-                    or peek_data.get("result_filename")
-                    or peek_data.get("image_filename"))
+        filename  = (peek_data.get("result_filename")
+                     or peek_data.get("filename")
+                     or peek_data.get("image_filename"))
+        subfolder = peek_data.get("result_subfolder", "")
+        img_type  = peek_data.get("result_type", "output")
+        gen_id    = peek_data.get("result_generation_id", "")
 
         if filename:
             print(f"[Hub Polling] Downloading result: {filename}")
@@ -83,22 +82,65 @@ def _on_result_ready(hub_url: str, session_id: str, peek_data: dict):
             if not ok:
                 print("[Hub Polling] ⚠ Download failed — will try refresh from existing disk file")
         else:
-            # Hub wrote directly to disk (original spec fallback)
             print("[Hub Polling] No filename in peek response — refreshing from disk")
 
         workspace_setup.refresh_ai_image()
         print("[Hub Polling] ✓ New image from hub — reloaded current_ai.png")
 
-        # Belt-and-suspenders redraw (refresh_ai_image already tags viewports)
         for window in bpy.context.window_manager.windows:
             for area in window.screen.areas:
                 if area.type == "VIEW_3D":
                     area.tag_redraw()
 
+        # ── Step 2: save enriched PNG to local Images/ library ───────────
+        # Check cloud sync toggle before spawning the thread
+        if gen_id:
+            try:
+                cloud_sync = getattr(
+                    ctx.scene.style_engine_props, "hub_cloud_sync", True
+                )
+            except Exception:
+                cloud_sync = True
+            if cloud_sync:
+                import threading
+                threading.Thread(
+                    target=_save_enriched_to_library,
+                    args=(hub_url, session_id, gen_id),
+                    daemon=True,
+                ).start()
+
     except Exception as e:
         print(f"[Hub Polling] Reload error: {e}")
         import traceback
         traceback.print_exc()
+
+
+def _save_enriched_to_library(hub_url: str, session_id: str, gen_id: str) -> None:
+    """
+    Fetch the hub's metadata-embedded PNG and save it to the local Images/ folder.
+    Skips silently if the file already exists.  Runs in a daemon thread.
+    """
+    try:
+        import bpy as _bpy
+        from pathlib import Path as _Path
+        from . import workspace_setup as _ws
+
+        library_dir = _Path(_ws.get_project_library()) / "Images"
+        library_dir.mkdir(parents=True, exist_ok=True)
+
+        dest = library_dir / f"{gen_id}.png"
+        if dest.exists():
+            return
+
+        png_bytes = hub_client.download_enriched_png(hub_url, session_id, gen_id)
+        if not png_bytes:
+            return
+
+        dest.write_bytes(png_bytes)
+        print(f"[Hub Polling] ✓ Saved hub generation to library: {dest.name}")
+
+    except Exception as e:
+        print(f"[Hub Polling] _save_enriched_to_library error: {e}")
 
 
 def start_polling():

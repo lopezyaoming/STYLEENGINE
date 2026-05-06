@@ -705,7 +705,17 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         description="Expand or collapse the File section",
         default=False
     )
-    
+
+    hub_cloud_sync: bpy.props.BoolProperty(
+        name="Sync Files with Cloud",
+        description=(
+            "When enabled, automatically syncs generated images with the Style "
+            "Engine Hub (GCS bucket) on every registration and on hub-delivered "
+            "results. Disable to work fully offline."
+        ),
+        default=True,
+    )
+
     # Unified seed for all AI workflows
     seed_value: bpy.props.IntProperty(
         name="Seed",
@@ -1984,6 +1994,35 @@ class WM_OT_RerollSeed(bpy.types.Operator):
     def execute(self, context):
         import random
         context.scene.style_engine_props.seed_value = random.randint(0, 2147483647)
+        return {'FINISHED'}
+
+
+class WM_OT_SyncCloudNow(bpy.types.Operator):
+    """Manually push the local Images/ library to the Style Engine Hub right now"""
+    bl_idname = "style_engine.sync_cloud_now"
+    bl_label = "Sync Now"
+    bl_description = "Upload local generated images to the Style Engine Hub (GCS) immediately"
+    bl_options = {'REGISTER'}
+
+    def execute(self, context):
+        try:
+            from . import hub_client
+            from . import __init__ as _addon
+            prefs      = context.preferences.addons["styleengine"].preferences
+            hub_url    = getattr(prefs, "hub_url", "").rstrip("/")
+            session_id = hub_client.get_session_id(
+                bpy.data.filepath if bpy.data.is_saved else None
+            )
+            if not hub_url:
+                self.report({'WARNING'}, "Hub URL is not set in preferences")
+                return {'CANCELLED'}
+            if session_id.startswith("unsaved"):
+                self.report({'WARNING'}, "Save the .blend file before syncing")
+                return {'CANCELLED'}
+            _addon._sync_library_to_hub(hub_url, session_id)
+            self.report({'INFO'}, "Cloud sync started in background")
+        except Exception as e:
+            self.report({'ERROR'}, f"Sync failed: {e}")
         return {'FINISHED'}
 
 
@@ -7674,6 +7713,16 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
             col.label(text="Model:")
             col.prop(style_props, "ai_model", text="")
 
+            # ── Cloud Sync ───────────────────────────────────────────────
+            file_box.separator()
+            sync_row = file_box.row(align=True)
+            sync_icon = 'LINKED' if style_props.hub_cloud_sync else 'UNLINKED'
+            sync_row.prop(style_props, "hub_cloud_sync", text="Sync Files with Cloud",
+                          icon=sync_icon, toggle=True)
+            sync_btn = sync_row.row(align=True)
+            sync_btn.enabled = style_props.hub_cloud_sync
+            sync_btn.operator("style_engine.sync_cloud_now", text="", icon='FILE_REFRESH')
+
         # ================================================================
         # IMAGE GENERATION CATEGORY (Collapsible) — Q · image
         # ================================================================
@@ -11000,6 +11049,7 @@ classes = (
     RefineTagItem,
     StyleEngineProperties,
     WM_OT_RerollSeed,
+    WM_OT_SyncCloudNow,
     WM_OT_AlignAICameraToView,
     WM_OT_BringBackgroundForward,
     WM_OT_SendBackgroundBack,
