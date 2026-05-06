@@ -277,6 +277,17 @@ def on_blend_file_saved(dummy):
     except Exception as e:
         print(f"[Style Engine] Error in save handler: {e}")
 
+    try:
+        from . import hub_client
+        prefs      = bpy.context.preferences.addons["styleengine"].preferences
+        hub_url    = getattr(prefs, "hub_url", "http://127.0.0.1:8000").rstrip("/")
+        session_id = Path(bpy.data.filepath).stem
+        current_ai = str(get_active_ai_output_path(bpy.context))
+        hub_client.register_session(hub_url, session_id, session_id, bpy.data.filepath, current_ai)
+        print(f"[Style Engine] Hub re-registered session: {session_id!r}")
+    except Exception as e:
+        print(f"[Style Engine] Hub re-register on save failed: {e}")
+
 
 # ================================================================
 #    Generation Browser - Navigate Through Saved Generations
@@ -1943,6 +1954,17 @@ def on_blend_file_loaded(dummy):
     except Exception as e:
         print(f"[Style Engine] ⚠ on_blend_file_loaded migration error: {e}")
 
+    try:
+        from . import hub_client
+        prefs      = bpy.context.preferences.addons["styleengine"].preferences
+        hub_url    = getattr(prefs, "hub_url", "http://127.0.0.1:8000").rstrip("/")
+        session_id = Path(bpy.data.filepath).stem if bpy.data.is_saved else "unsaved"
+        current_ai = str(get_active_ai_output_path(bpy.context))
+        hub_client.register_session(hub_url, session_id, session_id, bpy.data.filepath, current_ai)
+        print(f"[Style Engine] Hub re-registered session on load: {session_id!r}")
+    except Exception as e:
+        print(f"[Style Engine] Hub re-register on load failed: {e}")
+
     # Defer the restore to the next main-loop tick.
     # bpy.context.scene is not guaranteed to be valid inside load_post on all
     # Blender 4.x builds; iterating bpy.data.scenes in a timer is always safe.
@@ -2470,8 +2492,21 @@ def refresh_ai_image():
                 print(f"[Style Engine] ↩ filepath_raw updated: {img.filepath_raw} → {canonical}")
                 img.filepath_raw = canonical
 
-            img.reload()
-            img.update()  # ensures GPU texture is invalidated
+            if img.source != 'FILE':
+                # The placeholder was created with images.new() (source='GENERATED').
+                # Changing source and calling reload() leaves the GPU in an uncertain
+                # state. The only reliable path is: remove the generated datablock,
+                # load fresh from disk (always FILE-sourced), and re-attach.
+                print("[Style Engine] ↩ Placeholder was GENERATED — replacing with FILE datablock")
+                bpy.data.images.remove(img)
+                img = bpy.data.images.load(canonical, check_existing=False)
+                img.name = "current_ai.png"
+                img.filepath_raw = canonical
+                img.update()
+                _reattach_camera_background(img)
+            else:
+                img.reload()
+                img.update()  # ensures GPU texture is invalidated
         else:
             # Datablock was lost (Undo, user deleted it, etc.) — recover it
             print("[Style Engine] ⚠ current_ai.png datablock lost — re-loading from disk")
@@ -6135,6 +6170,85 @@ def on_generation_complete_server(context, success, result, error, workflow_type
                     # Refresh camera background
                     refresh_ai_image()
                     print(f"[GCS] ✓ Camera background updated with new AI image")
+
+                    # Push result + metadata to hub (two-step protocol)
+                    try:
+                        from . import hub_client as _hc
+                        _prefs   = _ctx.preferences.addons["styleengine"].preferences
+                        _hub_url = getattr(_prefs, "hub_url", "").rstrip("/")
+                        _sid     = Path(bpy.data.filepath).stem if bpy.data.is_saved else "unsaved"
+                        if _hub_url and _sid != "unsaved":
+                            # ── Snapshot all Blender-side data on the main thread ──
+                            _props = _ctx.scene.style_engine_props
+
+                            _prompt = ""
+                            try:
+                                _tb = bpy.data.texts.get("STYLEENGINE_Prompt")
+                                _prompt = _tb.as_string().strip() if _tb else ""
+                            except Exception:
+                                pass
+
+                            _hub_config = {
+                                "prompt":         _prompt,
+                                "temperature":    getattr(_props, "gemini_temperature", 1.0),
+                                "imageSize":      getattr(_props, "gemini_image_size", "1K"),
+                                "aspectRatio":    getattr(_props, "refine_meta_aspect", ""),
+                                "alignmentMode":  getattr(_props, "gemini_alignment", False),
+                                "model":          "gemini" if getattr(_props, "ai_model", "SDXL") == "GEMINI" else "sdxl",
+                            }
+
+                            # Collect source images and their hashes
+                            _sources = []
+                            for _role, _fname in [("frame", "combined.jpg"),
+                                                  ("canny", "canny.png"),
+                                                  ("depth", "depth.png")]:
+                                _src_path = str(_current_ai_path.parent / _fname)
+                                try:
+                                    import os as _os
+                                    if _os.path.isfile(_src_path):
+                                        _sources.append({
+                                            "role":          _role,
+                                            "filename":      _fname,
+                                            "sha256":        _hc.sha256_file(_src_path),
+                                            "generation_id": None,
+                                        })
+                                except Exception:
+                                    pass
+
+                            _wf_name = ""
+                            try:
+                                from . import progress_bar as _pb
+                                _wf = _pb.BridgePollerState.current_workflow
+                                if _wf and isinstance(_wf, dict):
+                                    # Workflow JSON stored as dict; name not always present.
+                                    # Fall back gracefully.
+                                    _wf_name = _wf.get("_filename", "")
+                            except Exception:
+                                pass
+
+                            _step2_payload = {
+                                "model":      _hub_config["model"],
+                                "workflow":   _wf_name,
+                                "blend_file": bpy.data.filepath,
+                                "config":     _hub_config,
+                                "sources":    _sources,
+                            }
+                            _ai_path_str = str(_current_ai_path)
+
+                            def _push_to_hub(_url, _session, _img, _payload):
+                                resp = _hc.push_result_image(_url, _session, _img)
+                                gen_id = resp.get("generation_id")
+                                if gen_id:
+                                    _hc.push_config(_url, _session, gen_id, _payload)
+
+                            import threading as _t
+                            _t.Thread(
+                                target=_push_to_hub,
+                                args=(_hub_url, _sid, _ai_path_str, _step2_payload),
+                                daemon=True,
+                            ).start()
+                    except Exception as _he:
+                        print(f"[GCS] Hub push error: {_he}")
 
                     # Trigger next generation cycle if auto-generate is enabled
                     trigger_next_generation_cycle(_ctx)

@@ -87,6 +87,8 @@ try:
     from . import pie_menu
     from . import trellis_client
     from . import asset_mode
+    from . import hub_client   # noqa: F401 (no classes to register)
+    from . import hub_polling
 except (ImportError, ValueError) as e:
     # Fallback for strict import systems (macOS during installation)
     print(f"[Style Engine] Using fallback imports (macOS compatibility mode)")
@@ -197,6 +199,8 @@ except (ImportError, ValueError) as e:
     pie_menu = load_module("pie_menu")
     trellis_client = load_module("trellis_client")
     asset_mode = load_module("asset_mode")
+    hub_client = load_module("hub_client")
+    hub_polling = load_module("hub_polling")
 
     print(f"[Style Engine] All modules loaded successfully!")
 
@@ -209,13 +213,41 @@ modules = [
     progress_bar,     # Progress bridge polling system
     heavypoly_integration,  # HeavyPoly Z pie injection (paratrooper mode!)
     pie_menu,         # Main Style Engine pie menus
+    hub_polling,      # Hub image delivery polling
 ]
+
+def _do_hub_register():
+    """Register this Blender session with the Hub."""
+    from pathlib import Path
+    import bpy as _bpy
+    from . import hub_client, workspace_setup
+    prefs      = _bpy.context.preferences.addons["styleengine"].preferences
+    hub_url    = getattr(prefs, "hub_url", "http://127.0.0.1:8000").rstrip("/")
+    session_id = Path(_bpy.data.filepath).stem if _bpy.data.is_saved else "unsaved"
+    blend_name = session_id
+    blend_path = _bpy.data.filepath
+    try:
+        ctx        = _bpy.context
+        current_ai = str(workspace_setup.get_active_ai_output_path(ctx))
+    except Exception:
+        current_ai = ""
+    hub_client.register_session(hub_url, session_id, blend_name, blend_path, current_ai)
+
+
+def _delayed_hub_register():
+    """Register with hub after Blender is fully loaded."""
+    try:
+        _do_hub_register()
+    except Exception as e:
+        print(f"[Style Engine] Hub register failed: {e}")
+    return None  # don't repeat
+
 
 def register():
     """Register all classes and properties."""
     for module in modules:
         module.register()
-    
+
     # Save handler — session migration when .blend is first saved
     if workspace_setup.on_blend_file_saved not in bpy.app.handlers.save_post:
         bpy.app.handlers.save_post.append(workspace_setup.on_blend_file_saved)
@@ -230,6 +262,9 @@ def register():
     if workspace_setup.on_blend_file_loaded not in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.append(workspace_setup.on_blend_file_loaded)
         print("[Style Engine] ✓ Load handler registered for temp-dir reset")
+
+    # Hub registration — deferred so prefs and workspace are fully ready
+    bpy.app.timers.register(_delayed_hub_register, first_interval=2.0)
 
 def unregister():
     """Unregister all classes and properties."""

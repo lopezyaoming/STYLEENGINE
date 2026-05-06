@@ -249,7 +249,13 @@ class StyleEnginePreferences(AddonPreferences):
         description="IP address or hostname of your ComfyUI server (e.g., http://127.0.0.1 or http://34.19.119.45)",
         default="http://127.0.0.1"
     )
-    
+
+    hub_url: StringProperty(
+        name="Hub URL",
+        description="Style Engine Hub address (web UI + image delivery bridge)",
+        default="http://127.0.0.1:8000",
+    )
+
     gcs_comfy_port: IntProperty(
         name="ComfyUI Port",
         description="Port for ComfyUI backend (default: 8188). Only change if your server uses a different port",
@@ -313,7 +319,8 @@ class StyleEnginePreferences(AddonPreferences):
         
         # Self-Hosted ComfyUI
         basic_box.prop(self, "gcs_server_url", text="Server Address")
-        
+        basic_box.prop(self, "hub_url", text="Hub URL")
+
         # Test button
         row = basic_box.row()
         row.scale_y = 1.3
