@@ -4,11 +4,62 @@ Uses only urllib.request — no third-party dependencies.
 """
 import hashlib
 import json
+import os
+import platform
+import random
+import time
 import urllib.request
 import urllib.error
 import urllib.parse
+from pathlib import Path
 
 HUB_DEFAULT = "http://style-engine:8000"
+
+# ── Session ID helpers ────────────────────────────────────────────────────────
+
+def _machine_suffix() -> str:
+    """
+    Stable 8-char hex suffix unique to this machine/user.
+    Derived from hostname + login name so it survives Blender restarts.
+    """
+    try:
+        raw = f"{platform.node()}-{os.getlogin()}"
+    except Exception:
+        raw = platform.node()
+    return hashlib.sha256(raw.encode()).hexdigest()[:8]
+
+
+_EPHEMERAL_SESSION_ID: str | None = None
+
+
+def _ephemeral_session_id() -> str:
+    """
+    Per-process ephemeral session ID used when no .blend file is saved.
+    Generated once on first call and reused for the lifetime of this process.
+    Format: unsaved_<8hex>  — the hub groups these under the 'unsaved' bucket.
+    """
+    global _EPHEMERAL_SESSION_ID
+    if _EPHEMERAL_SESSION_ID is None:
+        raw = f"{platform.node()}-{time.time()}-{random.random()}"
+        _EPHEMERAL_SESSION_ID = "unsaved_" + hashlib.sha256(raw.encode()).hexdigest()[:8]
+    return _EPHEMERAL_SESSION_ID
+
+
+def get_session_id(blend_filepath: str | None) -> str:
+    """
+    Return the hub session ID for the given .blend file path.
+
+    Saved file  → "<stem>_<8hex machine suffix>"  e.g. "car_3a9f12bc"
+    Unsaved     → "unsaved_<8hex process suffix>"  e.g. "unsaved_f04c91a2"
+    """
+    if not blend_filepath:
+        return _ephemeral_session_id()
+    return f"{Path(blend_filepath).stem}_{_machine_suffix()}"
+
+
+# ── Last-registered tracker (for Save As rename detection) ───────────────────
+
+_last_registered_session_id: str | None = None
 
 
 def sha256_file(path: str) -> str:
@@ -38,14 +89,29 @@ def _get(url: str, timeout: int = 4) -> dict:
 
 def register_session(hub_url: str, session_id: str, blend_name: str,
                      blend_path: str, current_ai_path: str) -> bool:
-    """Register this Blender instance with the hub. Returns True on success."""
+    """
+    Register this Blender instance with the hub.
+
+    Automatically detects Save As renames: if the session ID changed since the
+    last successful registration, `prev_session_id` is included so the hub can
+    link history continuity.
+
+    Returns True on success.
+    """
+    global _last_registered_session_id
     try:
-        _post(f"{hub_url}/api/blender/register", {
+        payload = {
             "session_id":      session_id,
             "blend_name":      blend_name,
             "blend_path":      blend_path,
             "current_ai_path": current_ai_path,
-        })
+        }
+        prev_id = _last_registered_session_id
+        if prev_id and prev_id != session_id:
+            payload["prev_session_id"] = prev_id
+            print(f"[Hub Client] Save As detected: {prev_id!r} → {session_id!r}")
+        _post(f"{hub_url}/api/blender/register", payload)
+        _last_registered_session_id = session_id
         return True
     except Exception as e:
         print(f"[Hub Client] Register failed: {e}")

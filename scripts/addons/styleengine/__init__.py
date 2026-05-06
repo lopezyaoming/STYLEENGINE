@@ -223,9 +223,9 @@ def _do_hub_register():
     from . import hub_client, workspace_setup
     prefs      = _bpy.context.preferences.addons["styleengine"].preferences
     hub_url    = getattr(prefs, "hub_url", "http://127.0.0.1:8000").rstrip("/")
-    session_id = Path(_bpy.data.filepath).stem if _bpy.data.is_saved else "unsaved"
-    blend_name = session_id
     blend_path = _bpy.data.filepath
+    session_id = hub_client.get_session_id(blend_path if _bpy.data.is_saved else None)
+    blend_name = Path(blend_path).stem if _bpy.data.is_saved else session_id
     try:
         ctx        = _bpy.context
         current_ai = str(workspace_setup.get_active_ai_output_path(ctx))

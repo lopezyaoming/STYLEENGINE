@@ -26,10 +26,7 @@ def _get_prefs():
 
 
 def _session_id() -> str:
-    if bpy.data.is_saved:
-        from pathlib import Path
-        return Path(bpy.data.filepath).stem
-    return "unsaved"
+    return hub_client.get_session_id(bpy.data.filepath if bpy.data.is_saved else None)
 
 
 def _poll_tick():

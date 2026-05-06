@@ -281,9 +281,9 @@ def on_blend_file_saved(dummy):
         from . import hub_client
         prefs      = bpy.context.preferences.addons["styleengine"].preferences
         hub_url    = getattr(prefs, "hub_url", "http://127.0.0.1:8000").rstrip("/")
-        session_id = Path(bpy.data.filepath).stem
+        session_id = hub_client.get_session_id(bpy.data.filepath)
         current_ai = str(get_active_ai_output_path(bpy.context))
-        hub_client.register_session(hub_url, session_id, session_id, bpy.data.filepath, current_ai)
+        hub_client.register_session(hub_url, session_id, Path(bpy.data.filepath).stem, bpy.data.filepath, current_ai)
         print(f"[Style Engine] Hub re-registered session: {session_id!r}")
     except Exception as e:
         print(f"[Style Engine] Hub re-register on save failed: {e}")
@@ -1958,9 +1958,10 @@ def on_blend_file_loaded(dummy):
         from . import hub_client
         prefs      = bpy.context.preferences.addons["styleengine"].preferences
         hub_url    = getattr(prefs, "hub_url", "http://127.0.0.1:8000").rstrip("/")
-        session_id = Path(bpy.data.filepath).stem if bpy.data.is_saved else "unsaved"
+        session_id = hub_client.get_session_id(bpy.data.filepath if bpy.data.is_saved else None)
+        blend_name = Path(bpy.data.filepath).stem if bpy.data.is_saved else session_id
         current_ai = str(get_active_ai_output_path(bpy.context))
-        hub_client.register_session(hub_url, session_id, session_id, bpy.data.filepath, current_ai)
+        hub_client.register_session(hub_url, session_id, blend_name, bpy.data.filepath, current_ai)
         print(f"[Style Engine] Hub re-registered session on load: {session_id!r}")
     except Exception as e:
         print(f"[Style Engine] Hub re-register on load failed: {e}")
@@ -6176,8 +6177,8 @@ def on_generation_complete_server(context, success, result, error, workflow_type
                         from . import hub_client as _hc
                         _prefs   = _ctx.preferences.addons["styleengine"].preferences
                         _hub_url = getattr(_prefs, "hub_url", "").rstrip("/")
-                        _sid     = Path(bpy.data.filepath).stem if bpy.data.is_saved else "unsaved"
-                        if _hub_url and _sid != "unsaved":
+                        _sid     = _hc.get_session_id(bpy.data.filepath if bpy.data.is_saved else None)
+                        if _hub_url and not _sid.startswith("unsaved"):
                             # ── Snapshot all Blender-side data on the main thread ──
                             _props = _ctx.scene.style_engine_props
 
