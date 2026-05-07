@@ -13,6 +13,34 @@ from . import workspace_setup
 # This persists across draw calls to avoid loading images repeatedly
 preview_collections = {}
 
+# ── Hub session status cache ──────────────────────────────────────────────────
+# peek_result is a blocking HTTP call.  The Cloud Session panel reads from this
+# cache instead, and a background timer refreshes it every 5 seconds.
+import time as _time
+
+_HUB_STATUS_CACHE: dict = {"ts": 0.0, "sid": "", "peek": {}}
+_HUB_STATUS_TTL: float = 5.0  # seconds between actual network calls
+
+
+def _get_hub_status(hub_url: str, sid: str) -> dict:
+    """
+    Return a cached peek_result dict.  Triggers a real network call only if
+    the cache is stale (> _HUB_STATUS_TTL seconds) or the session ID changed.
+    Thread-safe enough for single-threaded Blender draw calls.
+    """
+    now = _time.monotonic()
+    cache = _HUB_STATUS_CACHE
+    if (cache["sid"] != sid
+            or now - cache["ts"] > _HUB_STATUS_TTL):
+        try:
+            from . import hub_client as _hc
+            cache["peek"] = _hc.peek_result(hub_url, sid)
+        except Exception:
+            cache["peek"] = {}
+        cache["ts"]  = now
+        cache["sid"] = sid
+    return cache["peek"]
+
 # Global cache for LoRa list to avoid repeated API calls
 _lora_cache = {
     'items': [],
@@ -7861,16 +7889,19 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                 id_row = cloud_box.row(align=True)
                 id_row.label(text=stored_sid, icon='LINKED')
 
-                # Live / Offline indicator — try a quick peek
+                # Live / Offline indicator — uses a 5-second cache so the
+                # draw function never blocks on a live network call.
                 status_row = cloud_box.row(align=True)
                 try:
                     prefs   = context.preferences.addons["styleengine"].preferences
                     hub_url = getattr(prefs, "hub_url", "").rstrip("/")
-                    peek    = _hc.peek_result(hub_url, stored_sid)
+                    peek    = _get_hub_status(hub_url, stored_sid)
                     if peek.get("exists"):
                         status_row.label(text="Live", icon='SEQUENCE_COLOR_04')
-                    else:
+                    elif peek:
                         status_row.label(text="Session not found on hub", icon='ERROR')
+                    else:
+                        status_row.label(text="Offline / unreachable", icon='SEQUENCE_COLOR_01')
                 except Exception:
                     status_row.label(text="Offline / unreachable", icon='SEQUENCE_COLOR_01')
 
