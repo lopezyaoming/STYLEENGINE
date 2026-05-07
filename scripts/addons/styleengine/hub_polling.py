@@ -1,10 +1,12 @@
 """
 Hub polling — receives generated images from the Style Engine Hub.
 Uses bpy.app.timers for non-blocking periodic polling.
-The hub writes the image directly to current_ai_path on disk;
-this module just detects the signal and triggers the Blender reload.
+
+Cross-machine design: the hub runs on a separate machine. Blender downloads
+image bytes from the hub rather than the hub writing to Blender's disk.
 """
 import bpy
+from pathlib import Path
 from . import hub_client
 from . import workspace_setup
 
@@ -12,13 +14,17 @@ POLL_INTERVAL = 2.0   # seconds
 
 
 class HubPollerState:
-    is_polling     = False
-    last_result_ts = None   # float — timestamp of last acknowledged result
+    is_polling         = False
+    last_result_ts     = None   # float — timestamp of last acknowledged result
+    import_in_progress = False  # guard against dispatching the same batch twice
+    _last_imported_ids: set = set()  # avoid reprocessing on ack_import failure
 
     @classmethod
     def reset(cls):
-        cls.is_polling     = False
-        cls.last_result_ts = None
+        cls.is_polling         = False
+        cls.last_result_ts     = None
+        cls.import_in_progress = False
+        cls._last_imported_ids = set()
 
 
 def _get_prefs():
@@ -26,7 +32,14 @@ def _get_prefs():
 
 
 def _session_id() -> str:
-    return hub_client.get_session_id(bpy.data.filepath if bpy.data.is_saved else None)
+    """Return the active session ID. Prefers stored scene property."""
+    sid = hub_client.get_stored_session_id()
+    if sid:
+        return sid
+    # Legacy fallback for files that pre-date the stored property
+    if bpy.data.is_saved:
+        return hub_client.get_session_id(bpy.data.filepath)
+    return ""
 
 
 def _poll_tick():
@@ -39,15 +52,26 @@ def _poll_tick():
         hub_url    = getattr(prefs, "hub_url", "http://127.0.0.1:8000").rstrip("/")
         session_id = _session_id()
 
+        if not session_id:
+            return POLL_INTERVAL  # no session connected yet — keep timer alive
+
         result = hub_client.peek_result(hub_url, session_id)
 
+        # ── has_result: single image delivered by hub generate ────────────
         if result.get("has_result"):
             ts = result.get("result_ts")
-            # Guard against re-triggering the same delivery
             if ts != HubPollerState.last_result_ts:
                 HubPollerState.last_result_ts = ts
                 _on_result_ready(hub_url, session_id, result)
                 hub_client.ack_result(hub_url, session_id)
+
+        # ── pending_import: bulk hub→Blender push ─────────────────────────
+        pending = result.get("pending_import", [])
+        if pending and not HubPollerState.import_in_progress:
+            new_ids = [g for g in pending
+                       if g not in HubPollerState._last_imported_ids]
+            if new_ids:
+                _on_pending_import(hub_url, session_id, new_ids)
 
     except Exception as e:
         print(f"[Hub Polling] Tick error: {e}")
@@ -61,19 +85,17 @@ def _on_result_ready(hub_url: str, session_id: str, peek_data: dict):
 
     Step 1 — download the raw image via /api/comfy/view, write to current_ai.png,
               and reload the Blender viewport.
-    Step 2 — if a result_generation_id is present, spawn a background thread to
-              fetch the hub's metadata-embedded PNG and save it to the local
-              Images/ library (so it appears in the history panel).
+    Step 2 — if result_generation_id is present and cloud sync is enabled,
+              spawn a background thread to fetch the enriched PNG and save it
+              to the local Images/ library.
     """
     try:
-        ctx        = bpy.context
-        ai_path    = workspace_setup.get_active_ai_output_path(ctx)
+        ctx     = bpy.context
+        ai_path = workspace_setup.get_active_ai_output_path(ctx)
 
         filename  = (peek_data.get("result_filename")
                      or peek_data.get("filename")
                      or peek_data.get("image_filename"))
-        subfolder = peek_data.get("result_subfolder", "")
-        img_type  = peek_data.get("result_type", "output")
         gen_id    = peek_data.get("result_generation_id", "")
 
         if filename:
@@ -100,8 +122,7 @@ def _on_result_ready(hub_url: str, session_id: str, peek_data: dict):
                 )
             except Exception:
                 cloud_sync = True
-            # Resolve the library path on the main thread — bpy.data is not
-            # thread-safe and must not be accessed inside the daemon thread.
+            # Resolve library path on main thread — bpy.data not safe in thread
             library_dir = ""
             if cloud_sync:
                 try:
@@ -114,7 +135,7 @@ def _on_result_ready(hub_url: str, session_id: str, peek_data: dict):
                 import threading
                 threading.Thread(
                     target=_save_enriched_to_library,
-                    args=(hub_url, session_id, gen_id, library_dir),
+                    args=(session_id, gen_id, library_dir),
                     daemon=True,
                 ).start()
 
@@ -124,34 +145,89 @@ def _on_result_ready(hub_url: str, session_id: str, peek_data: dict):
         traceback.print_exc()
 
 
-def _save_enriched_to_library(hub_url: str, session_id: str, gen_id: str,
+def _save_enriched_to_library(session_id: str, gen_id: str,
                                library_dir: str) -> None:
     """
     Fetch the hub's metadata-embedded PNG and save it to the local Images/ folder.
     Skips silently if the file already exists.  Runs in a daemon thread.
 
-    `library_dir` must be resolved on the main thread before this is called —
-    no bpy.data access is performed here.
+    `library_dir` and `session_id` must be resolved on the main thread
+    before this is called — no bpy.data access is performed here.
     """
     try:
-        from pathlib import Path as _Path
-
-        dest_dir = _Path(library_dir)
+        dest_dir = Path(library_dir)
         dest_dir.mkdir(parents=True, exist_ok=True)
 
         dest = dest_dir / f"{gen_id}.png"
         if dest.exists():
             return
 
-        png_bytes = hub_client.download_enriched_png(hub_url, session_id, gen_id)
-        if not png_bytes:
-            return
-
-        dest.write_bytes(png_bytes)
-        print(f"[Hub Polling] ✓ Saved hub generation to library: {dest.name}")
+        hub_client.download_enriched_png(session_id, gen_id, library_dir)
+        print(f"[Hub Polling] ✓ Saved hub generation to library: {gen_id}.png")
 
     except Exception as e:
         print(f"[Hub Polling] _save_enriched_to_library error: {e}")
+
+
+def _on_pending_import(hub_url: str, session_id: str,
+                       gen_ids: list) -> None:
+    """
+    Main-thread entry point for a bulk hub→Blender import ("Push to Blender").
+
+    Resolves all bpy paths here (safe), then hands off to a daemon thread.
+    After the download, schedules a viewport refresh on the main thread.
+    """
+    import threading
+
+    blend_path = bpy.data.filepath
+    if not blend_path:
+        print("[Hub Polling] pending_import skipped — file not saved")
+        return
+
+    # Resolve the Images/ folder next to the blend file — safe here on main thread
+    images_dir = str(Path(blend_path).parent / "Images")
+    HubPollerState.import_in_progress = True
+
+    def _download_batch(sid: str, img_dir: str, ids: list):
+        imported  = 0
+        first_path = None
+        for gen_id in ids:
+            try:
+                dest = hub_client.download_enriched_png(sid, gen_id, img_dir)
+                HubPollerState._last_imported_ids.add(gen_id)
+                if first_path is None:
+                    first_path = dest
+                imported += 1
+            except Exception as e:
+                print(f"[Hub Polling] Failed to import {gen_id}: {e}")
+
+        print(f"[Hub Polling] Bulk import: {imported}/{len(ids)} downloaded")
+        hub_client.ack_import(sid)
+        HubPollerState.import_in_progress = False
+
+        # Schedule optional auto-reload on the main thread
+        if first_path:
+            def _notify():
+                try:
+                    import bpy as _bpy
+                    import shutil, os
+                    current_ai = str(
+                        workspace_setup.get_active_ai_output_path(_bpy.context)
+                    )
+                    os.makedirs(os.path.dirname(current_ai), exist_ok=True)
+                    shutil.copy2(first_path, current_ai)
+                    workspace_setup.refresh_ai_image()
+                    print(f"[Hub Polling] Auto-loaded first imported image")
+                except Exception as _e:
+                    print(f"[Hub Polling] Auto-reload failed (non-fatal): {_e}")
+                return None
+            bpy.app.timers.register(_notify, first_interval=0.0)
+
+    threading.Thread(
+        target=_download_batch,
+        args=(session_id, images_dir, list(gen_ids)),
+        daemon=True,
+    ).start()
 
 
 def start_polling():

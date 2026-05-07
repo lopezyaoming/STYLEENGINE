@@ -262,24 +262,36 @@ def _sync_library_to_hub(hub_url: str, session_id: str) -> None:
 
 
 def _do_hub_register():
-    """Register this Blender session with the Hub."""
+    """
+    Register this Blender session with the Hub.
+
+    With the new session-identity model, registration is a heartbeat for an
+    already-established session — it only fires when a stored session ID is
+    present in the blend file. Opening or saving an unregistered file produces
+    no hub traffic.
+    """
     from pathlib import Path
     import bpy as _bpy
     from . import hub_client, workspace_setup
+
+    sid = hub_client.get_stored_session_id()
+    if not sid:
+        # No session connected to this file yet — nothing to do
+        return
+
     prefs      = _bpy.context.preferences.addons["styleengine"].preferences
     hub_url    = getattr(prefs, "hub_url", "http://127.0.0.1:8000").rstrip("/")
     blend_path = _bpy.data.filepath
-    session_id = hub_client.get_session_id(blend_path if _bpy.data.is_saved else None)
-    blend_name = Path(blend_path).stem if _bpy.data.is_saved else session_id
+    blend_name = Path(blend_path).stem if _bpy.data.is_saved else sid
     try:
         ctx        = _bpy.context
         current_ai = str(workspace_setup.get_active_ai_output_path(ctx))
     except Exception:
         current_ai = ""
-    hub_client.register_session(hub_url, session_id, blend_name, blend_path, current_ai)
+    hub_client.register_session(hub_url, sid, blend_name, blend_path, current_ai)
 
     # Kick off background library sync when cloud sync is enabled
-    if hub_url and not session_id.startswith("unsaved"):
+    if hub_url:
         try:
             cloud_sync = getattr(
                 _bpy.context.scene.style_engine_props, "hub_cloud_sync", True
@@ -287,7 +299,7 @@ def _do_hub_register():
         except Exception:
             cloud_sync = True
         if cloud_sync:
-            _sync_library_to_hub(hub_url, session_id)
+            _sync_library_to_hub(hub_url, sid)
 
 
 def _delayed_hub_register():

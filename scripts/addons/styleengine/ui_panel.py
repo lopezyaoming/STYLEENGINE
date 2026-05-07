@@ -716,6 +716,12 @@ class StyleEngineProperties(bpy.types.PropertyGroup):
         default=True,
     )
 
+    show_cloud_session: bpy.props.BoolProperty(
+        name="Show Cloud Session",
+        description="Expand or collapse the Cloud Session section",
+        default=False,
+    )
+
     # Unified seed for all AI workflows
     seed_value: bpy.props.IntProperty(
         name="Seed",
@@ -2023,6 +2029,111 @@ class WM_OT_SyncCloudNow(bpy.types.Operator):
             self.report({'INFO'}, "Cloud sync started in background")
         except Exception as e:
             self.report({'ERROR'}, f"Sync failed: {e}")
+        return {'FINISHED'}
+
+
+class SE_OT_ConnectSession(bpy.types.Operator):
+    """Connect this blend file to a Style Engine Hub session"""
+    bl_idname  = "style_engine.connect_session"
+    bl_label   = "Connect to Style Engine"
+    bl_options = {'REGISTER'}
+
+    mode: bpy.props.EnumProperty(
+        items=[
+            ("CREATE", "Create new session", "Mint a new session on the hub"),
+            ("LINK",   "Link existing session", "Connect to an existing hub session"),
+        ],
+        default="CREATE",
+    )
+    # Used only in LINK mode — set by the per-session operator buttons in the dialog
+    chosen_session: bpy.props.StringProperty(default="")
+
+    def execute(self, context):
+        if not bpy.data.filepath:
+            self.report({'WARNING'}, "Save your .blend file before connecting a session")
+            return {'CANCELLED'}
+        if self.mode == "CREATE":
+            return self._create_new(context)
+        else:
+            return self._link_existing(context)
+
+    def invoke(self, context, event):
+        if self.mode == "LINK" and not self.chosen_session:
+            # Open a dialog that lists all hub sessions
+            return context.window_manager.invoke_props_dialog(self, width=360)
+        return self.execute(context)
+
+    def draw(self, context):
+        """Dialog content for LINK mode — shows all hub sessions as buttons."""
+        layout = self.layout
+        layout.label(text="Select a session to link:")
+        try:
+            from . import hub_client as _hc
+            sessions = _hc.fetch_all_sessions()
+        except Exception:
+            sessions = []
+        if not sessions:
+            layout.label(text="No sessions found — check Hub URL in preferences", icon='ERROR')
+            return
+        for s in sessions:
+            label = s.get("blend_name") or s.get("session_id", "?")
+            badge = "HUB" if s.get("hub_only") else "BLN"
+            row = layout.row(align=True)
+            op = row.operator("style_engine.connect_session",
+                              text=f"[{badge}] {label}  ({s['session_id']})")
+            op.mode = "LINK"
+            op.chosen_session = s["session_id"]
+
+    def _create_new(self, context):
+        import threading
+        from pathlib import Path as _Path
+        blend_name = _Path(bpy.data.filepath).stem
+
+        def _do():
+            try:
+                from . import hub_client as _hc
+                sid = _hc.create_hub_session(blend_name)
+
+                def _store():
+                    try:
+                        from . import hub_client as _hc2
+                        prefs   = bpy.context.preferences.addons["styleengine"].preferences
+                        hub_url = getattr(prefs, "hub_url", "").rstrip("/")
+                        _hc2.set_stored_session_id(sid)
+                        from . import workspace_setup as _ws
+                        current_ai = str(_ws.get_active_ai_output_path(bpy.context))
+                        _hc2.register_session(hub_url, sid, blend_name,
+                                              bpy.data.filepath, current_ai)
+                        print(f"[Style Engine] Connected to new session: {sid!r}")
+                    except Exception as _e:
+                        print(f"[Style Engine] _store session failed: {_e}")
+                    return None  # unregister timer
+                bpy.app.timers.register(_store, first_interval=0.0)
+            except Exception as e:
+                print(f"[Style Engine] create_hub_session failed: {e}")
+
+        threading.Thread(target=_do, daemon=True).start()
+        self.report({'INFO'}, "Creating session — panel will update shortly")
+        return {'FINISHED'}
+
+    def _link_existing(self, context):
+        if not self.chosen_session:
+            self.report({'WARNING'}, "No session selected")
+            return {'CANCELLED'}
+        from pathlib import Path as _Path
+        from . import hub_client as _hc
+        from . import workspace_setup as _ws
+        sid        = self.chosen_session
+        blend_name = _Path(bpy.data.filepath).stem
+        prefs      = context.preferences.addons["styleengine"].preferences
+        hub_url    = getattr(prefs, "hub_url", "").rstrip("/")
+        _hc.set_stored_session_id(sid)
+        try:
+            current_ai = str(_ws.get_active_ai_output_path(context))
+            _hc.register_session(hub_url, sid, blend_name, bpy.data.filepath, current_ai)
+        except Exception as e:
+            print(f"[Style Engine] register after link failed: {e}")
+        self.report({'INFO'}, f"Linked to session: {sid}")
         return {'FINISHED'}
 
 
@@ -7724,6 +7835,67 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
             sync_btn.operator("style_engine.sync_cloud_now", text="", icon='FILE_REFRESH')
 
         # ================================================================
+        # CLOUD SESSION CATEGORY (Collapsible)
+        # ================================================================
+        layout.separator()
+        cloud_box    = layout.box()
+        cloud_header = cloud_box.row(align=True)
+        cloud_icon   = 'TRIA_DOWN' if getattr(style_props, "show_cloud_session", False) else 'TRIA_RIGHT'
+        cloud_header.prop(style_props, "show_cloud_session", text="Cloud Session",
+                          icon=cloud_icon, emboss=False, toggle=True)
+        cloud_header.label(text="", icon='WORLD_DATA')
+
+        if getattr(style_props, "show_cloud_session", False):
+            from . import hub_client as _hc
+            stored_sid = _hc.get_stored_session_id()
+
+            if not bpy.data.filepath:
+                # File not saved — cannot connect
+                row = cloud_box.row()
+                row.enabled = False
+                row.label(text="Save your file to connect a session", icon='INFO')
+
+            elif stored_sid:
+                # Session is connected — show status
+                cloud_box.separator(factor=0.5)
+                id_row = cloud_box.row(align=True)
+                id_row.label(text=stored_sid, icon='LINKED')
+
+                # Live / Offline indicator — try a quick peek
+                status_row = cloud_box.row(align=True)
+                try:
+                    prefs   = context.preferences.addons["styleengine"].preferences
+                    hub_url = getattr(prefs, "hub_url", "").rstrip("/")
+                    peek    = _hc.peek_result(hub_url, stored_sid)
+                    if peek.get("exists"):
+                        status_row.label(text="Live", icon='SEQUENCE_COLOR_04')
+                    else:
+                        status_row.label(text="Session not found on hub", icon='ERROR')
+                except Exception:
+                    status_row.label(text="Offline / unreachable", icon='SEQUENCE_COLOR_01')
+
+                cloud_box.separator(factor=0.5)
+                change_row = cloud_box.row(align=True)
+                op = change_row.operator("style_engine.connect_session",
+                                         text="Change Session", icon='FILE_REFRESH')
+                op.mode = "LINK"
+                op.chosen_session = ""
+
+            else:
+                # File saved but no session connected yet
+                cloud_box.separator(factor=0.5)
+                btn_row = cloud_box.row(align=True)
+                op_create = btn_row.operator("style_engine.connect_session",
+                                             text="Create new", icon='ADD')
+                op_create.mode = "CREATE"
+                op_create.chosen_session = ""
+
+                op_link = btn_row.operator("style_engine.connect_session",
+                                           text="Link existing", icon='LINKED')
+                op_link.mode = "LINK"
+                op_link.chosen_session = ""
+
+        # ================================================================
         # IMAGE GENERATION CATEGORY (Collapsible) — Q · image
         # ================================================================
         layout.separator()
@@ -11050,6 +11222,7 @@ classes = (
     StyleEngineProperties,
     WM_OT_RerollSeed,
     WM_OT_SyncCloudNow,
+    SE_OT_ConnectSession,
     WM_OT_AlignAICameraToView,
     WM_OT_BringBackgroundForward,
     WM_OT_SendBackgroundBack,

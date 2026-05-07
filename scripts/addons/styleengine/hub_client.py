@@ -15,7 +15,23 @@ from pathlib import Path
 
 HUB_DEFAULT = "http://style-engine:8000"
 
-# ── Session ID helpers ────────────────────────────────────────────────────────
+# ── Scene property key ────────────────────────────────────────────────────────
+# The session ID is stored in the blend file as a custom scene property so it
+# survives Save As and is independent of the filename.
+
+SCENE_KEY = "style_engine_session_id"
+
+# ── Private helpers ───────────────────────────────────────────────────────────
+
+def _hub_url() -> str:
+    """Return the hub URL from addon preferences. Lazily imports bpy."""
+    try:
+        import bpy
+        prefs = bpy.context.preferences.addons["styleengine"].preferences
+        return getattr(prefs, "hub_url", HUB_DEFAULT).rstrip("/")
+    except Exception:
+        return HUB_DEFAULT
+
 
 def _machine_suffix() -> str:
     """
@@ -45,22 +61,71 @@ def _ephemeral_session_id() -> str:
     return _EPHEMERAL_SESSION_ID
 
 
-def get_session_id(blend_filepath: str | None) -> str:
+def _legacy_session_id_from_path(blend_filepath: str) -> str:
     """
-    Return the hub session ID for the given .blend file path.
-
-    Saved file  → "<stem>_<8hex machine suffix>"  e.g. "car_3a9f12bc"
-    Unsaved     → "unsaved_<8hex process suffix>"  e.g. "unsaved_f04c91a2"
+    Legacy filename-derived session ID: stem_8hex.
+    Kept during migration period for files that don't yet have a stored ID.
     """
-    if not blend_filepath:
-        return _ephemeral_session_id()
     return f"{Path(blend_filepath).stem}_{_machine_suffix()}"
 
 
-# ── Last-registered tracker (for Save As rename detection) ───────────────────
+# ── Session identity (new model) ──────────────────────────────────────────────
+
+def get_stored_session_id() -> str:
+    """
+    Read the session ID from the active scene's custom properties.
+    Returns "" if not set. Always call from the main Blender thread.
+    """
+    try:
+        import bpy
+        return bpy.context.scene.get(SCENE_KEY, "")
+    except Exception:
+        return ""
+
+
+def set_stored_session_id(session_id: str) -> None:
+    """
+    Write the session ID into the active scene's custom properties.
+    The ID is persisted with the blend file automatically.
+    Always call from the main Blender thread.
+    """
+    try:
+        import bpy
+        bpy.context.scene[SCENE_KEY] = session_id
+        print(f"[Hub Client] Session ID stored in blend file: {session_id}")
+    except Exception as e:
+        print(f"[Hub Client] set_stored_session_id failed: {e}")
+
+
+def get_session_id(blend_filepath: str | None = None) -> str:
+    """
+    Single source of truth for the current session ID.
+
+    Priority:
+      1. Stored scene property (set via Connect button or link operation)
+      2. Legacy filename-derived fallback (stem_machine_suffix) for files
+         that pre-date the new model
+      3. Empty string if the file is not saved and no property is set
+
+    `blend_filepath` is accepted for backwards-compatibility but is only
+    used when no stored property is present.
+    """
+    stored = get_stored_session_id()
+    if stored:
+        return stored
+    if blend_filepath:
+        return _legacy_session_id_from_path(blend_filepath)
+    return ""
+
+
+# ── Last-registered tracker ───────────────────────────────────────────────────
+# Kept to detect renames within a single Blender session, but prev_session_id
+# is no longer sent to the hub (session follows content, not filename).
 
 _last_registered_session_id: str | None = None
 
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
 
 def sha256_file(path: str) -> str:
     """Return the hex SHA-256 digest of a file's bytes."""
@@ -87,14 +152,16 @@ def _get(url: str, timeout: int = 4) -> dict:
         return json.loads(resp.read())
 
 
+# ── Hub API functions ─────────────────────────────────────────────────────────
+
 def register_session(hub_url: str, session_id: str, blend_name: str,
                      blend_path: str, current_ai_path: str) -> bool:
     """
     Register this Blender instance with the hub.
 
-    Automatically detects Save As renames: if the session ID changed since the
-    last successful registration, `prev_session_id` is included so the hub can
-    link history continuity.
+    With the new session-identity model, session_id is always the stored scene
+    property value — Save As renames only update blend_name, not session_id,
+    so prev_session_id is never sent.
 
     Returns True on success.
     """
@@ -106,10 +173,6 @@ def register_session(hub_url: str, session_id: str, blend_name: str,
             "blend_path":      blend_path,
             "current_ai_path": current_ai_path,
         }
-        prev_id = _last_registered_session_id
-        if prev_id and prev_id != session_id:
-            payload["prev_session_id"] = prev_id
-            print(f"[Hub Client] Save As detected: {prev_id!r} → {session_id!r}")
         _post(f"{hub_url}/api/blender/register", payload)
         _last_registered_session_id = session_id
         return True
@@ -121,13 +184,14 @@ def register_session(hub_url: str, session_id: str, blend_name: str,
 def peek_result(hub_url: str, session_id: str) -> dict:
     """
     Poll for a pending result.
-    Returns {"exists": bool, "has_result": bool, "result_ts": float|None}.
-    On network error returns {"exists": False, "has_result": False, "result_ts": None}.
+    Returns the full peek dict including has_result, pending_import, etc.
+    On network error returns a safe fallback so polling never crashes.
     """
     try:
         return _get(f"{hub_url}/api/blender/{session_id}/peek")
     except Exception:
-        return {"exists": False, "has_result": False, "result_ts": None}
+        return {"exists": False, "has_result": False, "result_ts": None,
+                "pending_import": []}
 
 
 def ack_result(hub_url: str, session_id: str) -> None:
@@ -151,7 +215,6 @@ def push_result_image(hub_url: str, session_id: str, image_path: str,
     or an empty dict on any error.
     """
     try:
-        import os
         url      = f"{hub_url}/api/blender/{session_id}/push_result"
         filename = os.path.basename(image_path)
         with open(image_path, "rb") as f:
@@ -182,18 +245,6 @@ def push_config(hub_url: str, session_id: str, generation_id: str,
     Post generation metadata (Step 2) after a successful push_result_image call.
 
     Endpoint: POST /api/sessions/{session_id}/history/{generation_id}/config
-
-    config dict shape:
-      {
-        "model":      "gemini" | "sdxl",
-        "workflow":   "<filename>.json",
-        "blend_file": "<full path>.blend",
-        "config": { "prompt": "...", "temperature": 0.0, ... },
-        "sources": [
-          { "role": "frame", "filename": "combined.jpg",
-            "sha256": "a3f8...", "generation_id": null }
-        ]
-      }
 
     Silently swallows all errors so generation flow is never interrupted.
     """
@@ -238,27 +289,37 @@ def import_image(hub_url: str, session_id: str, png_bytes: bytes,
         return {"imported": False, "reason": "network_error"}
 
 
-def download_enriched_png(hub_url: str, session_id: str,
-                          generation_id: str, timeout: int = 30) -> bytes:
+def download_enriched_png(session_id: str, gen_id: str,
+                          images_dir: str, timeout: int = 60) -> str:
     """
-    Download the hub's metadata-embedded PNG for a generation.
+    Download the hub's metadata-embedded PNG via the proxy endpoint and save
+    it to images_dir.
 
-    Endpoint: GET /api/sessions/{session_id}/history/{generation_id}/image
-    The server returns a 307 redirect to a GCS signed URL; urllib follows it
-    automatically.
+    Endpoint: GET /api/sessions/{session_id}/history/{gen_id}/download
+    The endpoint is a direct proxy (no CORS redirect) that includes a
+    Content-Disposition header with the original filename.
 
-    Returns raw bytes, or b'' on any error.
+    Returns the local file path on success.  Raises on error (caller handles).
     """
-    try:
-        url = f"{hub_url}/api/sessions/{session_id}/history/{generation_id}/image"
-        req = urllib.request.Request(
-            url, headers={"User-Agent": "StyleEngine-Blender/1.0"}
-        )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.read()
-    except Exception as e:
-        print(f"[Hub Client] download_enriched_png failed ({generation_id}): {e}")
-        return b""
+    hub = _hub_url()
+    url = f"{hub}/api/sessions/{session_id}/history/{gen_id}/download"
+    req = urllib.request.Request(
+        url, headers={"User-Agent": "StyleEngine-Blender/1.0"}
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        data = resp.read()
+        cd   = resp.headers.get("Content-Disposition", "")
+
+    filename = gen_id[:8] + ".png"
+    if 'filename="' in cd:
+        filename = cd.split('filename="')[1].rstrip('"')
+
+    Path(images_dir).mkdir(parents=True, exist_ok=True)
+    dest = str(Path(images_dir) / filename)
+    with open(dest, "wb") as f:
+        f.write(data)
+    print(f"[Hub Client] Imported {filename} → {images_dir}")
+    return dest
 
 
 def download_result_image(hub_url: str, filename: str, save_path: str,
@@ -284,3 +345,63 @@ def download_result_image(hub_url: str, filename: str, save_path: str,
     except Exception as e:
         print(f"[Hub Client] Download failed ({filename}): {e}")
         return False
+
+
+def ack_import(session_id: str) -> None:
+    """
+    Tell the hub we have processed all pending_import IDs.
+    Uses _hub_url() internally — no hub_url parameter needed.
+    Silently swallows errors (non-fatal).
+    """
+    hub = _hub_url()
+    url = f"{hub}/api/blender/{session_id}/ack_import"
+    req = urllib.request.Request(
+        url, data=b"", method="POST",
+        headers={"User-Agent": "StyleEngine-Blender/1.0"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10):
+            pass
+        print(f"[Hub Client] ack_import sent for session {session_id}")
+    except Exception as e:
+        print(f"[Hub Client] ack_import failed (non-fatal): {e}")
+
+
+def create_hub_session(name: str) -> str:
+    """
+    Ask the hub to mint a new named session.
+    Returns the new session_id string.
+    Raises on network error (caller should wrap in try/except).
+    """
+    hub  = _hub_url()
+    url  = f"{hub}/api/sessions/create"
+    body = json.dumps({"name": name}).encode()
+    req  = urllib.request.Request(
+        url, data=body, method="POST",
+        headers={"Content-Type": "application/json",
+                 "User-Agent":   "StyleEngine-Blender/1.0"},
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        data = json.loads(resp.read())
+    session_id = data["session_id"]
+    print(f"[Hub Client] Created hub session: {session_id!r}")
+    return session_id
+
+
+def fetch_all_sessions() -> list:
+    """
+    Return the full session list from the hub.
+    Each item: { session_id, blend_name, hub_only, registered }
+    Returns [] on any error.
+    """
+    try:
+        hub = _hub_url()
+        req = urllib.request.Request(
+            f"{hub}/api/sessions",
+            headers={"User-Agent": "StyleEngine-Blender/1.0"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read())
+    except Exception as e:
+        print(f"[Hub Client] fetch_all_sessions failed: {e}")
+        return []
