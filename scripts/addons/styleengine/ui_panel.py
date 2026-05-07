@@ -7897,13 +7897,13 @@ class VIEW3D_PT_StyleEngine(bpy.types.Panel):
                     hub_url = getattr(prefs, "hub_url", "").rstrip("/")
                     peek    = _get_hub_status(hub_url, stored_sid)
                     if peek.get("exists"):
-                        status_row.label(text="Live", icon='SEQUENCE_COLOR_04')
+                        status_row.label(text="Live", icon='CHECKMARK')
                     elif peek:
                         status_row.label(text="Session not found on hub", icon='ERROR')
                     else:
-                        status_row.label(text="Offline / unreachable", icon='SEQUENCE_COLOR_01')
+                        status_row.label(text="Offline / unreachable", icon='INTERNET_OFFLINE')
                 except Exception:
-                    status_row.label(text="Offline / unreachable", icon='SEQUENCE_COLOR_01')
+                    status_row.label(text="Offline / unreachable", icon='INTERNET_OFFLINE')
 
                 cloud_box.separator(factor=0.5)
                 change_row = cloud_box.row(align=True)
