@@ -6192,6 +6192,20 @@ def on_generation_complete_server(context, success, result, error, workflow_type
                             except Exception:
                                 pass
 
+                            # ── context: where in the scene hierarchy this generation was produced ──
+                            _is_asset    = getattr(_props, "asset_mode", False)
+                            _asset_label = getattr(_props, "current_asset_name", "")
+                            _asset_stack = []
+                            try:
+                                import json as _json
+                                _asset_stack = [
+                                    e.get("asset_name", "")
+                                    for e in _json.loads(getattr(_props, "asset_mode_stack", "[]") or "[]")
+                                ]
+                            except Exception:
+                                pass
+                            _context_path = _asset_stack + ([_asset_label] if _is_asset and _asset_label else [])
+
                             _hub_config = {
                                 "prompt":         _prompt,
                                 "temperature":    getattr(_props, "gemini_temperature", 1.0),
@@ -6199,6 +6213,12 @@ def on_generation_complete_server(context, success, result, error, workflow_type
                                 "aspectRatio":    getattr(_props, "refine_meta_aspect", ""),
                                 "alignmentMode":  getattr(_props, "gemini_alignment", False),
                                 "model":          "gemini" if getattr(_props, "ai_model", "SDXL") == "GEMINI" else "sdxl",
+                                # ── branching context ──────────────────────────────────────────────
+                                "context": {
+                                    "type":  "asset" if _is_asset else "scene",
+                                    "label": _asset_label if _is_asset else "",
+                                    "path":  _context_path,
+                                },
                             }
 
                             # Collect source images and their hashes
