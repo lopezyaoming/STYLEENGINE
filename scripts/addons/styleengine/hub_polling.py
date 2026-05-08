@@ -5,6 +5,7 @@ Uses bpy.app.timers for non-blocking periodic polling.
 Cross-machine design: the hub runs on a separate machine. Blender downloads
 image bytes from the hub rather than the hub writing to Blender's disk.
 """
+import math
 import bpy
 from pathlib import Path
 from . import hub_client
@@ -79,13 +80,61 @@ def _poll_tick():
     return POLL_INTERVAL
 
 
+def _parse_aspect_ratio(ratio_str: str):
+    """
+    Parse "W:H" strings such as "1:1", "16:9", "9:16", "4:3".
+    Returns (w_parts, h_parts) as ints, or None if unparseable.
+    """
+    try:
+        w, h = ratio_str.strip().split(":")
+        return int(w), int(h)
+    except Exception:
+        return None
+
+
+def _apply_aspect_ratio_to_camera(ratio_str: str) -> None:
+    """
+    Adjust scene render resolution to match ratio_str.
+
+    Preserves total pixel area so render time is unchanged.
+    Rounds to nearest 8 px for GPU alignment.
+    Only touches resolution_x/y — no camera FOV, sensor, percentage, or other
+    scene properties are modified.
+    Silently skips if the ratio is missing, unparseable, or already correct.
+    """
+    parsed = _parse_aspect_ratio(ratio_str)
+    if parsed is None:
+        print(f"[Hub Polling] Unknown aspect ratio '{ratio_str}' — skipping camera adjust")
+        return
+
+    w_ratio, h_ratio = parsed
+    scene  = bpy.context.scene
+    cur_w  = scene.render.resolution_x
+    cur_h  = scene.render.resolution_y
+    area   = cur_w * cur_h
+
+    new_h = int(math.sqrt(area * h_ratio / w_ratio))
+    new_w = int(new_h * w_ratio / h_ratio)
+    new_w = max(8, round(new_w / 8) * 8)
+    new_h = max(8, round(new_h / 8) * 8)
+
+    if new_w == cur_w and new_h == cur_h:
+        return  # already correct
+
+    scene.render.resolution_x = new_w
+    scene.render.resolution_y = new_h
+    print(f"[Hub Polling] Camera adjusted {cur_w}×{cur_h} → {new_w}×{new_h} ({ratio_str})")
+
+
 def _on_result_ready(hub_url: str, session_id: str, peek_data: dict):
     """
     Called on the main thread when the hub signals a new result.
 
-    Step 1 — download the raw image via /api/comfy/view, write to current_ai.png,
-              and reload the Blender viewport.
-    Step 2 — if result_generation_id is present and cloud sync is enabled,
+    Step 1 — download the raw image via /api/comfy/view, write to current_ai.png.
+    Step 1b — fetch the generation config and adjust render resolution to match
+               the hub's aspectRatio so the viewport is never letterboxed.
+    Step 2 — reload the Blender viewport.
+    Step 3 — if result_generation_id is present and cloud sync is enabled,
               spawn a background thread to fetch the enriched PNG and save it
               to the local Images/ library.
     """
@@ -105,6 +154,13 @@ def _on_result_ready(hub_url: str, session_id: str, peek_data: dict):
                 print("[Hub Polling] ⚠ Download failed — will try refresh from existing disk file")
         else:
             print("[Hub Polling] No filename in peek response — refreshing from disk")
+
+        # ── Step 1b: match render resolution to the hub generation's aspect ratio ──
+        if gen_id:
+            config    = hub_client.fetch_generation_config(hub_url, session_id, gen_id)
+            ar        = config.get("aspectRatio", "")
+            if ar:
+                _apply_aspect_ratio_to_camera(ar)
 
         workspace_setup.refresh_ai_image()
         print("[Hub Polling] ✓ New image from hub — reloaded current_ai.png")

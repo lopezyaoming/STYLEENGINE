@@ -2112,10 +2112,94 @@ class SE_OT_ConnectSession(bpy.types.Operator):
             op.mode = "LINK"
             op.chosen_session = s["session_id"]
 
+    # ── shared post-connect sync ──────────────────────────────────────────────
+
+    @staticmethod
+    def _post_connect_sync(hub_url: str, sid: str,
+                           images_dir: str, ai_output_path: str) -> None:
+        """
+        Daemon-thread worker called after a session is connected.
+
+        1. Fetches the full history list from the hub.
+        2. Downloads any generation that is not already in images_dir.
+        3. Copies the newest image to ai_output_path so current_ai is in sync.
+        4. Schedules a viewport refresh on the main thread.
+
+        All bpy paths must be resolved on the main thread before calling this.
+        """
+        from pathlib import Path as _Path
+        from . import hub_client as _hc
+
+        try:
+            history = _hc.fetch_session_history(sid)
+        except Exception as e:
+            print(f"[Style Engine] post_connect_sync: fetch history failed: {e}")
+            return
+
+        if not history:
+            print(f"[Style Engine] post_connect_sync: no history for {sid!r}")
+            return
+
+        _Path(images_dir).mkdir(parents=True, exist_ok=True)
+        downloaded = 0
+        first_new  = None  # newest image path (history is newest-first)
+
+        for item in history:
+            gen_id = item.get("generation_id") or item.get("id", "")
+            if not gen_id:
+                continue
+            dest = _Path(images_dir) / f"{gen_id}.png"
+            # Check for any filename starting with the gen_id prefix (8-char UUID prefix)
+            existing = list(_Path(images_dir).glob(f"{gen_id[:8]}*.png"))
+            if dest.exists() or existing:
+                if first_new is None:
+                    first_new = str(dest) if dest.exists() else str(existing[0])
+                continue
+            try:
+                path = _hc.download_enriched_png(sid, gen_id, images_dir)
+                if path and first_new is None:
+                    first_new = path
+                downloaded += 1
+            except Exception as e:
+                print(f"[Style Engine] post_connect_sync: failed to download {gen_id}: {e}")
+
+        print(f"[Style Engine] post_connect_sync: downloaded {downloaded}/{len(history)} "
+              f"images for session {sid!r}")
+
+        if first_new:
+            try:
+                _Path(ai_output_path).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(first_new, ai_output_path)
+                print(f"[Style Engine] post_connect_sync: current_ai set to "
+                      f"{_Path(first_new).name}")
+            except Exception as e:
+                print(f"[Style Engine] post_connect_sync: copy to current_ai failed: {e}")
+
+        def _refresh():
+            try:
+                from . import workspace_setup as _ws
+                _ws.refresh_ai_image()
+                for window in bpy.context.window_manager.windows:
+                    for area in window.screen.areas:
+                        if area.type == "VIEW_3D":
+                            area.tag_redraw()
+            except Exception as _e:
+                print(f"[Style Engine] post_connect_sync: refresh failed: {_e}")
+            return None  # unregister timer
+        bpy.app.timers.register(_refresh, first_interval=0.1)
+
+    # ── CREATE ────────────────────────────────────────────────────────────────
+
     def _create_new(self, context):
         import threading
         from pathlib import Path as _Path
-        blend_name = _Path(bpy.data.filepath).stem
+        blend_name   = _Path(bpy.data.filepath).stem
+        blend_path   = bpy.data.filepath
+        images_dir   = str(_Path(blend_path).parent / "Images")
+        prefs        = context.preferences.addons["styleengine"].preferences
+        hub_url      = getattr(prefs, "hub_url", "").rstrip("/")
+        from . import workspace_setup as _ws
+        ai_output    = str(_ws.get_active_ai_output_path(context))
 
         def _do():
             try:
@@ -2125,17 +2209,17 @@ class SE_OT_ConnectSession(bpy.types.Operator):
                 def _store():
                     try:
                         from . import hub_client as _hc2
-                        prefs   = bpy.context.preferences.addons["styleengine"].preferences
-                        hub_url = getattr(prefs, "hub_url", "").rstrip("/")
                         _hc2.set_stored_session_id(sid)
-                        from . import workspace_setup as _ws
-                        current_ai = str(_ws.get_active_ai_output_path(bpy.context))
                         _hc2.register_session(hub_url, sid, blend_name,
-                                              bpy.data.filepath, current_ai)
+                                              blend_path, ai_output)
                         print(f"[Style Engine] Connected to new session: {sid!r}")
+                        # New session has no history — nothing to download.
+                        # Kick off an upload of existing local images instead.
+                        from . import __init__ as _addon
+                        _addon._sync_library_to_hub(hub_url, sid)
                     except Exception as _e:
                         print(f"[Style Engine] _store session failed: {_e}")
-                    return None  # unregister timer
+                    return None
                 bpy.app.timers.register(_store, first_interval=0.0)
             except Exception as e:
                 print(f"[Style Engine] create_hub_session failed: {e}")
@@ -2144,24 +2228,39 @@ class SE_OT_ConnectSession(bpy.types.Operator):
         self.report({'INFO'}, "Creating session — panel will update shortly")
         return {'FINISHED'}
 
+    # ── LINK ──────────────────────────────────────────────────────────────────
+
     def _link_existing(self, context):
         if not self.chosen_session:
             self.report({'WARNING'}, "No session selected")
             return {'CANCELLED'}
+        import threading
         from pathlib import Path as _Path
         from . import hub_client as _hc
         from . import workspace_setup as _ws
-        sid        = self.chosen_session
-        blend_name = _Path(bpy.data.filepath).stem
-        prefs      = context.preferences.addons["styleengine"].preferences
-        hub_url    = getattr(prefs, "hub_url", "").rstrip("/")
+        sid          = self.chosen_session
+        blend_name   = _Path(bpy.data.filepath).stem
+        blend_path   = bpy.data.filepath
+        prefs        = context.preferences.addons["styleengine"].preferences
+        hub_url      = getattr(prefs, "hub_url", "").rstrip("/")
+        images_dir   = str(_Path(blend_path).parent / "Images")
+        ai_output    = str(_ws.get_active_ai_output_path(context))
+
+        # Store session and register synchronously (fast, no network wait for draw)
         _hc.set_stored_session_id(sid)
         try:
-            current_ai = str(_ws.get_active_ai_output_path(context))
-            _hc.register_session(hub_url, sid, blend_name, bpy.data.filepath, current_ai)
+            _hc.register_session(hub_url, sid, blend_name, blend_path, ai_output)
         except Exception as e:
             print(f"[Style Engine] register after link failed: {e}")
-        self.report({'INFO'}, f"Linked to session: {sid}")
+
+        # Kick off background sync: download hub history → set current_ai
+        threading.Thread(
+            target=SE_OT_ConnectSession._post_connect_sync,
+            args=(hub_url, sid, images_dir, ai_output),
+            daemon=True,
+        ).start()
+
+        self.report({'INFO'}, f"Linked to {sid!r} — syncing files in background…")
         return {'FINISHED'}
 
 

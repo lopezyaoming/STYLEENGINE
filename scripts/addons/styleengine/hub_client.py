@@ -405,3 +405,51 @@ def fetch_all_sessions() -> list:
     except Exception as e:
         print(f"[Hub Client] fetch_all_sessions failed: {e}")
         return []
+
+
+def fetch_generation_config(hub_url: str, session_id: str, gen_id: str) -> dict:
+    """
+    Fetch the embedded config for a single generation.
+
+    Endpoint: GET /api/sessions/{session_id}/history/{gen_id}/config
+    Returns the inner ``config`` dict (e.g. {"aspectRatio": "1:1", ...}).
+    Returns {} on any error or missing gen_id so callers can always
+    do a safe .get("aspectRatio", "") without a try/except.
+    """
+    if not gen_id:
+        return {}
+    try:
+        url = f"{hub_url}/api/sessions/{session_id}/history/{gen_id}/config"
+        req = urllib.request.Request(
+            url, headers={"User-Agent": "StyleEngine-Blender/1.0"}
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read())
+        return data.get("config", {})
+    except Exception as e:
+        print(f"[Hub Client] fetch_generation_config failed ({gen_id}): {e}")
+        return {}
+
+
+def fetch_session_history(session_id: str) -> list:
+    """
+    Return the generation history for a session.
+    Each item has at least: { generation_id, created_at, ... }
+    Items are returned in reverse-chronological order (newest first) when
+    the hub supports ordering; always newest-first after sort fallback.
+    Returns [] on any error.
+    """
+    try:
+        hub = _hub_url()
+        req = urllib.request.Request(
+            f"{hub}/api/sessions/{session_id}/history",
+            headers={"User-Agent": "StyleEngine-Blender/1.0"},
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            items = json.loads(resp.read())
+        # Sort newest-first using created_at when present
+        items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+        return items
+    except Exception as e:
+        print(f"[Hub Client] fetch_session_history failed: {e}")
+        return []
